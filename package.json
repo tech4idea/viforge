@@ -1,21 +1,18 @@
 {
-  "name": "demo",
-  "version": "0.0.0",
+  "name": "viwork",
   "private": true,
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "start": "node ./bin/www",
-    "test": "mocha --exit"
-  },
-  "dependencies": {
-    "cookie-parser": "^1.4.5",
-    "debug": "^4.3.1",
-    "express": "^4.17.1",
-    "http-errors": "^1.8.0",
-    "morgan": "^1.10.0",
-    "pug": "^3.0.2"
+    "dev": "pnpm --parallel --filter @viwork/api --filter @viwork/web dev",
+    "dev:api": "pnpm --filter @viwork/api dev",
+    "dev:web": "pnpm --filter @viwork/web dev",
+    "dev:agent-worker": "pnpm --filter @viwork/agent-worker dev",
+    "dev:integration-gateway": "pnpm --filter @viwork/integration-gateway dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
-    "mocha": "^9.0.0",
-    "supertest": "^6.1.3"
+    "typescript": "^5.5.3"
   }
 }

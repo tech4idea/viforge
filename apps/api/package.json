@@ -1,0 +1,26 @@
+{
+  "name": "@viwork/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@openai/codex-sdk": "^0.130.0",
+    "@viwork/shared": "workspace:*",
+    "hono": "^4.6.15",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.3",
+    "vitest": "^2.1.8"
+  }
+}

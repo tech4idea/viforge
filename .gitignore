@@ -59,3 +59,10 @@ typings/
 
 # next.js build output
 .next
+
+# Build artifacts
+dist/
+*.tsbuildinfo
+
+# Claude/superpowers worktrees
+.worktrees/
