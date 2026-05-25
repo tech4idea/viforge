@@ -54,6 +54,7 @@ describe('api client', () => {
     await client.listChatSessions('project-1');
     await client.listChatSessions('project-1', { includeArchived: true });
     await client.createChatSession('project-1');
+    await client.createTemporaryChatSession();
     await client.updateChatSession('session-1', { codexThreadId: 'thread-1' });
     await client.appendChatMessage('session-1', message);
     await client.updateChatMessage('session-1', 'message-1', { ...message, content: '写第二场' });
@@ -64,6 +65,7 @@ describe('api client', () => {
       ['/base/api/projects/project-1/chat-sessions', 'GET'],
       ['/base/api/projects/project-1/chat-sessions?includeArchived=true', 'GET'],
       ['/base/api/projects/project-1/chat-sessions', 'POST'],
+      ['/base/api/temporary-chat-sessions', 'POST'],
       ['/base/api/chat-sessions/session-1', 'PATCH'],
       ['/base/api/chat-sessions/session-1/messages', 'POST'],
       ['/base/api/chat-sessions/session-1/messages/message-1', 'PUT'],

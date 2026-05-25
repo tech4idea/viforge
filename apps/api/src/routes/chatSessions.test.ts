@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createChatSessionStore } from '../chat/chatSessionStore';
+import { createWorkspaceStore } from '../storage/workspaceStore';
 import { createChatSessionRoutes } from './chatSessions';
 
 let root: string;
@@ -13,7 +14,13 @@ let app: Hono;
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'viwork-chat-sessions-'));
-  app = new Hono().route('/api', createChatSessionRoutes(createChatSessionStore(path.join(root, 'chat-sessions.json'))));
+  app = new Hono().route(
+    '/api',
+    createChatSessionRoutes(
+      createChatSessionStore(path.join(root, 'chat-sessions.json')),
+      createWorkspaceStore(path.join(root, 'workspaces')),
+    ),
+  );
 });
 
 afterEach(async () => {
@@ -21,6 +28,18 @@ afterEach(async () => {
 });
 
 describe('chat session routes', () => {
+  it('creates a temporary workspace chat session', async () => {
+    const response = await app.request('/api/temporary-chat-sessions', { method: 'POST' });
+
+    expect(response.status).toBe(201);
+    const session = await response.json() as { projectId: string; messages: unknown[] };
+    expect(session.projectId).toMatch(/^temp-/);
+    expect(session.messages).toEqual([]);
+
+    const listResponse = await app.request(`/api/projects/${session.projectId}/chat-sessions`);
+    await expect(listResponse.json()).resolves.toEqual([expect.objectContaining({ projectId: session.projectId })]);
+  });
+
   it('lists sessions by recent activity and hides archived sessions', async () => {
     const olderResponse = await app.request('/api/projects/project-1/chat-sessions', { method: 'POST' });
     const older = await olderResponse.json() as { id: string };

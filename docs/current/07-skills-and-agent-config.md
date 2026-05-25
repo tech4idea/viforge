@@ -46,6 +46,7 @@ apps/api/data/workspaces/_global/Agent 配置
 
 - `AGENTS.md`
 - `config.toml`
+- `auth.json`
 - `installation_id`
 - `skills/*/SKILL.md`
 - `plugins`（如果用户创建）
@@ -57,19 +58,21 @@ apps/api/data/workspaces/_global/Agent 配置
 发起 Codex run 时，[apps/api/src/runs/codexRunService.ts](../../apps/api/src/runs/codexRunService.ts) 的 `prepareCodexHome()` 会从全局 Agent 配置复制到：
 
 ```text
-apps/api/data/.codex-home/<sessionId 或 runId>
+apps/api/data/workspaces/.codex-home/<sessionId 或 runId>
 ```
 
 复制内容：
 
 - `AGENTS.md`
 - `config.toml`
+- `auth.json`
+- `installation_id`
 - `skills`
 - `plugins`
 
 这意味着：
 
-- 用户在全局区编辑 `Agent 配置/config.toml`，下一次 run 会复制最新版本。
+- 用户在全局区编辑 `Agent 配置/config.toml` 或 `Agent 配置/auth.json`，下一次 run 会复制最新版本。
 - 运行中 Codex 对 HOME 的修改不会污染全局配置。
 - 同一个 `sessionId` 会复用同一个 `.codex-home/<sessionId>`，适合多轮会话。
 
@@ -94,4 +97,3 @@ additionalDirectories: await getGlobalResourceDirectories(store)
 - `Agent 配置/skills` -> 技能广场：适合文件系统为主，UI 只做展示。
 
 当前版本二者是并行能力，不要假设 `skills.json` 会自动同步到 Codex HOME。
-

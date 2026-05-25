@@ -4,6 +4,7 @@ export type Project = {
   description: string;
   createdAt: string;
   updatedAt: string;
+  temporary?: boolean;
 };
 
 export type WorkspaceEntry = {

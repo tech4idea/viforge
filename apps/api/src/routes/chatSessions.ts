@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ChatMessage } from '@viwork/shared';
 
 import type { ChatSessionStore } from '../chat/chatSessionStore';
+import type { WorkspaceStore } from '../storage/workspaceStore';
 
 const chatMessageSchema = z.object({
   id: z.string().min(1),
@@ -21,7 +22,7 @@ const updateSessionSchema = z.object({
   title: z.string().trim().min(1).optional(),
 });
 
-export function createChatSessionRoutes(store: ChatSessionStore): Hono {
+export function createChatSessionRoutes(store: ChatSessionStore, workspaceStore?: WorkspaceStore): Hono {
   const routes = new Hono();
 
   routes.get('/projects/:projectId/chat-sessions', async (context) => {
@@ -31,6 +32,15 @@ export function createChatSessionRoutes(store: ChatSessionStore): Hono {
 
   routes.post('/projects/:projectId/chat-sessions', async (context) => {
     return context.json(await store.createSession(context.req.param('projectId')), 201);
+  });
+
+  routes.post('/temporary-chat-sessions', async (context) => {
+    if (!workspaceStore) {
+      return context.json({ error: 'Temporary workspace support is not configured' }, 500);
+    }
+
+    const project = await workspaceStore.createTemporaryProject();
+    return context.json(await store.createSession(project.id), 201);
   });
 
   routes.patch('/chat-sessions/:sessionId', async (context) => {

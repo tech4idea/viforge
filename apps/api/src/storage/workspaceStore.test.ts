@@ -76,6 +76,21 @@ describe('workspaceStore', () => {
     ]);
   });
 
+  it('creates temporary project workspaces without listing them as projects', async () => {
+    const store = createWorkspaceStore(root);
+
+    const temporaryProject = await store.createTemporaryProject();
+
+    expect(temporaryProject).toEqual(expect.objectContaining({
+      id: expect.stringMatching(/^temp-/),
+      name: '临时对话工作区',
+      temporary: true,
+    }));
+    await expect(store.getProject(temporaryProject.id)).resolves.toEqual(temporaryProject);
+    await expect(store.listProjects()).resolves.toEqual([]);
+    await expect(store.listWorkspaceEntries(temporaryProject.id)).resolves.toEqual([]);
+  });
+
   it('initializes and reads the global workspace from the filesystem', async () => {
     const store = createWorkspaceStore(root);
 
@@ -95,6 +110,8 @@ describe('workspaceStore', () => {
   it('migrates legacy global agent files into the Agent 配置 directory', async () => {
     await mkdir(path.join(root, '_global', 'skills', '旧技能'), { recursive: true });
     await writeFile(path.join(root, '_global', 'AGENTS.md'), '# Legacy Agent', 'utf8');
+    await writeFile(path.join(root, '_global', 'auth.json'), '{"token":"legacy"}', 'utf8');
+    await writeFile(path.join(root, '_global', 'installation_id'), 'legacy-installation', 'utf8');
     await writeFile(path.join(root, '_global', 'skills', '旧技能', 'SKILL.md'), '# 旧技能', 'utf8');
 
     const store = createWorkspaceStore(root);
@@ -102,9 +119,13 @@ describe('workspaceStore', () => {
 
     expect(entries).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'Agent 配置/AGENTS.md', type: 'file' }),
+      expect.objectContaining({ path: 'Agent 配置/auth.json', type: 'file' }),
+      expect.objectContaining({ path: 'Agent 配置/installation_id', type: 'file' }),
       expect.objectContaining({ path: 'Agent 配置/skills/旧技能/SKILL.md', type: 'file' }),
     ]));
     await expect(readFile(path.join(root, '_global', 'AGENTS.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(path.join(root, '_global', 'auth.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(path.join(root, '_global', 'installation_id'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('writes and reads workspace files and returns file metadata in entries', async () => {

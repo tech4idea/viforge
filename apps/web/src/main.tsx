@@ -109,6 +109,7 @@ function App() {
   const skipRenameEntryBlurRef = useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [temporaryProjectId, setTemporaryProjectId] = useState<string | null>(null);
   const [projectLoadState, setProjectLoadState] = useState<LoadState>('idle');
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -154,6 +155,9 @@ function App() {
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
   const [createEntryDraft, setCreateEntryDraft] = useState<CreateEntryDraft | null>(null);
   const [renameEntryDraft, setRenameEntryDraft] = useState<RenameEntryDraft | null>(null);
+  const createEntryFocusKey = createEntryDraft
+    ? `${createEntryDraft.workspaceScope}:${createEntryDraft.projectId ?? ''}:${createEntryDraft.parentPath}:${createEntryDraft.kind}`
+    : null;
   const renameEntryFocusKey = renameEntryDraft
     ? `${renameEntryDraft.workspaceScope}:${renameEntryDraft.projectId ?? ''}:${renameEntryDraft.entryPath}`
     : null;
@@ -176,6 +180,7 @@ function App() {
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
+  const activeChatProjectId = selectedProjectId ?? temporaryProjectId;
   const activeEntries = activeWorkspaceScope === 'global' ? globalEntries : entries;
   const selectedPath = activeWorkspaceScope === 'global' ? selectedGlobalPath : selectedProjectPath;
   const selectedEntry = useMemo(
@@ -197,24 +202,24 @@ function App() {
   const projectChatSessions = useMemo(
     () =>
       chatSessions
-        .filter((session) => session.projectId === selectedProjectId && !session.archivedAt)
+        .filter((session) => session.projectId === activeChatProjectId && !session.archivedAt)
         .sort((a, b) => timestampFromIso(b.updatedAt) - timestampFromIso(a.updatedAt)),
-    [chatSessions, selectedProjectId],
+    [activeChatProjectId, chatSessions],
   );
   const archivedChatSessions = useMemo(
     () =>
       chatSessions
-        .filter((session) => session.projectId === selectedProjectId && session.archivedAt)
+        .filter((session) => session.projectId === activeChatProjectId && session.archivedAt)
         .sort((a, b) => timestampFromIso(b.updatedAt) - timestampFromIso(a.updatedAt)),
-    [chatSessions, selectedProjectId],
+    [activeChatProjectId, chatSessions],
   );
   const displayedChatSessions = chatSessionView === 'archived' ? archivedChatSessions : projectChatSessions;
   const activeChatSession = useMemo(
     () =>
-      chatSessions.find((session) => session.projectId === selectedProjectId && session.id === activeChatSessionId) ??
+      chatSessions.find((session) => session.projectId === activeChatProjectId && session.id === activeChatSessionId) ??
       projectChatSessions[0] ??
       null,
-    [activeChatSessionId, chatSessions, projectChatSessions, selectedProjectId],
+    [activeChatProjectId, activeChatSessionId, chatSessions, projectChatSessions],
   );
   const activeChatSessionArchived = Boolean(activeChatSession?.archivedAt);
   const visibleEntries = useMemo(
@@ -245,7 +250,7 @@ function App() {
       createEntryInputRef.current?.focus();
       createEntryInputRef.current?.select();
     });
-  }, [createEntryDraft]);
+  }, [createEntryFocusKey]);
 
   useEffect(() => {
     if (!renameEntryDraft) return;
@@ -276,11 +281,8 @@ function App() {
 
   useEffect(() => {
     if (!selectedProjectId) {
-      setActiveChatSessionId(null);
-      setChatSessions([]);
       setChatSessionsProjectId(null);
       setReferencedFiles([]);
-      setPrompt('');
       closeReferenceMenu();
       return;
     }
@@ -824,11 +826,17 @@ function App() {
 
   async function submitPrompt() {
     const messageText = prompt.trim();
-    const session = activeChatSession;
 
-    if (!selectedProjectId || !messageText || !session) {
+    if (!messageText) {
       return;
     }
+
+    const session = await ensureAssistantChatSession();
+    if (!session) {
+      return;
+    }
+
+    const runProjectId = session.projectId;
 
     const attachedReferences = [...referencedFiles];
     const userMessage = createChatMessage('user', messageText, { referencedFiles: attachedReferences });
@@ -842,7 +850,7 @@ function App() {
 
     try {
       const response = await apiClient.createMockRun({
-        projectId: selectedProjectId,
+        projectId: runProjectId,
         sessionId: session.id,
         codexThreadId: session.codexThreadId ?? undefined,
         prompt: messageText,
@@ -861,7 +869,9 @@ function App() {
             status: 'success',
           }),
         );
-        await refreshWorkspaceAfterRun(selectedProjectId);
+        if (selectedProjectId === runProjectId) {
+          await refreshWorkspaceAfterRun(runProjectId);
+        }
       } else {
         const assistantMessage = createChatMessage('assistant', '', {
           referencedFiles: response.run.referencedFiles,
@@ -891,6 +901,33 @@ function App() {
     }
   }
 
+  async function ensureAssistantChatSession(): Promise<ChatSession | null> {
+    if (activeChatSession && activeChatSession.projectId === activeChatProjectId) {
+      return activeChatSession;
+    }
+
+    try {
+      const session = selectedProjectId
+        ? await apiClient.createChatSession(selectedProjectId)
+        : temporaryProjectId
+          ? await apiClient.createChatSession(temporaryProjectId)
+          : await apiClient.createTemporaryChatSession();
+
+      if (!selectedProjectId) {
+        setTemporaryProjectId(session.projectId);
+        setChatSessionsProjectId(session.projectId);
+      }
+
+      setChatSessions((currentSessions) => [session, ...currentSessions.filter((current) => current.id !== session.id)]);
+      setActiveChatSessionId(session.id);
+      return session;
+    } catch (error) {
+      setRunState('error');
+      setRunError(errorToMessage(error));
+      return null;
+    }
+  }
+
   async function refreshWorkspaceAfterRun(projectId: string) {
     await loadEntries(projectId, { keepSelectedPath: selectedProjectPath, selectFirstTextFile: true });
     if (selectedProjectPath && isSupportedTextFile(selectedProjectPath)) {
@@ -913,7 +950,11 @@ function App() {
     }
 
     updateMessageInSession(sessionId, messageId, (message) => {
-      const content = event.type === 'text.delta' ? message.content + event.delta : message.content;
+      const content = event.type === 'text.delta'
+        ? message.content + event.delta
+        : event.type === 'run.end' && event.status === 'error' && !message.content
+          ? `运行失败：${event.errorMessage ?? '未知错误'}`
+          : message.content;
       return {
         ...message,
         content,
@@ -1345,11 +1386,17 @@ function App() {
   }
 
   async function createNewChatSession() {
-    if (!selectedProjectId) {
-      return;
+    let session: ChatSession | null = null;
+    if (selectedProjectId) {
+      session = await createAndActivateChatSession(selectedProjectId);
+    } else if (temporaryProjectId) {
+      session = await createAndActivateChatSession(temporaryProjectId);
+    } else {
+      session = await ensureAssistantChatSession();
     }
 
-    await createAndActivateChatSession(selectedProjectId);
+    if (!session) return;
+
     setPrompt('');
     setReferencedFiles([]);
     closeReferenceMenu();
@@ -1846,7 +1893,9 @@ function App() {
                 <h2>创作助手</h2>
               </div>
               <div className="session-heading-actions">
-                <span className={`status-pill ${runState}`}>{runStatusLabel(runState, currentRun)}</span>
+                <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
+                  {runStatusLabel(runState, currentRun)}
+                </span>
                 <button
                   type="button"
                   className={`toolbar-button text-mode-button ${chatReadingMode ? 'active' : ''}`}
@@ -1951,7 +2000,11 @@ function App() {
               ) : (
                 <div className="chat-empty">
                   <p>从右侧直接开始和创作助手对话。</p>
-                  <p className="muted">输入 `@` 可以引用当前项目里的剧本、人物设定、分镜或制作文档。</p>
+                  <p className="muted">
+                    {selectedProjectId
+                      ? '输入 `@` 可以引用当前项目里的剧本、人物设定、分镜或制作文档。'
+                      : '未选择项目时会使用后台临时工作目录，不会出现在项目列表中。'}
+                  </p>
                 </div>
               )}
             </section>
@@ -1994,7 +2047,7 @@ function App() {
 	                  ref={composerRef}
 	                  className="composer__textarea"
 	                  value={prompt}
-	                  placeholder={activeChatSessionArchived ? '归档会话只读，恢复后可继续对话' : '描述这一场戏、角色动机或对白要求，输入 @ 引用项目文件'}
+	                  placeholder={activeChatSessionArchived ? '归档会话只读，恢复后可继续对话' : selectedProjectId ? '描述这一场戏、角色动机或对白要求，输入 @ 引用项目文件' : '直接开始对话，后台会创建临时工作目录'}
 	                  disabled={activeChatSessionArchived}
 	                  onChange={handleComposerChange}
                   onClick={(event) => updateReferenceMenu(prompt, event.currentTarget.selectionStart ?? prompt.length)}
@@ -2002,14 +2055,13 @@ function App() {
                 />
                 <div className="composer__toolbar">
                   <div className="composer__left">
-                    <span className="muted">{selectedProject ? selectedProject.name : '未选择项目'}</span>
+                    <span className="muted">{selectedProject ? selectedProject.name : temporaryProjectId ? '临时工作目录' : '未选择项目'}</span>
                   </div>
                   <div className="composer__right">
-                    {runError ? <span className="inline-error">运行失败：{runError}</span> : null}
                     <button
 	                      type="button"
 	                      className="composer__send"
-	                      disabled={activeChatSessionArchived || !selectedProjectId || !prompt.trim() || runState === 'running'}
+	                      disabled={activeChatSessionArchived || !prompt.trim() || runState === 'running'}
                       onClick={() => void submitPrompt()}
                       aria-label="发送"
                       title="发送"

@@ -25,6 +25,7 @@ export type CreateProjectInput = {
 
 export type WorkspaceStore = {
   createProject(input: CreateProjectInput): Promise<Project>;
+  createTemporaryProject(): Promise<Project>;
   listProjects(): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
   getProjectRoot(projectId: string): string;
@@ -143,6 +144,8 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
   async function migrateGlobalAgentConfig(rootPath: string): Promise<void> {
     await migrateGlobalEntry(rootPath, 'AGENTS.md', `${GLOBAL_AGENT_CONFIG_DIR}/AGENTS.md`);
     await migrateGlobalEntry(rootPath, 'config.toml', `${GLOBAL_AGENT_CONFIG_DIR}/config.toml`);
+    await migrateGlobalEntry(rootPath, 'auth.json', `${GLOBAL_AGENT_CONFIG_DIR}/auth.json`);
+    await migrateGlobalEntry(rootPath, 'installation_id', `${GLOBAL_AGENT_CONFIG_DIR}/installation_id`);
     await migrateGlobalEntry(rootPath, 'skills', `${GLOBAL_AGENT_CONFIG_DIR}/skills`);
     await migrateGlobalEntry(rootPath, 'plugins', `${GLOBAL_AGENT_CONFIG_DIR}/plugins`);
   }
@@ -246,6 +249,23 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
       return project;
     },
 
+    async createTemporaryProject() {
+      const now = new Date().toISOString();
+      const project: Project = {
+        id: `temp-${randomUUID()}`,
+        name: '临时对话工作区',
+        description: '未绑定项目的创作助手临时工作目录。',
+        createdAt: now,
+        updatedAt: now,
+        temporary: true,
+      };
+
+      await mkdir(projectRoot(project.id), { recursive: true });
+      await writeFile(metadataPath(project.id), JSON.stringify(project, null, 2), 'utf8');
+
+      return project;
+    },
+
     async listProjects() {
       try {
         const entries = await readdir(workspacesRoot, { withFileTypes: true });
@@ -256,7 +276,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
         );
 
         return projects
-          .filter((project): project is Project => project !== undefined)
+          .filter((project): project is Project => project !== undefined && !project.temporary)
           .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
       } catch (error) {
         if (isNotFoundError(error)) {

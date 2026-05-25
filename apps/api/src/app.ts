@@ -21,7 +21,7 @@ export function createApp(): Hono {
 
   app.use('/api/*', cors());
   app.route('/api', createProjectsRoutes(workspaceStore));
-  app.route('/api', createChatSessionRoutes(createChatSessionStore(path.join(WORKSPACES_ROOT, '..', 'chat-sessions.json'))));
+  app.route('/api', createChatSessionRoutes(createChatSessionStore(path.join(WORKSPACES_ROOT, '..', 'chat-sessions.json')), workspaceStore));
   app.route('/api', createRunsRoutes(createCodexRunService(workspaceStore, runBus), runBus));
   app.route('/api', createRunEventsRoutes(runBus));
   app.route('/api', createSkillsRoutes(createSkillStore(path.join(WORKSPACES_ROOT, '..', 'skills'))));

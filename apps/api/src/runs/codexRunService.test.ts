@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -7,7 +7,7 @@ import type { StreamEvent } from '@viwork/shared';
 import type { ThreadOptions, TurnOptions, Input, ThreadEvent } from '@openai/codex-sdk';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
-import { buildCodexEnv, createCodexRunService } from './codexRunService';
+import { buildCodexEnv, createCodexRunService, resolveCodexPathOverride } from './codexRunService';
 import { createRunBus, type RunBus } from './runBus';
 
 let root: string;
@@ -45,8 +45,33 @@ describe('codex run service', () => {
     }
   });
 
+  it('resolves the Codex CLI from CODEX_PATH or PATH', async () => {
+    const previousCodexPath = process.env.CODEX_PATH;
+    const previousPath = process.env.PATH;
+    const binPath = path.join(root, 'bin');
+    const codexPath = path.join(binPath, 'codex');
+
+    try {
+      await mkdir(binPath, { recursive: true });
+      await writeFile(codexPath, '#!/usr/bin/env sh\nexit 0\n', 'utf8');
+      await chmod(codexPath, 0o755);
+
+      process.env.CODEX_PATH = '/custom/codex';
+      await expect(resolveCodexPathOverride()).resolves.toBe('/custom/codex');
+
+      delete process.env.CODEX_PATH;
+      process.env.PATH = binPath;
+      await expect(resolveCodexPathOverride()).resolves.toBe(codexPath);
+    } finally {
+      restoreEnv('CODEX_PATH', previousCodexPath);
+      restoreEnv('PATH', previousPath);
+    }
+  });
+
   it('starts a run and publishes streamed text, reasoning, command, and terminal events', async () => {
     const project = await store.createProject({ name: 'Codex Writers' });
+    await store.writeGlobalWorkspaceFile('Agent 配置/auth.json', '{"OPENAI_API_KEY":"test"}\n');
+    await store.writeGlobalWorkspaceFile('Agent 配置/installation_id', 'installation-1\n');
     let capturedThreadOptions: ThreadOptions | null = null;
     let capturedInput: Input | null = null;
     const codex = {
@@ -93,6 +118,8 @@ describe('codex run service', () => {
     await expect(readFile(path.join(root, '.codex-home', run.id, 'skills', '人物设定技能', 'SKILL.md'), 'utf8')).resolves.toEqual(
       expect.stringContaining('人物设定技能'),
     );
+    await expect(readFile(path.join(root, '.codex-home', run.id, 'auth.json'), 'utf8')).resolves.toBe('{"OPENAI_API_KEY":"test"}\n');
+    await expect(readFile(path.join(root, '.codex-home', run.id, 'installation_id'), 'utf8')).resolves.toBe('installation-1\n');
     expect(capturedInput).toEqual(expect.stringContaining('# 情景剧创作请求'));
     expect(run.status).toBe('running');
     expect(events.map((event) => event.type)).toEqual([

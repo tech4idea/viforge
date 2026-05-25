@@ -50,6 +50,7 @@ export type ApiClient = {
   deleteEntry(projectId: string, path: string): Promise<{ deleted: true }>;
   listChatSessions(projectId: string, options?: { includeArchived?: boolean }): Promise<ChatSession[]>;
   createChatSession(projectId: string): Promise<ChatSession>;
+  createTemporaryChatSession(): Promise<ChatSession>;
   updateChatSession(sessionId: string, input: { codexThreadId?: string | null; title?: string }): Promise<ChatSession>;
   archiveChatSession(sessionId: string): Promise<ChatSession>;
   restoreChatSession(sessionId: string): Promise<ChatSession>;
@@ -200,6 +201,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       ),
     createChatSession: (projectId) =>
       request<ChatSession>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/chat-sessions`, {
+        method: 'POST',
+      }),
+    createTemporaryChatSession: () =>
+      request<ChatSession>(fetcher, baseUrl, '/api/temporary-chat-sessions', {
         method: 'POST',
       }),
     updateChatSession: (sessionId, input) =>

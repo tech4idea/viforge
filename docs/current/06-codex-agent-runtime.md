@@ -41,10 +41,12 @@ GET /api/runs/:runId/events
 
 ```ts
 const runtimeCodex = codex ?? new Codex({
-  codexPathOverride: process.env.CODEX_PATH ?? '/opt/homebrew/Cellar/node/23.11.0/bin/codex',
+  codexPathOverride: await resolveCodexPathOverride(codexPathOverride),
   env: buildCodexEnv(codexHome),
 });
 ```
+
+`resolveCodexPathOverride()` 优先使用显式传入值或 `CODEX_PATH`，否则从当前 `PATH` 查找 `codex` 可执行文件。找不到时会抛出清晰的运行错误，而不是依赖机器相关的写死路径。
 
 线程选择：
 
@@ -58,7 +60,7 @@ Codex thread id 通过 `thread.started` 流事件回传前端，并写入 `ChatS
 `prepareCodexHome(store, sessionKey)` 为每个会话或 run 创建稳定 HOME：
 
 ```text
-apps/api/data/.codex-home/<sessionId 或 runId>
+apps/api/data/workspaces/.codex-home/<sessionId 或 runId>
 ```
 
 来源目录：
@@ -71,6 +73,8 @@ apps/api/data/workspaces/_global/Agent 配置
 
 - `AGENTS.md`
 - `config.toml`
+- `auth.json`
+- `installation_id`
 - `skills`
 - `plugins`
 
@@ -144,4 +148,3 @@ SSE 路由 `GET /api/runs/:runId/events`：
 - `run.end` 后自动关闭
 
 前端 `apiClient.streamRunEvents` 使用 `EventSource` 订阅，并在 `run.end` 后关闭。
-

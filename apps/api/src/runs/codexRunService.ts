@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { Codex, type Input, type ThreadEvent, type ThreadItem, type ThreadOptions, type TurnOptions } from '@openai/codex-sdk';
@@ -128,8 +129,9 @@ async function executeCodexRun({
   try {
     const prompt = await buildCodexPrompt(store, input);
     const codexHome = await prepareCodexHome(store, input.sessionId ?? run.id);
+    const resolvedCodexPath = await resolveCodexPathOverride(codexPathOverride);
     const runtimeCodex = codex ?? new Codex({
-      codexPathOverride: codexPathOverride ?? process.env.CODEX_PATH ?? '/opt/homebrew/Cellar/node/23.11.0/bin/codex',
+      codexPathOverride: resolvedCodexPath,
       env: buildCodexEnv(codexHome),
     });
     const threadOptions: ThreadOptions = {
@@ -174,7 +176,7 @@ async function prepareCodexHome(store: WorkspaceStore, sessionKey: string): Prom
 
   await mkdir(targetRoot, { recursive: true });
 
-  for (const entryName of ['AGENTS.md', 'config.toml']) {
+  for (const entryName of ['AGENTS.md', 'config.toml', 'auth.json', 'installation_id']) {
     const source = path.join(sourceRoot, entryName);
     const target = path.join(targetRoot, entryName);
     if (!(await pathExists(source))) {
@@ -218,6 +220,34 @@ export function buildCodexEnv(codexHome: string): Record<string, string> {
   );
   env.CODEX_API_KEY = env.CODEX_API_KEY ?? env.OPENAI_API_KEY ?? env.ANTHROPIC_AUTH_TOKEN ?? '';
   return env;
+}
+
+export async function resolveCodexPathOverride(codexPathOverride?: string): Promise<string> {
+  const configuredPath = codexPathOverride ?? process.env.CODEX_PATH;
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const executable = await findExecutableOnPath('codex');
+  if (!executable) {
+    throw new Error('Codex CLI executable not found. Set CODEX_PATH or install codex on PATH.');
+  }
+
+  return executable;
+}
+
+async function findExecutableOnPath(command: string): Promise<string | null> {
+  const pathEntries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  for (const pathEntry of pathEntries) {
+    const candidate = path.join(pathEntry, command);
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Keep searching PATH.
+    }
+  }
+  return null;
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
