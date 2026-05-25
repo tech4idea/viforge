@@ -136,8 +136,7 @@ textarea {
 
 .panel h2,
 .panel h3,
-.notice h2,
-.empty-state h2 {
+.notice h2 {
   margin: 0;
 }
 
@@ -150,19 +149,6 @@ textarea {
   text-transform: uppercase;
 }
 
-.create-project {
-  display: grid;
-  gap: 8px;
-}
-
-.create-project input {
-  padding: 0.65rem 0.75rem;
-}
-
-.create-project .inline-error {
-  margin: 0;
-}
-
 .sidebar-create {
   margin-bottom: 14px;
   padding: 12px;
@@ -172,7 +158,6 @@ textarea {
 }
 
 .notice,
-.empty-state,
 .panel {
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid #dfe6f0;
@@ -180,19 +165,9 @@ textarea {
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
 
-.notice,
-.empty-state {
+.notice {
   margin-top: 18px;
   padding: 18px;
-}
-
-.empty-state {
-  max-width: 720px;
-}
-
-.empty-state p {
-  color: #526176;
-  line-height: 1.6;
 }
 
 .error-notice {

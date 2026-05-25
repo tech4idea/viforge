@@ -111,8 +111,6 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectLoadState, setProjectLoadState] = useState<LoadState>('idle');
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
-  const [newProjectName, setNewProjectName] = useState(DEFAULT_PROJECT_NAME);
-  const [newProjectDescription, setNewProjectDescription] = useState(DEFAULT_PROJECT_DESCRIPTION);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
@@ -413,33 +411,6 @@ function App() {
     } catch (error) {
       setRunError(errorToMessage(error));
       return null;
-    }
-  }
-
-  async function createProject() {
-    const name = newProjectName.trim();
-    if (!name) {
-      setCreateProjectError('请输入项目名称。');
-      return;
-    }
-
-    setIsCreatingProject(true);
-    setCreateProjectError(null);
-
-    try {
-      const project = await apiClient.createProject({
-        name,
-        description: newProjectDescription.trim() || undefined,
-      });
-      setProjects((currentProjects) => [project, ...currentProjects.filter((item) => item.id !== project.id)]);
-      setSelectedProjectId(project.id);
-      setNewProjectName(DEFAULT_PROJECT_NAME);
-      setNewProjectDescription(DEFAULT_PROJECT_DESCRIPTION);
-      setCreateProjectError(null);
-    } catch (error) {
-      setCreateProjectError(errorToMessage(error));
-    } finally {
-      setIsCreatingProject(false);
     }
   }
 
@@ -1590,18 +1561,6 @@ function App() {
       ) : null}
 
       {projectLoadState === 'loading' ? <section className="notice">正在加载项目...</section> : null}
-
-      {projectLoadState !== 'loading' && projects.length === 0 && projectLoadState !== 'error' ? (
-        <section className="empty-state">
-          <p className="eyebrow">从第一个项目开始</p>
-          <h2>创建一个情景剧项目，生成初始工作区文件。</h2>
-          <p>项目会包含 01 基本设定、02 故事、03 剧本、04 分镜脚本、05 视频和 06 产物等创作目录。</p>
-          <button type="button" onClick={() => void createProject()} disabled={isCreatingProject}>
-            {isCreatingProject ? '创建中...' : `创建“${newProjectName || DEFAULT_PROJECT_NAME}”`}
-          </button>
-          {createProjectError ? <p className="inline-error">{createProjectError}</p> : null}
-        </section>
-      ) : null}
 
       {projectLoadState !== 'loading' ? (
         <main
