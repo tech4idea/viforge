@@ -8,7 +8,7 @@
 - `apps/api` 封装文件系统、Codex SDK、SSE、技能和微信状态。
 - `packages/shared` 提供前后端共享类型与默认工作区模板。
 
-API 服务由 [apps/api/src/app.ts](/Users/yukeon/project/viwork/apps/api/src/app.ts) 装配：
+API 服务由 [apps/api/src/app.ts](../../apps/api/src/app.ts) 装配：
 
 ```ts
 app.route('/api', createProjectsRoutes(workspaceStore));
@@ -21,7 +21,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 
 ## 共享类型
 
-共享合同位于 [packages/shared/src/contracts.ts](/Users/yukeon/project/viwork/packages/shared/src/contracts.ts)。
+共享合同位于 [packages/shared/src/contracts.ts](../../packages/shared/src/contracts.ts)。
 
 核心类型：
 
@@ -39,7 +39,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 
 ## 默认模板
 
-默认目录和文件模板位于 [packages/shared/src/templates.ts](/Users/yukeon/project/viwork/packages/shared/src/templates.ts)。
+默认目录和文件模板位于 [packages/shared/src/templates.ts](../../packages/shared/src/templates.ts)。
 
 全局区默认结构：
 
@@ -64,7 +64,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 
 ## API Client
 
-前端 API client 位于 [apps/web/src/api.ts](/Users/yukeon/project/viwork/apps/web/src/api.ts)。它负责：
+前端 API client 位于 [apps/web/src/api.ts](../../apps/web/src/api.ts)。它负责：
 
 - 对路径分段做 URL encode，避免中文和斜杠错误。
 - 把非 2xx JSON 错误转换成 `Error`。

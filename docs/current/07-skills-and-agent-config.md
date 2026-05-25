@@ -4,8 +4,8 @@
 
 技能广场用于管理可启用/停用的情景剧创作技能。后端实现：
 
-- Store：[apps/api/src/skills/skillStore.ts](/Users/yukeon/project/viwork/apps/api/src/skills/skillStore.ts)
-- Route：[apps/api/src/routes/skills.ts](/Users/yukeon/project/viwork/apps/api/src/routes/skills.ts)
+- Store：[apps/api/src/skills/skillStore.ts](../../apps/api/src/skills/skillStore.ts)
+- Route：[apps/api/src/routes/skills.ts](../../apps/api/src/routes/skills.ts)
 
 持久化文件：
 
@@ -26,7 +26,7 @@ API：
 - `POST /api/skills`
 - `PATCH /api/skills/:slug`
 
-前端入口在 [apps/web/src/main.tsx](/Users/yukeon/project/viwork/apps/web/src/main.tsx)：
+前端入口在 [apps/web/src/main.tsx](../../apps/web/src/main.tsx)：
 
 - `loadSkills`
 - `toggleSkill`
@@ -50,11 +50,11 @@ apps/api/data/workspaces/_global/Agent 配置
 - `skills/*/SKILL.md`
 - `plugins`（如果用户创建）
 
-初始化和迁移由 [apps/api/src/storage/workspaceStore.ts](/Users/yukeon/project/viwork/apps/api/src/storage/workspaceStore.ts) 的 `ensureGlobalWorkspace()` 和 `migrateGlobalAgentConfig()` 处理。
+初始化和迁移由 [apps/api/src/storage/workspaceStore.ts](../../apps/api/src/storage/workspaceStore.ts) 的 `ensureGlobalWorkspace()` 和 `migrateGlobalAgentConfig()` 处理。
 
 ## Codex HOME 复制
 
-发起 Codex run 时，[apps/api/src/runs/codexRunService.ts](/Users/yukeon/project/viwork/apps/api/src/runs/codexRunService.ts) 的 `prepareCodexHome()` 会从全局 Agent 配置复制到：
+发起 Codex run 时，[apps/api/src/runs/codexRunService.ts](../../apps/api/src/runs/codexRunService.ts) 的 `prepareCodexHome()` 会从全局 Agent 配置复制到：
 
 ```text
 apps/api/data/.codex-home/<sessionId 或 runId>

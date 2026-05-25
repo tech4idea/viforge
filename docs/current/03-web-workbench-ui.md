@@ -2,13 +2,13 @@
 
 ## 主界面
 
-前端主文件是 [apps/web/src/main.tsx](/Users/yukeon/project/viwork/apps/web/src/main.tsx)。当前 UI 是三栏工作台：
+前端主文件是 [apps/web/src/main.tsx](../../apps/web/src/main.tsx)。当前 UI 是三栏工作台：
 
 - 左侧：工作区文件树。
 - 中间：编辑/预览区。
 - 右侧：创作助手。
 
-布局样式在 [apps/web/src/styles.css](/Users/yukeon/project/viwork/apps/web/src/styles.css) 的 `.workspace-grid` 附近。
+布局样式在 [apps/web/src/styles.css](../../apps/web/src/styles.css) 的 `.workspace-grid` 附近。
 
 ## 三栏可调宽
 
@@ -40,7 +40,7 @@ const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, edito
 
 ## 文件树显示
 
-树过滤逻辑在 [apps/web/src/workspace-tree.ts](/Users/yukeon/project/viwork/apps/web/src/workspace-tree.ts)：
+树过滤逻辑在 [apps/web/src/workspace-tree.ts](../../apps/web/src/workspace-tree.ts)：
 
 - `buildCollapsedDirectoryPaths(entries, revealPath)`
 - `filterVisibleWorkspaceEntries(entries, collapsedDirectoryPaths)`

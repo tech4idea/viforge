@@ -8,9 +8,9 @@
 
 ## 后端实现
 
-Store：[apps/api/src/wechat/wechatStore.ts](/Users/yukeon/project/viwork/apps/api/src/wechat/wechatStore.ts)
+Store：[apps/api/src/wechat/wechatStore.ts](../../apps/api/src/wechat/wechatStore.ts)
 
-Route：[apps/api/src/routes/wechat.ts](/Users/yukeon/project/viwork/apps/api/src/routes/wechat.ts)
+Route：[apps/api/src/routes/wechat.ts](../../apps/api/src/routes/wechat.ts)
 
 持久化文件：
 
@@ -55,7 +55,7 @@ remote-wechat/<ISO 时间>.md
 
 ## 前端入口
 
-顶部“微信接入”按钮打开 modal。相关函数在 [apps/web/src/main.tsx](/Users/yukeon/project/viwork/apps/web/src/main.tsx)：
+顶部“微信接入”按钮打开 modal。相关函数在 [apps/web/src/main.tsx](../../apps/web/src/main.tsx)：
 
 - `loadWechatStatus`
 - `createWechatSetup`

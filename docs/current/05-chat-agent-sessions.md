@@ -2,7 +2,7 @@
 
 ## 前端入口
 
-创作助手 UI 位于 [apps/web/src/main.tsx](/Users/yukeon/project/viwork/apps/web/src/main.tsx) 的 `session-panel` 区域。
+创作助手 UI 位于 [apps/web/src/main.tsx](../../apps/web/src/main.tsx) 的 `session-panel` 区域。
 
 核心状态：
 
@@ -19,7 +19,7 @@
 
 ## 后端会话持久化
 
-后端 store 位于 [apps/api/src/chat/chatSessionStore.ts](/Users/yukeon/project/viwork/apps/api/src/chat/chatSessionStore.ts)。
+后端 store 位于 [apps/api/src/chat/chatSessionStore.ts](../../apps/api/src/chat/chatSessionStore.ts)。
 
 持久化文件：
 
@@ -41,7 +41,7 @@ apps/api/data/chat-sessions.json
 
 ## 会话 API
 
-路由位于 [apps/api/src/routes/chatSessions.ts](/Users/yukeon/project/viwork/apps/api/src/routes/chatSessions.ts)。
+路由位于 [apps/api/src/routes/chatSessions.ts](../../apps/api/src/routes/chatSessions.ts)。
 
 - `GET /api/projects/:projectId/chat-sessions`
 - `GET /api/projects/:projectId/chat-sessions?includeArchived=true`
@@ -52,7 +52,7 @@ apps/api/data/chat-sessions.json
 - `POST /api/chat-sessions/:sessionId/messages`
 - `PUT /api/chat-sessions/:sessionId/messages/:messageId`
 
-前端封装在 [apps/web/src/api.ts](/Users/yukeon/project/viwork/apps/web/src/api.ts)。
+前端封装在 [apps/web/src/api.ts](../../apps/web/src/api.ts)。
 
 ## 最近/归档视图
 
@@ -93,7 +93,7 @@ const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
 
 ## 文件引用
 
-引用逻辑位于 [apps/web/src/chat-references.ts](/Users/yukeon/project/viwork/apps/web/src/chat-references.ts)。
+引用逻辑位于 [apps/web/src/chat-references.ts](../../apps/web/src/chat-references.ts)。
 
 能力：
 

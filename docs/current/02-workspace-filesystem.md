@@ -2,7 +2,7 @@
 
 ## 数据模型
 
-工作区由真实文件系统承载，核心实现位于 [apps/api/src/storage/workspaceStore.ts](/Users/yukeon/project/viwork/apps/api/src/storage/workspaceStore.ts)。
+工作区由真实文件系统承载，核心实现位于 [apps/api/src/storage/workspaceStore.ts](../../apps/api/src/storage/workspaceStore.ts)。
 
 根目录：
 
@@ -66,7 +66,7 @@
 
 ## HTTP API
 
-路由位于 [apps/api/src/routes/projects.ts](/Users/yukeon/project/viwork/apps/api/src/routes/projects.ts)。
+路由位于 [apps/api/src/routes/projects.ts](../../apps/api/src/routes/projects.ts)。
 
 全局区：
 
@@ -97,7 +97,7 @@
 
 ## 前端联动
 
-前端在 [apps/web/src/main.tsx](/Users/yukeon/project/viwork/apps/web/src/main.tsx) 中维护：
+前端在 [apps/web/src/main.tsx](../../apps/web/src/main.tsx) 中维护：
 
 - `projects`
 - `entries`
@@ -126,7 +126,7 @@
 
 覆盖点：
 
-- [apps/api/src/storage/workspaceStore.test.ts](/Users/yukeon/project/viwork/apps/api/src/storage/workspaceStore.test.ts)
-- [apps/api/src/routes/projects.test.ts](/Users/yukeon/project/viwork/apps/api/src/routes/projects.test.ts)
-- [apps/web/src/workspace-tree.test.ts](/Users/yukeon/project/viwork/apps/web/src/workspace-tree.test.ts)
+- [apps/api/src/storage/workspaceStore.test.ts](../../apps/api/src/storage/workspaceStore.test.ts)
+- [apps/api/src/routes/projects.test.ts](../../apps/api/src/routes/projects.test.ts)
+- [apps/web/src/workspace-tree.test.ts](../../apps/web/src/workspace-tree.test.ts)
 

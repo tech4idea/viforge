@@ -2,16 +2,16 @@
 
 ## 入口
 
-Codex agent 后端实现位于 [apps/api/src/runs/codexRunService.ts](/Users/yukeon/project/viwork/apps/api/src/runs/codexRunService.ts)。
+Codex agent 后端实现位于 [apps/api/src/runs/codexRunService.ts](../../apps/api/src/runs/codexRunService.ts)。
 
 API 路由：
 
-- [apps/api/src/routes/runs.ts](/Users/yukeon/project/viwork/apps/api/src/routes/runs.ts)
-- [apps/api/src/routes/runEvents.ts](/Users/yukeon/project/viwork/apps/api/src/routes/runEvents.ts)
+- [apps/api/src/routes/runs.ts](../../apps/api/src/routes/runs.ts)
+- [apps/api/src/routes/runEvents.ts](../../apps/api/src/routes/runEvents.ts)
 
 事件总线：
 
-- [apps/api/src/runs/runBus.ts](/Users/yukeon/project/viwork/apps/api/src/runs/runBus.ts)
+- [apps/api/src/runs/runBus.ts](../../apps/api/src/runs/runBus.ts)
 
 ## 创建 Run
 

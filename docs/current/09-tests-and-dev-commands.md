@@ -71,15 +71,15 @@ pnpm --filter @viwork/web test -- chat-references.test.ts
 
 ## 关键测试覆盖
 
-- API client URL 编码和端点：[apps/web/src/api.test.ts](/Users/yukeon/project/viwork/apps/web/src/api.test.ts)
-- 文件树折叠过滤：[apps/web/src/workspace-tree.test.ts](/Users/yukeon/project/viwork/apps/web/src/workspace-tree.test.ts)
-- viewer 类型判断：[apps/web/src/viewers.test.ts](/Users/yukeon/project/viwork/apps/web/src/viewers.test.ts)
-- Markdown/表格/代码 viewer：[apps/web/src/viewer-components.test.ts](/Users/yukeon/project/viwork/apps/web/src/viewer-components.test.ts)
-- 引用输入：[apps/web/src/chat-references.test.ts](/Users/yukeon/project/viwork/apps/web/src/chat-references.test.ts)
-- 工作区 API：[apps/api/src/routes/projects.test.ts](/Users/yukeon/project/viwork/apps/api/src/routes/projects.test.ts)
-- 会话持久化 API：[apps/api/src/routes/chatSessions.test.ts](/Users/yukeon/project/viwork/apps/api/src/routes/chatSessions.test.ts)
-- Codex run service：[apps/api/src/runs/codexRunService.test.ts](/Users/yukeon/project/viwork/apps/api/src/runs/codexRunService.test.ts)
-- SSE run events：[apps/api/src/routes/runEvents.test.ts](/Users/yukeon/project/viwork/apps/api/src/routes/runEvents.test.ts)
+- API client URL 编码和端点：[apps/web/src/api.test.ts](../../apps/web/src/api.test.ts)
+- 文件树折叠过滤：[apps/web/src/workspace-tree.test.ts](../../apps/web/src/workspace-tree.test.ts)
+- viewer 类型判断：[apps/web/src/viewers.test.ts](../../apps/web/src/viewers.test.ts)
+- Markdown/表格/代码 viewer：[apps/web/src/viewer-components.test.ts](../../apps/web/src/viewer-components.test.ts)
+- 引用输入：[apps/web/src/chat-references.test.ts](../../apps/web/src/chat-references.test.ts)
+- 工作区 API：[apps/api/src/routes/projects.test.ts](../../apps/api/src/routes/projects.test.ts)
+- 会话持久化 API：[apps/api/src/routes/chatSessions.test.ts](../../apps/api/src/routes/chatSessions.test.ts)
+- Codex run service：[apps/api/src/runs/codexRunService.test.ts](../../apps/api/src/runs/codexRunService.test.ts)
+- SSE run events：[apps/api/src/routes/runEvents.test.ts](../../apps/api/src/routes/runEvents.test.ts)
 
 ## 开发注意事项
 

@@ -2,9 +2,9 @@
 
 ## 入口
 
-文件预览和编辑组件位于 [apps/web/src/viewer-components.tsx](/Users/yukeon/project/viwork/apps/web/src/viewer-components.tsx)。
+文件预览和编辑组件位于 [apps/web/src/viewer-components.tsx](../../apps/web/src/viewer-components.tsx)。
 
-文件类型检测位于 [apps/web/src/viewers.ts](/Users/yukeon/project/viwork/apps/web/src/viewers.ts)：
+文件类型检测位于 [apps/web/src/viewers.ts](../../apps/web/src/viewers.ts)：
 
 ```ts
 export type ViewerKind = 'markdown' | 'sheet' | 'image' | 'pdf' | 'html' | 'code' | 'binary';
