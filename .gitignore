@@ -64,5 +64,13 @@ typings/
 dist/
 *.tsbuildinfo
 
+# Local app data and tool state
+apps/api/data/
+.codex/
+.idea/
+.agents/
+.claude/
+.qwen/
+
 # Claude/superpowers worktrees
 .worktrees/

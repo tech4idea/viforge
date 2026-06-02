@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { AgentRun, ReferencedFile, RunEvent, RunSource } from '@viwork/shared';
+import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunSource } from '@viwork/shared';
 
 import type { WorkspaceStore } from '../storage/workspaceStore';
 
@@ -10,6 +10,7 @@ export type CreateRunInput = {
   codexThreadId?: string;
   prompt: string;
   referencedFiles?: ReferencedFile[];
+  referencedSnippets?: ReferencedChatSnippet[];
   source?: RunSource;
 };
 
@@ -36,12 +37,13 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
         prompt: input.prompt,
         source,
         referencedFiles: input.referencedFiles ?? [],
+        referencedSnippets: input.referencedSnippets ?? [],
         status: 'success',
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      const outputPath = `06 产物/01 第一集/${run.id}.md`;
-      const outputContent = `# Mock Agent Run\n\nPrompt: ${input.prompt}\n${
+      const outputPath = '02 改编方案/01 第一集/单集改编方案.md';
+      const outputContent = `# 01 第一集单集改编方案\n\n## 原著范围\n\n${input.prompt}\n\n## 戏剧任务\n\n这是一次模拟 adaptation-planner-agent 产出的单集改编方案。\n${
         run.referencedFiles.length > 0
           ? `\nReferenced files:\n${run.referencedFiles.map((file) => `- ${file.label} (${file.path})`).join('\n')}\n`
           : ''
@@ -51,6 +53,7 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
 
       const events: RunEvent[] = [
         { type: 'run.start', runId: run.id },
+        { type: 'agent.step.start', runId: run.id, agentId: 'adaptation-planner-agent', phase: '改编方案', iteration: 1, maxIterations: 5 },
         {
           type: 'text.delta',
           runId: run.id,
@@ -59,6 +62,9 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
               ? `Received prompt: ${input.prompt}\n\n参考文件：${run.referencedFiles.map((file) => file.label).join('、')}`
               : `Received prompt: ${input.prompt}`,
         },
+        { type: 'agent.step.end', runId: run.id, agentId: 'adaptation-planner-agent', phase: '改编方案', iteration: 1, maxIterations: 5, status: 'passed' },
+        { type: 'agent.step.start', runId: run.id, agentId: 'reviewer-agent', phase: '方案审稿', iteration: 1, maxIterations: 5 },
+        { type: 'agent.step.end', runId: run.id, agentId: 'reviewer-agent', phase: '方案审稿', iteration: 1, maxIterations: 5, status: 'passed' },
         {
           type: 'tool.use',
           runId: run.id,
@@ -66,6 +72,7 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
           input: { path: outputPath, referencedFiles: run.referencedFiles },
         },
         { type: 'file.changed', runId: run.id, path: outputPath, change: 'created' },
+        { type: 'agent.workflow.end', runId: run.id, status: 'passed', outputPath },
         { type: 'run.end', runId: run.id, status: 'success' },
       ];
 

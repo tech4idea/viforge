@@ -1,6 +1,8 @@
 import {
   Fragment,
   StrictMode,
+  memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,10 +14,16 @@ import { createRoot } from 'react-dom/client';
 
 import {
   apiClient,
+  type AigcHubModelMetadata,
   type AgentRun,
   type ChatMessage,
+  type ChatMessageAttachment,
   type ChatSession,
+  type GeminiImageAspectRatio,
+  type GeminiImageThinkingLevel,
+  type ImageGenerationReferenceImage,
   type Project,
+  type ReferencedChatSnippet,
   type ReferencedFile,
   type RunEvent,
   type StreamEvent,
@@ -24,8 +32,9 @@ import {
   type WechatStatus,
   type WorkspaceEntry,
 } from './api';
+import { AssistantStreamBody, streamEventsFromRunEvents } from './assistant-stream';
 import { buildReferenceSuggestions, getActiveReferenceQuery, insertReference, type FileReference, type ReferenceSuggestion } from './chat-references';
-import { MarkdownReadPreview, renderEditorViewer } from './viewer-components';
+import { renderEditorViewer } from './viewer-components';
 import {
   WORKSPACE_SECTIONS,
   buildCollapsedDirectoryPaths,
@@ -34,8 +43,8 @@ import {
 } from './workspace-tree';
 import './styles.css';
 
-const DEFAULT_PROJECT_NAME = '办公室奇遇记';
-const DEFAULT_PROJECT_DESCRIPTION = '围绕办公室日常冲突展开的轻喜剧情景剧。';
+const DEFAULT_PROJECT_NAME = '长夜改编计划';
+const DEFAULT_PROJECT_DESCRIPTION = '围绕一部小说展开的剧本改编项目。';
 const TEXT_FILE_PATTERN = /\.(md|markdown|txt|toml|json|js|jsx|ts|tsx|css|html|pug|csv|yml|yaml)$/i;
 const IMAGE_FILE_PATTERN = /\.(png|jpe?g|gif|webp|svg)$/i;
 const PDF_FILE_PATTERN = /\.pdf$/i;
@@ -48,15 +57,53 @@ const WORKSPACE_PANEL_MAX_WIDTH = 420;
 const CHAT_PANEL_MIN_WIDTH = 240;
 const CHAT_PANEL_MAX_WIDTH = 560;
 const CHAT_READING_MODE_STORAGE_KEY = 'viwork.chatReadingMode.v1';
+const SELECTED_PROJECT_STORAGE_KEY = 'viwork.selectedProjectId.v1';
+const TEMPORARY_CHAT_SESSION_STORAGE_KEY = 'viwork.temporaryChatSession.v1';
+const CHAT_SCOPE_STORAGE_KEY = 'viwork.chatScope.v1';
+const WORKSPACE_SELECTION_STORAGE_KEY = 'viwork.workspaceSelection.v1';
+const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'viwork.activeChatSession.v1';
+const THEME_MODE_STORAGE_KEY = 'viwork.themeMode.v1';
+const TEMPORARY_CHAT_SCOPE_ID = '__temporary__';
+const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
+const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
 
 type LoadState = 'idle' | 'loading' | 'error';
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 type RunState = 'idle' | 'running' | 'success' | 'error';
+type ChatMode = 'assistant' | 'image';
+type ChatScope = 'project' | 'temporary';
+type WorkspaceScope = 'global' | 'project' | 'temporary';
+type ChatSessionView = 'active' | 'archived';
+type ThemeMode = 'light' | 'dark' | 'soft';
+type WorkspaceTarget = { workspaceScope: WorkspaceScope; projectId: string | null; parentPath: string };
+type ChatSessionsUpdate = ChatSession[] | ((currentSessions: ChatSession[]) => ChatSession[]);
+type PendingChatMessageUpdate = { sessionId: string; messageId: string; message: ChatMessage };
+type ChatMessageTextSelectionHandler = (event: React.MouseEvent, message: ChatMessage) => void;
+
+type ImageReferenceDraft = ImageGenerationReferenceImage & {
+  id: string;
+};
+
+type ImageThinkingLevelOption = 'default' | GeminiImageThinkingLevel;
+
+type StoredWorkspaceSelection = {
+  activeWorkspaceScope: WorkspaceScope;
+  selectedProjectPath: string | null;
+  selectedGlobalPath: string | null;
+  selectedTemporaryProjectId: string | null;
+  selectedTemporaryPath: string | null;
+};
+
+type StoredActiveChatSession = {
+  projectSessionIds: Record<string, string>;
+  temporarySessionId: string | null;
+  chatSessionView: ChatSessionView;
+};
 
 type SidebarContextMenu = {
   x: number;
   y: number;
-  workspaceScope: 'global' | 'project';
+  workspaceScope: WorkspaceScope;
   projectId: string | null;
   entryPath: string | null;
   entryType: WorkspaceEntry['type'] | null;
@@ -72,11 +119,13 @@ type SelectedTextContextMenu = {
   x: number;
   y: number;
   text: string;
-  sourcePath: string;
-};
+} & (
+  | { source: 'file'; sourcePath: string }
+  | { source: 'chat'; messageId: string; role: ChatMessage['role']; label: string; createdAt: string }
+);
 
 type CreateEntryDraft = {
-  workspaceScope: 'global' | 'project';
+  workspaceScope: WorkspaceScope;
   projectId: string | null;
   parentPath: string;
   kind: 'folder' | 'file';
@@ -84,7 +133,7 @@ type CreateEntryDraft = {
 };
 
 type RenameEntryDraft = {
-  workspaceScope: 'global' | 'project';
+  workspaceScope: WorkspaceScope;
   projectId: string | null;
   entryPath: string;
   originalName: string;
@@ -92,7 +141,7 @@ type RenameEntryDraft = {
 };
 
 type DragEntryDraft = {
-  workspaceScope: 'global' | 'project';
+  workspaceScope: WorkspaceScope;
   projectId: string | null;
   entryPath: string;
   entryType: WorkspaceEntry['type'];
@@ -100,16 +149,23 @@ type DragEntryDraft = {
 
 function App() {
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
+  const imageReferenceInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatThreadRef = useRef<HTMLElement | null>(null);
   const workspaceGridRef = useRef<HTMLElement | null>(null);
   const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingChatMessageUpdatesRef = useRef<Map<string, PendingChatMessageUpdate>>(new Map());
+  const chatMessageUpdateFlushScheduledRef = useRef(false);
   const createEntryInputRef = useRef<HTMLInputElement | null>(null);
   const skipCreateEntryBlurRef = useRef(false);
   const renameEntryInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameEntryBlurRef = useRef(false);
+  const suppressNextShellClickRef = useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [temporaryProjectId, setTemporaryProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => readStoredSelectedProjectId());
+  const [temporaryProjectId, setTemporaryProjectId] = useState<string | null>(
+    () => readStoredTemporaryChatSession()?.projectId ?? readStoredWorkspaceSelection()?.selectedTemporaryProjectId ?? null,
+  );
   const [projectLoadState, setProjectLoadState] = useState<LoadState>('idle');
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -121,10 +177,25 @@ function App() {
   const [globalEntries, setGlobalEntries] = useState<WorkspaceEntry[]>([]);
   const [globalEntriesState, setGlobalEntriesState] = useState<LoadState>('idle');
   const [globalEntriesError, setGlobalEntriesError] = useState<string | null>(null);
+  const [temporaryEntriesByProject, setTemporaryEntriesByProject] = useState<Record<string, WorkspaceEntry[]>>({});
+  const [temporaryEntriesStateByProject, setTemporaryEntriesStateByProject] = useState<Record<string, LoadState>>({});
+  const [temporaryEntriesErrorByProject, setTemporaryEntriesErrorByProject] = useState<Record<string, string | null>>({});
 
-  const [activeWorkspaceScope, setActiveWorkspaceScope] = useState<'global' | 'project'>('global');
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
-  const [selectedGlobalPath, setSelectedGlobalPath] = useState<string | null>(null);
+  const [activeWorkspaceScope, setActiveWorkspaceScope] = useState<WorkspaceScope>(
+    () => readStoredWorkspaceSelection()?.activeWorkspaceScope ?? 'global',
+  );
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
+    () => readStoredWorkspaceSelection()?.selectedProjectPath ?? null,
+  );
+  const [selectedGlobalPath, setSelectedGlobalPath] = useState<string | null>(
+    () => readStoredWorkspaceSelection()?.selectedGlobalPath ?? null,
+  );
+  const [selectedTemporaryProjectId, setSelectedTemporaryProjectId] = useState<string | null>(
+    () => readStoredWorkspaceSelection()?.selectedTemporaryProjectId ?? null,
+  );
+  const [selectedTemporaryPath, setSelectedTemporaryPath] = useState<string | null>(
+    () => readStoredWorkspaceSelection()?.selectedTemporaryPath ?? null,
+  );
   const [fileContent, setFileContent] = useState('');
   const [lastSavedContent, setLastSavedContent] = useState('');
   const [fileState, setFileState] = useState<LoadState>('idle');
@@ -137,18 +208,36 @@ function App() {
   const [runError, setRunError] = useState<string | null>(null);
   const [currentRun, setCurrentRun] = useState<AgentRun | null>(null);
   const [referencedFiles, setReferencedFiles] = useState<FileReference[]>([]);
+  const [referencedSnippets, setReferencedSnippets] = useState<ReferencedChatSnippet[]>([]);
   const [referenceSuggestions, setReferenceSuggestions] = useState<ReferenceSuggestion[]>([]);
   const [referenceQuery, setReferenceQuery] = useState<{ start: number; end: number; query: string } | null>(null);
   const [activeReferenceIndex, setActiveReferenceIndex] = useState(0);
   const [chatReadingMode, setChatReadingMode] = useState(() => readStoredChatReadingMode());
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [chatMode, setChatMode] = useState<ChatMode>('assistant');
+  const [aigcHubModels, setAigcHubModels] = useState<AigcHubModelMetadata[]>([]);
+  const [aigcHubModelError, setAigcHubModelError] = useState<string | null>(null);
+  const [chatModel, setChatModel] = useState(() => readStoredModel(CHAT_MODEL_STORAGE_KEY));
+  const [imageModel, setImageModel] = useState(() => readStoredModel(IMAGE_MODEL_STORAGE_KEY));
+  const [imageAspectRatio, setImageAspectRatio] = useState<GeminiImageAspectRatio>('1:1');
+  const [imageThinkingLevel, setImageThinkingLevel] = useState<ImageThinkingLevelOption>('default');
+  const [imageCount, setImageCount] = useState(1);
+  const [imageReferenceDrafts, setImageReferenceDrafts] = useState<ImageReferenceDraft[]>([]);
+  const [chatSessions, setChatSessionsState] = useState<ChatSession[]>([]);
+  const chatSessionsRef = useRef<ChatSession[]>([]);
+  const [chatScope, setChatScope] = useState<ChatScope>(() =>
+    readStoredChatScope() ?? (readStoredSelectedProjectId() ? 'project' : 'temporary'),
+  );
   const [chatSessionsProjectId, setChatSessionsProjectId] = useState<string | null>(null);
-  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
-  const [chatSessionView, setChatSessionView] = useState<'active' | 'archived'>('active');
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => readInitialActiveChatSessionId());
+  const [chatSessionView, setChatSessionView] = useState<ChatSessionView>(() => readStoredActiveChatSession().chatSessionView);
   const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, editor: false, chat: false });
   const [panelWidths, setPanelWidths] = useState({ workspace: 238, chat: 340 });
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
+  const [temporaryWorkspaceCollapsed, setTemporaryWorkspaceCollapsed] = useState(true);
   const [collapsedGlobalPaths, setCollapsedGlobalPaths] = useState<string[]>([]);
   const [collapsedDirectoriesByProject, setCollapsedDirectoriesByProject] = useState<Record<string, string[]>>({});
+  const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
+  const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
   const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
@@ -162,15 +251,15 @@ function App() {
     ? `${renameEntryDraft.workspaceScope}:${renameEntryDraft.projectId ?? ''}:${renameEntryDraft.entryPath}`
     : null;
   const [quickActionError, setQuickActionError] = useState<string | null>(null);
-  const [uploadTarget, setUploadTarget] = useState<{ workspaceScope: 'global' | 'project'; projectId: string | null; parentPath: string } | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<WorkspaceTarget | null>(null);
   const [dragEntry, setDragEntry] = useState<DragEntryDraft | null>(null);
   const [dragOverTargetKey, setDragOverTargetKey] = useState<string | null>(null);
   const [skills, setSkills] = useState<TheaterSkill[]>([]);
   const [skillsState, setSkillsState] = useState<LoadState>('idle');
   const [newSkill, setNewSkill] = useState({
-    title: '冷开场生成器',
-    description: '根据本集主题写一个 30 秒冷开场。',
-    prompt: '请生成一个短促、有反转的情景剧冷开场。',
+    title: '原著分析助手',
+    description: '根据原著片段提炼主题、人物关系和可改编场面。',
+    prompt: '请分析这段原著，提炼主题、人物关系、关键场面和改编风险。',
   });
   const [wechatStatus, setWechatStatus] = useState<WechatStatus | null>(null);
   const [wechatSetup, setWechatSetup] = useState<WechatSetupSession | null>(null);
@@ -180,9 +269,21 @@ function App() {
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
-  const activeChatProjectId = selectedProjectId ?? temporaryProjectId;
-  const activeEntries = activeWorkspaceScope === 'global' ? globalEntries : entries;
-  const selectedPath = activeWorkspaceScope === 'global' ? selectedGlobalPath : selectedProjectPath;
+  const activeProjectWorkspaceId = activeWorkspaceScope === 'project'
+    ? selectedProjectId
+    : activeWorkspaceScope === 'temporary'
+      ? selectedTemporaryProjectId
+      : null;
+  const activeEntries = activeWorkspaceScope === 'global'
+    ? globalEntries
+    : activeWorkspaceScope === 'temporary' && selectedTemporaryProjectId
+      ? temporaryEntriesByProject[selectedTemporaryProjectId] ?? []
+      : entries;
+  const selectedPath = activeWorkspaceScope === 'global'
+    ? selectedGlobalPath
+    : activeWorkspaceScope === 'temporary'
+      ? selectedTemporaryPath
+      : selectedProjectPath;
   const selectedEntry = useMemo(
     () => activeEntries.find((entry) => entry.path === selectedPath) ?? null,
     [activeEntries, selectedPath],
@@ -194,33 +295,34 @@ function App() {
   const rawPreviewUrl = selectedPath
     ? activeWorkspaceScope === 'global'
       ? `/api/global/raw/${encodeWorkspacePath(selectedPath)}`
-      : selectedProjectId
-        ? `/api/projects/${encodeURIComponent(selectedProjectId)}/raw/${encodeWorkspacePath(selectedPath)}`
+      : activeProjectWorkspaceId
+        ? `/api/projects/${encodeURIComponent(activeProjectWorkspaceId)}/raw/${encodeWorkspacePath(selectedPath)}`
         : ''
     : '';
   const hasUnsavedChanges = isTextFile && fileContent !== lastSavedContent;
   const projectChatSessions = useMemo(
     () =>
       chatSessions
-        .filter((session) => session.projectId === activeChatProjectId && !session.archivedAt)
+        .filter((session) => isSessionInActiveChatMode(session, chatMode, chatScope, selectedProjectId) && !session.archivedAt)
         .sort((a, b) => timestampFromIso(b.updatedAt) - timestampFromIso(a.updatedAt)),
-    [activeChatProjectId, chatSessions],
+    [chatMode, chatScope, chatSessions, selectedProjectId],
   );
   const archivedChatSessions = useMemo(
     () =>
       chatSessions
-        .filter((session) => session.projectId === activeChatProjectId && session.archivedAt)
+        .filter((session) => isSessionInActiveChatMode(session, chatMode, chatScope, selectedProjectId) && session.archivedAt)
         .sort((a, b) => timestampFromIso(b.updatedAt) - timestampFromIso(a.updatedAt)),
-    [activeChatProjectId, chatSessions],
+    [chatMode, chatScope, chatSessions, selectedProjectId],
   );
   const displayedChatSessions = chatSessionView === 'archived' ? archivedChatSessions : projectChatSessions;
   const activeChatSession = useMemo(
     () =>
-      chatSessions.find((session) => session.projectId === activeChatProjectId && session.id === activeChatSessionId) ??
-      projectChatSessions[0] ??
+      displayedChatSessions.find((session) => session.id === activeChatSessionId) ??
+      displayedChatSessions[0] ??
       null,
-    [activeChatProjectId, activeChatSessionId, chatSessions, projectChatSessions],
+    [activeChatSessionId, displayedChatSessions],
   );
+  const activeChatLastMessage = activeChatSession?.messages[activeChatSession.messages.length - 1] ?? null;
   const activeChatSessionArchived = Boolean(activeChatSession?.archivedAt);
   const visibleEntries = useMemo(
     () => filterVisibleWorkspaceEntries(entries, collapsedDirectoriesByProject[selectedProjectId ?? ''] ?? []),
@@ -230,19 +332,173 @@ function App() {
     () => filterVisibleWorkspaceEntries(globalEntries, collapsedGlobalPaths),
     [collapsedGlobalPaths, globalEntries],
   );
-  const selectedProjectFiles = useMemo(
-    () => entries.filter((entry) => entry.type === 'file'),
-    [entries],
+  const temporaryChatSessions = useMemo(
+    () =>
+      chatSessions
+        .filter((session) => isTemporaryProjectId(session.projectId))
+        .sort((a, b) => timestampFromIso(b.updatedAt) - timestampFromIso(a.updatedAt)),
+    [chatSessions],
   );
+  const selectedProjectFiles = useMemo(
+    () => activeWorkspaceScope === 'project' ? entries.filter((entry) => entry.type === 'file') : [],
+    [activeWorkspaceScope, entries],
+  );
+  const activeChatScopeName = chatScope === 'project' && selectedProject ? selectedProject.name : '临时工作目录';
+  const chatModelOptions = useMemo(() => modelsForCapability(aigcHubModels, 'chat'), [aigcHubModels]);
+  const imageModelOptions = useMemo(() => modelsForCapability(aigcHubModels, 'image'), [aigcHubModels]);
+  const handleChatTextSelection = useCallback<ChatMessageTextSelectionHandler>((event, message) => {
+    const selectedText = getSelectedTextFromEvent(event).trim();
+    if (!selectedText) {
+      return;
+    }
+
+    if (event.type === 'contextmenu') {
+      event.preventDefault();
+    }
+    event.stopPropagation();
+    setSidebarContextMenu(null);
+    setChatSessionContextMenu(null);
+    const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
+    const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
+    setSelectedTextContextMenu({
+      x: Math.max(VIEWPORT_EDGE_GAP, menuX),
+      y: Math.max(VIEWPORT_EDGE_GAP, menuY),
+      text: selectedText.slice(0, 2000),
+      source: 'chat',
+      messageId: message.id,
+      role: message.role,
+      label: `${message.role === 'user' ? '你' : '创作助手'}片段`,
+      createdAt: message.createdAt,
+    });
+  }, []);
+
+  function setChatSessions(update: ChatSessionsUpdate) {
+    const nextSessions = typeof update === 'function' ? update(chatSessionsRef.current) : update;
+    chatSessionsRef.current = nextSessions;
+    setChatSessionsState(nextSessions);
+  }
+
+  function switchChatScope(nextScope: ChatScope) {
+    if (nextScope === 'project' && !selectedProjectId) {
+      return;
+    }
+
+    setChatScope(nextScope);
+    setChatSessionView('active');
+    closeReferenceMenu();
+
+    if (nextScope === 'temporary') {
+      setReferencedFiles([]);
+      const stored = readStoredActiveChatSession();
+      const nextSession = pickPreferredChatSession(
+        chatSessionsRef.current.filter((session) => isTemporaryProjectId(session.projectId) && getSessionKind(session) === 'assistant'),
+        stored.temporarySessionId,
+        chatSessionView,
+      );
+      if (nextSession) {
+        setChatSessionView(nextSession.archivedAt ? 'archived' : 'active');
+      }
+      setActiveChatSessionId(nextSession?.id ?? null);
+      if (chatSessionsProjectId !== TEMPORARY_CHAT_SCOPE_ID) {
+        void loadTemporaryChatSessions({ activate: true });
+      }
+      return;
+    }
+
+    const stored = readStoredActiveChatSession();
+    const nextSession = selectedProjectId
+      ? pickPreferredChatSession(
+        chatSessionsRef.current.filter((session) => session.projectId === selectedProjectId && getSessionKind(session) === 'assistant'),
+        stored.projectSessionIds[selectedProjectId] ?? null,
+        chatSessionView,
+      )
+      : null;
+    if (nextSession) {
+      setChatSessionView(nextSession.archivedAt ? 'archived' : 'active');
+    }
+    setActiveChatSessionId(nextSession?.id ?? null);
+    if (selectedProjectId && chatSessionsProjectId !== selectedProjectId) {
+      void loadProjectChatSessions(selectedProjectId);
+    }
+  }
 
   useEffect(() => {
     void loadProjects();
     void loadGlobalEntries();
+    void loadTemporaryChatSessions({ activate: false });
+    void loadAigcHubModels();
   }, []);
+
+  useEffect(() => {
+    writeStoredModel(CHAT_MODEL_STORAGE_KEY, chatModel);
+  }, [chatModel]);
+
+  useEffect(() => {
+    writeStoredModel(IMAGE_MODEL_STORAGE_KEY, imageModel);
+  }, [imageModel]);
 
   useEffect(() => {
     writeStoredChatReadingMode(chatReadingMode);
   }, [chatReadingMode]);
+
+  useEffect(() => {
+    writeStoredThemeMode(themeMode);
+    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.style.colorScheme = themeMode === 'dark' ? 'dark' : 'light';
+  }, [themeMode]);
+
+  useEffect(() => {
+    writeStoredSelectedProjectId(selectedProjectId);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    writeStoredChatScope(chatScope);
+  }, [chatScope]);
+
+  useEffect(() => {
+    writeStoredWorkspaceSelection({
+      activeWorkspaceScope,
+      selectedProjectPath,
+      selectedGlobalPath,
+      selectedTemporaryProjectId,
+      selectedTemporaryPath,
+    });
+  }, [activeWorkspaceScope, selectedGlobalPath, selectedProjectPath, selectedTemporaryPath, selectedTemporaryProjectId]);
+
+  useEffect(() => {
+    writeStoredActiveChatSessionView(chatSessionView);
+  }, [chatSessionView]);
+
+  useEffect(() => {
+    if (!activeChatSessionId) {
+      return;
+    }
+
+    if (chatScope === 'project' && selectedProjectId) {
+      writeStoredProjectActiveChatSession(selectedProjectId, activeChatSessionId);
+      return;
+    }
+
+    if (chatScope === 'temporary') {
+      writeStoredTemporaryActiveChatSession(activeChatSessionId);
+      const session = chatSessions.find((item) => item.id === activeChatSessionId && isTemporaryProjectId(item.projectId));
+      if (session) {
+        writeStoredTemporaryChatSession({ projectId: session.projectId, sessionId: session.id });
+      }
+    }
+  }, [activeChatSessionId, chatScope, chatSessions, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId && chatScope === 'project') {
+      setChatScope('temporary');
+    }
+  }, [chatScope, selectedProjectId]);
+
+  useEffect(() => {
+    if (activeWorkspaceScope === 'project' && !selectedProjectId) {
+      setActiveWorkspaceScope(selectedTemporaryProjectId ? 'temporary' : 'global');
+    }
+  }, [activeWorkspaceScope, selectedProjectId, selectedTemporaryProjectId]);
 
   useEffect(() => {
     if (!createEntryDraft) return;
@@ -276,22 +532,51 @@ function App() {
       return;
     }
 
-    void loadEntries(selectedProjectId, { selectFirstTextFile: true });
+    void loadEntries(selectedProjectId, {
+      keepSelectedPath: selectedProjectPath,
+      revealPath: selectedProjectPath,
+      selectFirstTextFile: true,
+    });
   }, [selectedProjectId]);
 
   useEffect(() => {
+    if (activeWorkspaceScope !== 'temporary' || !selectedTemporaryProjectId) {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(temporaryEntriesByProject, selectedTemporaryProjectId)) {
+      return;
+    }
+
+    void loadTemporaryEntries(selectedTemporaryProjectId, {
+      keepSelectedPath: selectedTemporaryPath,
+      revealPath: selectedTemporaryPath,
+    });
+  }, [activeWorkspaceScope, selectedTemporaryPath, selectedTemporaryProjectId, temporaryEntriesByProject]);
+
+  useEffect(() => {
     if (!selectedProjectId) {
-      setChatSessionsProjectId(null);
       setReferencedFiles([]);
+      setReferencedSnippets([]);
       closeReferenceMenu();
       return;
     }
 
-    void loadProjectChatSessions(selectedProjectId);
-  }, [selectedProjectId]);
+    if (chatMode === 'assistant' && chatScope === 'project' && chatSessionsProjectId !== selectedProjectId) {
+      void loadProjectChatSessions(selectedProjectId);
+    }
+  }, [chatMode, chatScope, chatSessionsProjectId, selectedProjectId]);
 
   useEffect(() => {
-    if (!selectedProjectId || chatSessionsProjectId !== selectedProjectId) {
+    if (chatScope !== 'temporary' || chatSessionsProjectId === TEMPORARY_CHAT_SCOPE_ID) {
+      return;
+    }
+
+    void loadTemporaryChatSessions({ activate: true });
+  }, [chatScope, chatSessionsProjectId]);
+
+  useEffect(() => {
+    if (chatMode !== 'assistant' || chatScope !== 'project' || chatSessionView !== 'active' || !selectedProjectId || chatSessionsProjectId !== selectedProjectId) {
       return;
     }
 
@@ -306,7 +591,7 @@ function App() {
     }
 
     void createAndActivateChatSession(selectedProjectId);
-  }, [chatSessionsProjectId, projectChatSessions, selectedProjectId]);
+  }, [chatMode, chatScope, chatSessionView, chatSessionsProjectId, projectChatSessions, selectedProjectId]);
 
   useEffect(() => {
     if (!selectedEntry || selectedEntry.type !== 'file') {
@@ -334,16 +619,33 @@ function App() {
       return;
     }
 
-    if (selectedProjectId) {
-      void loadFile(selectedProjectId, selectedEntry.path);
+    if (activeProjectWorkspaceId) {
+      void loadFile(activeProjectWorkspaceId, selectedEntry.path);
     }
-  }, [activeWorkspaceScope, selectedProjectId, selectedEntry?.path, selectedEntry?.type]);
+  }, [activeProjectWorkspaceId, activeWorkspaceScope, selectedEntry?.path, selectedEntry?.type]);
 
   useEffect(() => {
     setReferencedFiles([]);
+    setReferencedSnippets([]);
     setPrompt('');
     closeReferenceMenu();
   }, [activeChatSessionId]);
+
+  useEffect(() => {
+    const thread = chatThreadRef.current;
+    if (!thread) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      thread.scrollTop = thread.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    activeChatSession?.id,
+    activeChatSession?.messages.length,
+    activeChatLastMessage?.content,
+  ]);
 
   async function loadProjects() {
     setProjectLoadState('loading');
@@ -357,12 +659,29 @@ function App() {
           return currentId;
         }
 
-        return loadedProjects[0]?.id ?? null;
+        const storedProjectId = readStoredSelectedProjectId();
+        if (storedProjectId && loadedProjects.some((project) => project.id === storedProjectId)) {
+          return storedProjectId;
+        }
+
+        return null;
       });
       setProjectLoadState('idle');
     } catch (error) {
       setProjectLoadState('error');
       setProjectLoadError(errorToMessage(error));
+    }
+  }
+
+  async function loadAigcHubModels() {
+    try {
+      const response = await apiClient.listAigcHubModels();
+      setAigcHubModels(response.models);
+      setAigcHubModelError(response.error ?? null);
+      setChatModel((current) => current || preferredModelId(response.models, 'chat') || response.models[0]?.id || '');
+      setImageModel((current) => current || preferredModelId(response.models, 'image') || response.models[0]?.id || '');
+    } catch (error) {
+      setAigcHubModelError(errorToMessage(error));
     }
   }
 
@@ -382,7 +701,7 @@ function App() {
         setSelectedGlobalPath(loadedEntries.find((entry) => entry.type === 'file' && isSupportedTextFile(entry.path))?.path ?? null);
       }
 
-      setCollapsedGlobalPaths(buildCollapsedDirectoryPaths(loadedEntries, options.revealPath ?? null));
+      setCollapsedGlobalPaths(buildCollapsedDirectoryPaths(loadedEntries, options.revealPath ?? preferredEntry?.path ?? null));
       setGlobalEntriesState('idle');
     } catch (error) {
       setGlobalEntriesState('error');
@@ -398,9 +717,89 @@ function App() {
         ...sessions,
       ]);
       setChatSessionsProjectId(projectId);
+      const stored = readStoredActiveChatSession();
+      const preferredSession = pickPreferredChatSession(sessions, stored.projectSessionIds[projectId] ?? null, chatSessionView);
+      if (preferredSession) {
+        setChatSessionView(preferredSession.archivedAt ? 'archived' : 'active');
+      }
+      setActiveChatSessionId((currentId) => {
+        const currentSession = currentId ? sessions.find((session) => session.id === currentId) : null;
+        if (currentSession && sessionMatchesView(currentSession, chatSessionView)) {
+          return currentSession.id;
+        }
+        return preferredSession?.id ?? null;
+      });
     } catch (error) {
       setRunError(errorToMessage(error));
       setChatSessionsProjectId(projectId);
+    }
+  }
+
+  async function loadTemporaryChatSessions(options: { activate?: boolean } = {}) {
+    try {
+      const existingTemporarySessionIds = new Set(
+        chatSessionsRef.current.filter((session) => isTemporaryProjectId(session.projectId)).map((session) => session.id),
+      );
+      const sessions = await apiClient.listTemporaryChatSessions({ includeArchived: true });
+      setChatSessions((currentSessions) => [
+        ...currentSessions.filter((session) => !isTemporaryProjectId(session.projectId)),
+        ...sessions,
+      ]);
+      setCollapsedTemporarySessionIds((current) => [
+        ...new Set([
+          ...current,
+          ...sessions
+            .filter((session) => !existingTemporarySessionIds.has(session.id))
+            .map((session) => session.id),
+        ]),
+      ]);
+
+      const storedWorkspace = readStoredWorkspaceSelection();
+      const storedTemporary = readStoredTemporaryChatSession();
+      const storedActive = readStoredActiveChatSession();
+      const storedSessionId = storedActive.temporarySessionId ?? storedTemporary?.sessionId ?? null;
+      const modeSessions = sessions.filter((session) => getSessionKind(session) === chatMode);
+      const preferredSession = pickPreferredChatSession(modeSessions, chatMode === 'assistant' ? storedSessionId : null, chatSessionView);
+
+      if (!options.activate) {
+        const latestSession = preferredSession ?? pickPreferredChatSession(modeSessions, null, 'active') ?? pickPreferredChatSession(sessions, null, 'active');
+        if (latestSession) {
+          setTemporaryProjectId(latestSession.projectId);
+        }
+        const selectedTemporarySession = storedWorkspace?.selectedTemporaryProjectId
+          ? sessions.find((session) => session.projectId === storedWorkspace.selectedTemporaryProjectId) ?? null
+          : null;
+        const projectToRestore = selectedTemporarySession?.projectId ?? latestSession?.projectId ?? null;
+        if (activeWorkspaceScope === 'temporary' && projectToRestore) {
+          setSelectedTemporaryProjectId(projectToRestore);
+          void loadTemporaryEntries(projectToRestore, {
+            keepSelectedPath: projectToRestore === storedWorkspace?.selectedTemporaryProjectId ? storedWorkspace.selectedTemporaryPath : null,
+            revealPath: projectToRestore === storedWorkspace?.selectedTemporaryProjectId ? storedWorkspace.selectedTemporaryPath : null,
+          });
+        }
+        return;
+      }
+
+      const activeSession = preferredSession;
+      setChatSessionsProjectId(TEMPORARY_CHAT_SCOPE_ID);
+
+      if (activeSession) {
+        setChatSessionView(activeSession.archivedAt ? 'archived' : 'active');
+        setTemporaryProjectId(activeSession.projectId);
+        setSelectedTemporaryProjectId((currentId) => currentId ?? activeSession.projectId);
+        setActiveChatSessionId(activeSession.id);
+        writeStoredTemporaryChatSession({ projectId: activeSession.projectId, sessionId: activeSession.id });
+        return;
+      }
+
+      setTemporaryProjectId(null);
+      setActiveChatSessionId(null);
+      clearStoredTemporaryChatSession();
+    } catch (error) {
+      setRunError(errorToMessage(error));
+      if (options.activate) {
+        setChatSessionsProjectId(TEMPORARY_CHAT_SCOPE_ID);
+      }
     }
   }
 
@@ -417,7 +816,7 @@ function App() {
   }
 
   async function createProjectFromContext() {
-    const name = window.prompt('新情景剧项目名称', DEFAULT_PROJECT_NAME)?.trim();
+    const name = window.prompt('新改编项目名称', DEFAULT_PROJECT_NAME)?.trim();
     if (!name) return;
     const description = window.prompt('一句话描述题材', DEFAULT_PROJECT_DESCRIPTION)?.trim() || '';
     setIsCreatingProject(true);
@@ -451,12 +850,38 @@ function App() {
 
       setCollapsedDirectoriesByProject((current) => ({
         ...current,
-        [projectId]: buildCollapsedDirectoryPaths(loadedEntries, options.revealPath ?? null),
+        [projectId]: buildCollapsedDirectoryPaths(loadedEntries, options.revealPath ?? preferredEntry?.path ?? null),
       }));
       setEntriesState('idle');
     } catch (error) {
       setEntriesState('error');
       setEntriesError(errorToMessage(error));
+    }
+  }
+
+  async function loadTemporaryEntries(projectId: string, options: { keepSelectedPath?: string | null; revealPath?: string | null } = {}) {
+    setTemporaryEntriesStateByProject((current) => ({ ...current, [projectId]: 'loading' }));
+    setTemporaryEntriesErrorByProject((current) => ({ ...current, [projectId]: null }));
+
+    try {
+      const loadedEntries = await apiClient.listWorkspaceEntries(projectId);
+      setTemporaryEntriesByProject((current) => ({ ...current, [projectId]: loadedEntries }));
+
+      const preferredPath = options.keepSelectedPath ?? (selectedTemporaryProjectId === projectId ? selectedTemporaryPath : null);
+      const preferredEntry = preferredPath ? loadedEntries.find((entry) => entry.path === preferredPath) : null;
+      if (preferredEntry) {
+        setSelectedTemporaryProjectId(projectId);
+        setSelectedTemporaryPath(preferredEntry.path);
+      }
+
+      setCollapsedDirectoriesByTemporaryProject((current) => ({
+        ...current,
+        [projectId]: buildCollapsedDirectoryPaths(loadedEntries, options.revealPath ?? preferredEntry?.path ?? null),
+      }));
+      setTemporaryEntriesStateByProject((current) => ({ ...current, [projectId]: 'idle' }));
+    } catch (error) {
+      setTemporaryEntriesStateByProject((current) => ({ ...current, [projectId]: 'error' }));
+      setTemporaryEntriesErrorByProject((current) => ({ ...current, [projectId]: errorToMessage(error) }));
     }
   }
 
@@ -515,14 +940,18 @@ function App() {
         return;
       }
 
-      if (!selectedProjectId) {
+      if (!activeProjectWorkspaceId) {
         return;
       }
 
-      const savedFile = await apiClient.writeWorkspaceFile(selectedProjectId, selectedPath, fileContent);
+      const savedFile = await apiClient.writeWorkspaceFile(activeProjectWorkspaceId, selectedPath, fileContent);
       setLastSavedContent(savedFile.content);
       setSaveState('saved');
-      await loadEntries(selectedProjectId, { keepSelectedPath: selectedPath, revealPath: selectedPath });
+      if (activeWorkspaceScope === 'temporary') {
+        await loadTemporaryEntries(activeProjectWorkspaceId, { keepSelectedPath: selectedPath, revealPath: selectedPath });
+      } else {
+        await loadEntries(activeProjectWorkspaceId, { keepSelectedPath: selectedPath, revealPath: selectedPath });
+      }
     } catch (error) {
       setSaveState('error');
       setSaveError(errorToMessage(error));
@@ -562,7 +991,12 @@ function App() {
         await apiClient.createFile(draft.projectId, entryPath, `# ${entryTitleFromPath(entryPath)}\n`);
       }
       setCreateEntryDraft(null);
-      await loadEntries(draft.projectId, { keepSelectedPath: entryPath, revealPath: entryPath });
+      if (draft.workspaceScope === 'temporary') {
+        setSelectedTemporaryProjectId(draft.projectId);
+        await loadTemporaryEntries(draft.projectId, { keepSelectedPath: entryPath, revealPath: entryPath });
+      } else {
+        await loadEntries(draft.projectId, { keepSelectedPath: entryPath, revealPath: entryPath });
+      }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     }
@@ -579,16 +1013,21 @@ function App() {
         return;
       }
 
-      if (!selectedProjectId) return;
-      const moved = await apiClient.moveEntry(selectedProjectId, selectedPath, targetPath.trim());
-      await loadEntries(selectedProjectId, { keepSelectedPath: moved.path, revealPath: moved.path });
-      setSelectedProjectPath(moved.path);
+      if (!activeProjectWorkspaceId) return;
+      const moved = await apiClient.moveEntry(activeProjectWorkspaceId, selectedPath, targetPath.trim());
+      if (activeWorkspaceScope === 'temporary') {
+        await loadTemporaryEntries(activeProjectWorkspaceId, { keepSelectedPath: moved.path, revealPath: moved.path });
+        setSelectedTemporaryPath(moved.path);
+      } else {
+        await loadEntries(activeProjectWorkspaceId, { keepSelectedPath: moved.path, revealPath: moved.path });
+        setSelectedProjectPath(moved.path);
+      }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     }
   }
 
-  async function moveEntryToDirectory(entry: DragEntryDraft, target: { workspaceScope: 'global' | 'project'; projectId: string | null; parentPath: string }) {
+  async function moveEntryToDirectory(entry: DragEntryDraft, target: WorkspaceTarget) {
     if (entry.workspaceScope !== target.workspaceScope || entry.projectId !== target.projectId) {
       setQuickActionError('只能在同一个工作区内移动文件。');
       return;
@@ -615,8 +1054,14 @@ function App() {
 
       if (!entry.projectId) return;
       const moved = await apiClient.moveEntry(entry.projectId, entry.entryPath, targetPath);
-      await loadEntries(entry.projectId, { keepSelectedPath: moved.path, revealPath: moved.path });
-      setSelectedProjectPath(moved.path);
+      if (entry.workspaceScope === 'temporary') {
+        await loadTemporaryEntries(entry.projectId, { keepSelectedPath: moved.path, revealPath: moved.path });
+        setSelectedTemporaryProjectId(entry.projectId);
+        setSelectedTemporaryPath(moved.path);
+      } else {
+        await loadEntries(entry.projectId, { keepSelectedPath: moved.path, revealPath: moved.path });
+        setSelectedProjectPath(moved.path);
+      }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     }
@@ -648,8 +1093,14 @@ function App() {
       if (!draft.projectId) return;
       const moved = await apiClient.moveEntry(draft.projectId, draft.entryPath, targetPath);
       setRenameEntryDraft(null);
-      await loadEntries(draft.projectId, { keepSelectedPath: moved.path, revealPath: moved.path });
-      setSelectedProjectPath(moved.path);
+      if (draft.workspaceScope === 'temporary') {
+        await loadTemporaryEntries(draft.projectId, { keepSelectedPath: moved.path, revealPath: moved.path });
+        setSelectedTemporaryProjectId(draft.projectId);
+        setSelectedTemporaryPath(moved.path);
+      } else {
+        await loadEntries(draft.projectId, { keepSelectedPath: moved.path, revealPath: moved.path });
+        setSelectedProjectPath(moved.path);
+      }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     }
@@ -666,10 +1117,15 @@ function App() {
         return;
       }
 
-      if (!selectedProjectId) return;
-      await apiClient.deleteEntry(selectedProjectId, selectedPath);
-      setSelectedProjectPath(null);
-      await loadEntries(selectedProjectId, { selectFirstTextFile: true });
+      if (!activeProjectWorkspaceId) return;
+      await apiClient.deleteEntry(activeProjectWorkspaceId, selectedPath);
+      if (activeWorkspaceScope === 'temporary') {
+        setSelectedTemporaryPath(null);
+        await loadTemporaryEntries(activeProjectWorkspaceId);
+      } else {
+        setSelectedProjectPath(null);
+        await loadEntries(activeProjectWorkspaceId, { selectFirstTextFile: true });
+      }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     }
@@ -677,7 +1133,9 @@ function App() {
 
   function resolveUploadTarget(context: SidebarContextMenu | null = null) {
     const workspaceScope = context?.workspaceScope ?? activeWorkspaceScope;
-    const projectId = workspaceScope === 'global' ? null : context?.projectId ?? selectedProjectId;
+    const projectId = workspaceScope === 'global'
+      ? null
+      : context?.projectId ?? (workspaceScope === 'temporary' ? selectedTemporaryProjectId : selectedProjectId);
     const contextPath = context?.entryPath ?? selectedPath;
     const contextType = context?.entryPath ? context.entryType : selectedEntry?.type ?? null;
     const parentPath = contextType === 'directory'
@@ -692,8 +1150,11 @@ function App() {
     const target = resolveUploadTarget(context);
     setUploadTarget(target);
     setActiveWorkspaceScope(target.workspaceScope);
-    if (target.projectId) {
+    if (target.workspaceScope === 'project' && target.projectId) {
       setSelectedProjectId(target.projectId);
+    }
+    if (target.workspaceScope === 'temporary' && target.projectId) {
+      setSelectedTemporaryProjectId(target.projectId);
     }
     fileUploadRef.current?.click();
   }
@@ -721,8 +1182,14 @@ function App() {
         contentBase64,
         mimeType: file.type || undefined,
       });
-      await loadEntries(target.projectId, { keepSelectedPath: asset.path, revealPath: asset.path });
-      setSelectedProjectPath(asset.path);
+      if (target.workspaceScope === 'temporary') {
+        await loadTemporaryEntries(target.projectId, { keepSelectedPath: asset.path, revealPath: asset.path });
+        setSelectedTemporaryProjectId(target.projectId);
+        setSelectedTemporaryPath(asset.path);
+      } else {
+        await loadEntries(target.projectId, { keepSelectedPath: asset.path, revealPath: asset.path });
+        setSelectedProjectPath(asset.path);
+      }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     } finally {
@@ -741,6 +1208,9 @@ function App() {
   }
 
   async function toggleSkill(skill: TheaterSkill) {
+    if (skill.mutable === false) {
+      return;
+    }
     const updated = await apiClient.updateSkill(skill.slug, { enabled: !skill.enabled });
     setSkills((current) => current.map((item) => item.slug === updated.slug ? updated : item));
   }
@@ -785,6 +1255,11 @@ function App() {
   }
 
   function updateReferenceMenu(nextPrompt: string, caret: number) {
+    if (chatScope !== 'project' || !selectedProjectId) {
+      closeReferenceMenu();
+      return;
+    }
+
     const match = getActiveReferenceQuery(nextPrompt, caret);
     if (!match) {
       closeReferenceMenu();
@@ -824,6 +1299,27 @@ function App() {
     setReferencedFiles((current) => current.filter((item) => item.path !== path));
   }
 
+  function removeReferencedSnippet(id: string) {
+    setReferencedSnippets((current) => current.filter((item) => item.id !== id));
+  }
+
+  async function handleImageReferenceFiles(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const imageFiles = Array.from(files).filter((file) => /^image\/(png|jpe?g|webp)$/i.test(file.type));
+    const drafts = await Promise.all(imageFiles.map(readImageReferenceDraft));
+    setImageReferenceDrafts((current) => [...current, ...drafts].slice(0, 6));
+    if (imageReferenceInputRef.current) {
+      imageReferenceInputRef.current.value = '';
+    }
+  }
+
+  function removeImageReferenceDraft(id: string) {
+    setImageReferenceDrafts((current) => current.filter((draft) => draft.id !== id));
+  }
+
   async function submitPrompt() {
     const messageText = prompt.trim();
 
@@ -836,57 +1332,76 @@ function App() {
       return;
     }
 
+    if (isImageGenerationPrompt(messageText)) {
+      await submitAssistantImagePrompt(session, messageText);
+      return;
+    }
+
     const runProjectId = session.projectId;
 
-    const attachedReferences = [...referencedFiles];
-    const userMessage = createChatMessage('user', messageText, { referencedFiles: attachedReferences });
+    const attachedReferences = chatScope === 'project' ? [...referencedFiles] : [];
+    const attachedSnippets = [...referencedSnippets];
+    const userMessage = createChatMessage('user', messageText, { referencedFiles: attachedReferences, referencedSnippets: attachedSnippets });
     appendMessageToSession(session.id, userMessage);
     setPrompt('');
     setReferencedFiles([]);
+    setReferencedSnippets([]);
     closeReferenceMenu();
     setRunState('running');
     setRunError(null);
     setCurrentRun(null);
 
     try {
-      const response = await apiClient.createMockRun({
+      const response = await apiClient.createRun({
         projectId: runProjectId,
         sessionId: session.id,
         codexThreadId: session.codexThreadId ?? undefined,
         prompt: messageText,
+        model: chatModel || undefined,
         referencedFiles: attachedReferences,
+        referencedSnippets: attachedSnippets,
       });
       setCurrentRun(response.run);
 
       if (response.events) {
         const endEvent = response.events.find((event): event is Extract<RunEvent, { type: 'run.end' }> => event.type === 'run.end');
-        setRunState(endEvent?.status === 'error' || response.run.status === 'error' ? 'error' : 'success');
+        const messageStatus = endEvent?.status === 'error' || response.run.status === 'error' ? 'error' : 'success';
+        setRunState(messageStatus);
         appendMessageToSession(
           session.id,
           createChatMessage('assistant', assistantMessageFromEvents(response.events), {
             events: response.events,
             referencedFiles: response.run.referencedFiles,
-            status: 'success',
+            referencedSnippets: response.run.referencedSnippets ?? [],
+            streamEvents: streamEventsFromRunEvents(response.events),
+            status: messageStatus,
           }),
         );
-        if (selectedProjectId === runProjectId) {
+        if (isTemporaryProjectId(runProjectId)) {
+          await loadTemporaryEntries(runProjectId, {
+            keepSelectedPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+            revealPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+          });
+        } else if (selectedProjectId === runProjectId) {
           await refreshWorkspaceAfterRun(runProjectId);
         }
       } else {
         const assistantMessage = createChatMessage('assistant', '', {
           referencedFiles: response.run.referencedFiles,
+          referencedSnippets: response.run.referencedSnippets ?? [],
           status: 'running',
         });
         appendMessageToSession(session.id, assistantMessage);
         apiClient.streamRunEvents(response.run.id, {
-          onEvent: (event) => handleRunStreamEvent(session.id, assistantMessage.id, event),
+          onEvent: (event) => handleRunStreamEvent(session.id, assistantMessage.id, runProjectId, event),
           onError: (error) => {
+            const message = userFacingRunError(error);
             setRunState('error');
-            setRunError(error.message);
+            setRunError(message);
             updateMessageInSession(session.id, assistantMessage.id, (message) => ({
               ...message,
               status: 'error',
-              content: message.content || `运行失败：${error.message}`,
+              content: message.content || `运行失败：${userFacingRunError(error)}`,
             }));
           },
         });
@@ -896,26 +1411,85 @@ function App() {
       setRunError(errorToMessage(error));
       appendMessageToSession(
         session.id,
-        createChatMessage('assistant', `运行失败：${errorToMessage(error)}`, { referencedFiles: attachedReferences }),
+        createChatMessage('assistant', `运行失败：${errorToMessage(error)}`, {
+          referencedFiles: attachedReferences,
+          referencedSnippets: attachedSnippets,
+        }),
       );
     }
   }
 
+  async function submitAssistantImagePrompt(session: ChatSession, messageText: string) {
+    const pendingUserMessage = createChatMessage('user', messageText, {
+      referencedFiles: chatScope === 'project' ? [...referencedFiles] : [],
+      referencedSnippets: [...referencedSnippets],
+    });
+    const pendingAssistantMessage = createChatMessage('assistant', '正在生成图片...', { status: 'running' });
+    appendDraftMessagesToSession(session.id, [pendingUserMessage, pendingAssistantMessage]);
+    setPrompt('');
+    setReferencedFiles([]);
+    setReferencedSnippets([]);
+    closeReferenceMenu();
+    setRunState('running');
+    setRunError(null);
+    setCurrentRun(null);
+
+    try {
+      const response = await apiClient.createImageGeneration({
+        sessionId: session.id,
+        prompt: messageText,
+        model: imageModel || undefined,
+        aspectRatio: imageAspectRatio,
+        thinkingLevel: imageThinkingLevel === 'default' ? undefined : imageThinkingLevel,
+        count: imageCount,
+        referenceImages: imageReferenceDrafts.map(({ name, mimeType, contentBase64 }) => ({ name, mimeType, contentBase64 })),
+      });
+      setImageReferenceDrafts([]);
+
+      setChatSessions((currentSessions) => [response.session, ...currentSessions.filter((current) => current.id !== response.session.id)]);
+      setActiveChatSessionId(response.session.id);
+      setRunState('success');
+      setRunError(null);
+
+      const generatedPath = response.assistantMessage.attachments?.[0]?.path ?? null;
+      if (isTemporaryProjectId(response.session.projectId)) {
+        setTemporaryProjectId(response.session.projectId);
+        setSelectedTemporaryProjectId(response.session.projectId);
+        writeStoredTemporaryChatSession({ projectId: response.session.projectId, sessionId: response.session.id });
+        await loadTemporaryEntries(response.session.projectId, {
+          keepSelectedPath: selectedTemporaryProjectId === response.session.projectId ? selectedTemporaryPath : null,
+          revealPath: generatedPath,
+        });
+      } else if (selectedProjectId === response.session.projectId) {
+        await loadEntries(response.session.projectId, {
+          keepSelectedPath: selectedProjectPath,
+          revealPath: generatedPath,
+        });
+      }
+    } catch (error) {
+      const message = errorToMessage(error);
+      setRunState('error');
+      setRunError(message);
+      markLatestRunningAssistantMessage(session.id, `图片生成失败：${message}`);
+    }
+  }
+
   async function ensureAssistantChatSession(): Promise<ChatSession | null> {
-    if (activeChatSession && activeChatSession.projectId === activeChatProjectId) {
+    if (activeChatSession && isSessionInActiveChatScope(activeChatSession, chatScope, selectedProjectId) && getSessionKind(activeChatSession) === 'assistant') {
       return activeChatSession;
     }
 
     try {
-      const session = selectedProjectId
+      const session = chatScope === 'project' && selectedProjectId
         ? await apiClient.createChatSession(selectedProjectId)
-        : temporaryProjectId
-          ? await apiClient.createChatSession(temporaryProjectId)
-          : await apiClient.createTemporaryChatSession();
+        : await apiClient.createTemporaryChatSession();
 
-      if (!selectedProjectId) {
+      if (chatScope === 'temporary') {
         setTemporaryProjectId(session.projectId);
-        setChatSessionsProjectId(session.projectId);
+        setSelectedTemporaryProjectId(session.projectId);
+        setChatSessionsProjectId(TEMPORARY_CHAT_SCOPE_ID);
+        writeStoredTemporaryChatSession({ projectId: session.projectId, sessionId: session.id });
+        setCollapsedTemporarySessionIds((current) => current.includes(session.id) ? current : [session.id, ...current]);
       }
 
       setChatSessions((currentSessions) => [session, ...currentSessions.filter((current) => current.id !== session.id)]);
@@ -935,7 +1509,7 @@ function App() {
     }
   }
 
-  function handleRunStreamEvent(sessionId: string, messageId: string, event: StreamEvent) {
+  function handleRunStreamEvent(sessionId: string, messageId: string, runProjectId: string, event: StreamEvent) {
     if (event.type === 'thread.started') {
       setChatSessions((currentSessions) =>
         currentSessions.map((session) =>
@@ -953,7 +1527,7 @@ function App() {
       const content = event.type === 'text.delta'
         ? message.content + event.delta
         : event.type === 'run.end' && event.status === 'error' && !message.content
-          ? `运行失败：${event.errorMessage ?? '未知错误'}`
+          ? `运行失败：${userFacingRunError(event.errorMessage)}`
           : message.content;
       return {
         ...message,
@@ -966,17 +1540,22 @@ function App() {
     if (event.type === 'run.end') {
       setRunState(event.status === 'success' ? 'success' : 'error');
       if (event.errorMessage) {
-        setRunError(event.errorMessage);
+        setRunError(userFacingRunError(event.errorMessage));
       }
-      if (selectedProjectId) {
-        void refreshWorkspaceAfterRun(selectedProjectId);
+      if (isTemporaryProjectId(runProjectId)) {
+        void loadTemporaryEntries(runProjectId, {
+          keepSelectedPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+          revealPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+        });
+      } else if (selectedProjectId === runProjectId) {
+        void refreshWorkspaceAfterRun(runProjectId);
       }
     }
   }
 
   function openSidebarContextMenu(
     event: React.MouseEvent,
-    payload: { workspaceScope?: 'global' | 'project'; projectId?: string | null; entry?: WorkspaceEntry | null } = {},
+    payload: { workspaceScope?: WorkspaceScope; projectId?: string | null; entry?: WorkspaceEntry | null } = {},
   ) {
     event.preventDefault();
     event.stopPropagation();
@@ -984,12 +1563,17 @@ function App() {
     closeSelectedTextContextMenu();
     const workspaceScope = payload.workspaceScope ?? 'project';
     setActiveWorkspaceScope(workspaceScope);
-    if (payload.projectId) {
+    if (workspaceScope === 'project' && payload.projectId) {
       setSelectedProjectId(payload.projectId);
+    }
+    if (workspaceScope === 'temporary' && payload.projectId) {
+      setSelectedTemporaryProjectId(payload.projectId);
     }
     if (payload.entry) {
       if (workspaceScope === 'global') {
         setSelectedGlobalPath(payload.entry.path);
+      } else if (workspaceScope === 'temporary') {
+        setSelectedTemporaryPath(payload.entry.path);
       } else {
         setSelectedProjectPath(payload.entry.path);
       }
@@ -1000,7 +1584,7 @@ function App() {
       x: Math.max(VIEWPORT_EDGE_GAP, menuX),
       workspaceScope,
       y: Math.max(VIEWPORT_EDGE_GAP, menuY),
-      projectId: payload.projectId ?? selectedProjectId,
+      projectId: payload.projectId ?? (workspaceScope === 'temporary' ? selectedTemporaryProjectId : selectedProjectId),
       entryPath: payload.entry?.path ?? null,
       entryType: payload.entry?.type ?? null,
     });
@@ -1013,6 +1597,7 @@ function App() {
   function openChatSessionContextMenu(event: React.MouseEvent, sessionId: string) {
     event.preventDefault();
     event.stopPropagation();
+    suppressNextShellClickRef.current = true;
     closeSidebarContextMenu();
     closeSelectedTextContextMenu();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
@@ -1045,6 +1630,7 @@ function App() {
       x: Math.max(VIEWPORT_EDGE_GAP, menuX),
       y: Math.max(VIEWPORT_EDGE_GAP, menuY),
       text: selectedText.slice(0, 4000),
+      source: 'file',
       sourcePath: selectedPath,
     });
   }
@@ -1055,20 +1641,35 @@ function App() {
 
   function quoteSelectedTextToComposer() {
     if (!selectedTextContextMenu) return;
-    const sourcePath = selectedTextContextMenu.sourcePath;
-    const label = basename(sourcePath);
-    const quote = selectedTextContextMenu.text
-      .split('\n')
-      .map((line) => `> ${line}`)
-      .join('\n');
-    const insertion = [`引用 @${label}：`, quote].join('\n');
-    const separator = prompt.trim() ? '\n\n' : '';
-    setPrompt((current) => `${current}${separator}${insertion}`);
-    setReferencedFiles((current) =>
-      current.some((item) => item.path === sourcePath)
-        ? current
-        : [...current, { path: sourcePath, label }],
-    );
+
+    if (selectedTextContextMenu.source === 'file') {
+      const sourcePath = selectedTextContextMenu.sourcePath;
+      const label = basename(sourcePath);
+      const quote = selectedTextContextMenu.text
+        .split('\n')
+        .map((line) => `> ${line}`)
+        .join('\n');
+      const insertion = [`引用 @${label}：`, quote].join('\n');
+      const separator = prompt.trim() ? '\n\n' : '';
+      setPrompt((current) => `${current}${separator}${insertion}`);
+      setReferencedFiles((current) =>
+        current.some((item) => item.path === sourcePath)
+          ? current
+          : [...current, { path: sourcePath, label }],
+      );
+    } else {
+      const snippet: ReferencedChatSnippet = {
+        id: createSnippetReferenceId(selectedTextContextMenu),
+        messageId: selectedTextContextMenu.messageId,
+        role: selectedTextContextMenu.role,
+        label: selectedTextContextMenu.label,
+        text: selectedTextContextMenu.text,
+        createdAt: selectedTextContextMenu.createdAt,
+      };
+      setReferencedSnippets((current) =>
+        current.some((item) => item.id === snippet.id) ? current : [...current, snippet],
+      );
+    }
     closeSelectedTextContextMenu();
     closeReferenceMenu();
     window.requestAnimationFrame(() => {
@@ -1076,6 +1677,17 @@ function App() {
       const end = composerRef.current?.value.length ?? 0;
       composerRef.current?.setSelectionRange(end, end);
     });
+  }
+
+  async function copySelectedText() {
+    if (!selectedTextContextMenu) return;
+
+    try {
+      await copyTextToClipboard(selectedTextContextMenu.text);
+      closeSelectedTextContextMenu();
+    } catch (error) {
+      setQuickActionError(errorToMessage(error));
+    }
   }
 
   function toggleDirectory(projectId: string, entryPath: string) {
@@ -1094,32 +1706,52 @@ function App() {
     setCollapsedGlobalPaths((current) => toggleCollapsedPath(current, entryPath));
   }
 
-  function dragTargetKey(workspaceScope: 'global' | 'project', projectId: string | null, parentPath: string): string {
+  function toggleTemporarySession(session: ChatSession) {
+    setSelectedTemporaryProjectId(session.projectId);
+    setCollapsedTemporarySessionIds((current) => toggleCollapsedPath(current, session.id));
+    if (!temporaryEntriesByProject[session.projectId]) {
+      void loadTemporaryEntries(session.projectId);
+    }
+  }
+
+  function toggleTemporaryDirectory(projectId: string, entryPath: string) {
+    setCollapsedDirectoriesByTemporaryProject((current) => {
+      const collapsed = new Set(current[projectId] ?? []);
+      if (collapsed.has(entryPath)) {
+        collapsed.delete(entryPath);
+      } else {
+        collapsed.add(entryPath);
+      }
+      return { ...current, [projectId]: [...collapsed] };
+    });
+  }
+
+  function dragTargetKey(workspaceScope: WorkspaceScope, projectId: string | null, parentPath: string): string {
     return `${workspaceScope}:${projectId ?? ''}:${parentPath}`;
   }
 
-  function canDropEntry(target: { workspaceScope: 'global' | 'project'; projectId: string | null; parentPath: string }): boolean {
+  function canDropEntry(target: WorkspaceTarget): boolean {
     if (!dragEntry) return false;
     if (dragEntry.workspaceScope !== target.workspaceScope || dragEntry.projectId !== target.projectId) return false;
     if (dragEntry.entryType === 'directory' && (target.parentPath === dragEntry.entryPath || target.parentPath.startsWith(`${dragEntry.entryPath}/`))) return false;
     return joinWorkspacePath(target.parentPath, basename(dragEntry.entryPath)) !== dragEntry.entryPath;
   }
 
-  function handleEntryDragStart(event: ReactDragEvent, workspaceScope: 'global' | 'project', projectId: string | null, entry: WorkspaceEntry) {
+  function handleEntryDragStart(event: ReactDragEvent, workspaceScope: WorkspaceScope, projectId: string | null, entry: WorkspaceEntry) {
     const dragged: DragEntryDraft = { workspaceScope, projectId, entryPath: entry.path, entryType: entry.type };
     setDragEntry(dragged);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('application/x-viwork-entry', JSON.stringify(dragged));
   }
 
-  function handleDropTargetDragOver(event: ReactDragEvent, target: { workspaceScope: 'global' | 'project'; projectId: string | null; parentPath: string }) {
+  function handleDropTargetDragOver(event: ReactDragEvent, target: WorkspaceTarget) {
     if (!canDropEntry(target)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     setDragOverTargetKey(dragTargetKey(target.workspaceScope, target.projectId, target.parentPath));
   }
 
-  async function handleDropOnDirectory(event: ReactDragEvent, target: { workspaceScope: 'global' | 'project'; projectId: string | null; parentPath: string }) {
+  async function handleDropOnDirectory(event: ReactDragEvent, target: WorkspaceTarget) {
     event.preventDefault();
     const droppedEntry = dragEntry;
     setDragEntry(null);
@@ -1128,7 +1760,7 @@ function App() {
     await moveEntryToDirectory(droppedEntry, target);
   }
 
-  function dropTargetClass(workspaceScope: 'global' | 'project', projectId: string | null, parentPath: string): string {
+  function dropTargetClass(workspaceScope: WorkspaceScope, projectId: string | null, parentPath: string): string {
     return dragOverTargetKey === dragTargetKey(workspaceScope, projectId, parentPath) ? ' drag-over' : '';
   }
 
@@ -1166,11 +1798,13 @@ function App() {
   }
 
   function workspaceGridColumns() {
-    if (collapsedPanels.workspace) {
-      return `0 0 minmax(520px, 1fr) 8px ${panelWidths.chat}px`;
-    }
-
-    return `${panelWidths.workspace}px 8px minmax(420px, 1fr) 8px ${panelWidths.chat}px`;
+    return [
+      collapsedPanels.workspace ? '0' : `${panelWidths.workspace}px`,
+      collapsedPanels.workspace || collapsedPanels.editor ? '0' : '8px',
+      collapsedPanels.editor ? '0' : 'minmax(420px, 1fr)',
+      collapsedPanels.editor || collapsedPanels.chat ? '0' : '8px',
+      collapsedPanels.chat ? '0' : collapsedPanels.editor ? 'minmax(320px, 1fr)' : `${panelWidths.chat}px`,
+    ].join(' ');
   }
 
   function openDirectoryForDraft(draft: CreateEntryDraft) {
@@ -1183,6 +1817,14 @@ function App() {
 
     const projectId = draft.projectId;
     if (!projectId) return;
+    if (draft.workspaceScope === 'temporary') {
+      setCollapsedDirectoriesByTemporaryProject((current) => ({
+        ...current,
+        [projectId]: (current[projectId] ?? []).filter((directoryPath) => directoryPath !== draft.parentPath),
+      }));
+      return;
+    }
+
     setCollapsedDirectoriesByProject((current) => ({
       ...current,
       [projectId]: (current[projectId] ?? []).filter((directoryPath) => directoryPath !== draft.parentPath),
@@ -1191,7 +1833,9 @@ function App() {
 
   function startCreateEntry(kind: CreateEntryDraft['kind'], context: SidebarContextMenu | null) {
     const workspaceScope = context?.workspaceScope ?? 'project';
-    const projectId = workspaceScope === 'global' ? null : context?.projectId ?? selectedProjectId;
+    const projectId = workspaceScope === 'global'
+      ? null
+      : context?.projectId ?? (workspaceScope === 'temporary' ? selectedTemporaryProjectId : selectedProjectId);
     const parentPath = context?.entryType === 'directory'
       ? context.entryPath ?? ''
       : context?.entryPath
@@ -1206,8 +1850,11 @@ function App() {
     };
 
     setActiveWorkspaceScope(workspaceScope);
-    if (projectId) {
+    if (workspaceScope === 'project' && projectId) {
       setSelectedProjectId(projectId);
+    }
+    if (workspaceScope === 'temporary' && projectId) {
+      setSelectedTemporaryProjectId(projectId);
     }
     setCreateEntryDraft(draft);
     setRenameEntryDraft(null);
@@ -1217,13 +1864,20 @@ function App() {
   function startRenameEntry(context: SidebarContextMenu | null) {
     if (!context?.entryPath) return;
     const workspaceScope = context.workspaceScope;
-    const projectId = workspaceScope === 'global' ? null : context.projectId ?? selectedProjectId;
+    const projectId = workspaceScope === 'global'
+      ? null
+      : context.projectId ?? (workspaceScope === 'temporary' ? selectedTemporaryProjectId : selectedProjectId);
     setActiveWorkspaceScope(workspaceScope);
-    if (projectId) {
+    if (workspaceScope === 'project' && projectId) {
       setSelectedProjectId(projectId);
+    }
+    if (workspaceScope === 'temporary' && projectId) {
+      setSelectedTemporaryProjectId(projectId);
     }
     if (workspaceScope === 'global') {
       setSelectedGlobalPath(context.entryPath);
+    } else if (workspaceScope === 'temporary') {
+      setSelectedTemporaryPath(context.entryPath);
     } else {
       setSelectedProjectPath(context.entryPath);
     }
@@ -1246,8 +1900,11 @@ function App() {
       return;
     }
 
-    if (context?.projectId && context.projectId !== selectedProjectId) {
+    if (context?.workspaceScope === 'project' && context.projectId && context.projectId !== selectedProjectId) {
       setSelectedProjectId(context.projectId);
+    }
+    if (context?.workspaceScope === 'temporary' && context.projectId && context.projectId !== selectedTemporaryProjectId) {
+      setSelectedTemporaryProjectId(context.projectId);
     }
     setActiveWorkspaceScope(context?.workspaceScope ?? 'project');
 
@@ -1274,6 +1931,9 @@ function App() {
     if (action === 'move' && context?.entryPath) {
       if (context.workspaceScope === 'global') {
         setSelectedGlobalPath(context.entryPath);
+      } else if (context.workspaceScope === 'temporary') {
+        setSelectedTemporaryProjectId(context.projectId);
+        setSelectedTemporaryPath(context.entryPath);
       } else {
         setSelectedProjectPath(context.entryPath);
       }
@@ -1287,6 +1947,9 @@ function App() {
     if (action === 'delete' && context?.entryPath) {
       if (context.workspaceScope === 'global') {
         setSelectedGlobalPath(context.entryPath);
+      } else if (context.workspaceScope === 'temporary') {
+        setSelectedTemporaryProjectId(context.projectId);
+        setSelectedTemporaryPath(context.entryPath);
       } else {
         setSelectedProjectPath(context.entryPath);
       }
@@ -1296,7 +1959,7 @@ function App() {
     }
   }
 
-  function renderCreateEntryDraft(workspaceScope: 'global' | 'project', projectId: string | null, parentPath: string, depth: number) {
+  function renderCreateEntryDraft(workspaceScope: WorkspaceScope, projectId: string | null, parentPath: string, depth: number) {
     const draft = createEntryDraft;
     if (!draft || draft.workspaceScope !== workspaceScope || draft.projectId !== projectId || draft.parentPath !== parentPath) {
       return null;
@@ -1341,7 +2004,7 @@ function App() {
     );
   }
 
-  function renderRenameEntryDraft(entry: WorkspaceEntry, workspaceScope: 'global' | 'project', projectId: string | null) {
+  function renderRenameEntryDraft(entry: WorkspaceEntry, workspaceScope: WorkspaceScope, projectId: string | null) {
     const draft = renameEntryDraft;
     if (!draft || draft.workspaceScope !== workspaceScope || draft.projectId !== projectId || draft.entryPath !== entry.path) {
       return null;
@@ -1387,18 +2050,33 @@ function App() {
 
   async function createNewChatSession() {
     let session: ChatSession | null = null;
-    if (selectedProjectId) {
+    if (chatScope === 'project' && selectedProjectId) {
       session = await createAndActivateChatSession(selectedProjectId);
-    } else if (temporaryProjectId) {
-      session = await createAndActivateChatSession(temporaryProjectId);
     } else {
-      session = await ensureAssistantChatSession();
+      try {
+        const created = await apiClient.createTemporaryChatSession();
+        session = created;
+        setChatSessions((currentSessions) => [created, ...currentSessions.filter((current) => current.id !== created.id)]);
+        setActiveChatSessionId(created.id);
+      } catch (error) {
+        setRunError(errorToMessage(error));
+        return;
+      }
     }
 
     if (!session) return;
 
+    if (chatScope === 'temporary') {
+      setTemporaryProjectId(session.projectId);
+      setSelectedTemporaryProjectId(session.projectId);
+      setChatSessionsProjectId(TEMPORARY_CHAT_SCOPE_ID);
+      writeStoredTemporaryChatSession({ projectId: session.projectId, sessionId: session.id });
+      setCollapsedTemporarySessionIds((current) => current.includes(session.id) ? current : [session.id, ...current]);
+    }
     setPrompt('');
     setReferencedFiles([]);
+    setReferencedSnippets([]);
+    setImageReferenceDrafts([]);
     closeReferenceMenu();
     setRunError(null);
     setRunState('idle');
@@ -1408,8 +2086,14 @@ function App() {
   function openChatSession(sessionId: string) {
     closeChatSessionContextMenu();
     setActiveChatSessionId(sessionId);
+    const session = chatSessions.find((item) => item.id === sessionId);
+    if (chatScope === 'temporary' && session) {
+      setSelectedTemporaryProjectId(session.projectId);
+      writeStoredTemporaryChatSession({ projectId: session.projectId, sessionId: session.id });
+    }
     setPrompt('');
     setReferencedFiles([]);
+    setReferencedSnippets([]);
     closeReferenceMenu();
     setRunError(null);
     setRunState('idle');
@@ -1428,6 +2112,7 @@ function App() {
         setActiveChatSessionId(nextSession?.id ?? null);
         setPrompt('');
         setReferencedFiles([]);
+        setReferencedSnippets([]);
         closeReferenceMenu();
         setRunError(null);
         setRunState('idle');
@@ -1471,6 +2156,49 @@ function App() {
     persistChatMessageAppend(sessionId, message);
   }
 
+  function appendDraftMessagesToSession(sessionId: string, messages: ChatMessage[]) {
+    setChatSessions((currentSessions) =>
+      currentSessions.map((session) => {
+        if (session.id !== sessionId) {
+          return session;
+        }
+
+        const firstUserMessage = messages.find((message) => message.role === 'user');
+        const title = session.messages.length === 0 && firstUserMessage ? firstUserMessage.content.slice(0, 24) : session.title;
+        return {
+          ...session,
+          title: title || session.title,
+          updatedAt: messages[messages.length - 1]?.createdAt ?? new Date().toISOString(),
+          messages: [...session.messages, ...messages],
+        };
+      }),
+    );
+  }
+
+  function markLatestRunningAssistantMessage(sessionId: string, content: string) {
+    setChatSessions((currentSessions) =>
+      currentSessions.map((session) => {
+        if (session.id !== sessionId) {
+          return session;
+        }
+
+        const messages = [...session.messages];
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+          const message = messages[index];
+          if (message.role === 'assistant' && message.status === 'running') {
+            messages[index] = { ...message, content, status: 'error' };
+            break;
+          }
+        }
+        return {
+          ...session,
+          updatedAt: new Date().toISOString(),
+          messages,
+        };
+      }),
+    );
+  }
+
   function updateMessageInSession(sessionId: string, messageId: string, update: (message: ChatMessage) => ChatMessage) {
     let updatedMessage: ChatMessage | null = null;
     setChatSessions((currentSessions) =>
@@ -1509,14 +2237,43 @@ function App() {
   }
 
   function persistChatMessageUpdate(sessionId: string, messageId: string, message: ChatMessage) {
+    pendingChatMessageUpdatesRef.current.set(`${sessionId}:${messageId}`, { sessionId, messageId, message });
+    scheduleChatMessageUpdateFlush();
+  }
+
+  function scheduleChatMessageUpdateFlush() {
+    if (chatMessageUpdateFlushScheduledRef.current) {
+      return;
+    }
+
+    chatMessageUpdateFlushScheduledRef.current = true;
     chatMessagePersistQueueRef.current = chatMessagePersistQueueRef.current
       .catch(() => undefined)
-      .then(async () => {
-        await apiClient.updateChatMessage(sessionId, messageId, message);
-      })
+      .then(flushPendingChatMessageUpdates)
       .catch((error) => {
         setRunError(errorToMessage(error));
+      })
+      .finally(() => {
+        chatMessageUpdateFlushScheduledRef.current = false;
+        if (pendingChatMessageUpdatesRef.current.size > 0) {
+          scheduleChatMessageUpdateFlush();
+        }
       });
+  }
+
+  async function flushPendingChatMessageUpdates() {
+    while (pendingChatMessageUpdatesRef.current.size > 0) {
+      const updates = [...pendingChatMessageUpdatesRef.current.values()];
+      pendingChatMessageUpdatesRef.current.clear();
+
+      for (const update of updates) {
+        try {
+          await apiClient.updateChatMessage(update.sessionId, update.messageId, update.message);
+        } catch (error) {
+          setRunError(errorToMessage(error));
+        }
+      }
+    }
   }
 
   function handleComposerChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -1565,6 +2322,10 @@ function App() {
     <div
       className="workspace-shell"
       onClick={() => {
+        if (suppressNextShellClickRef.current) {
+          suppressNextShellClickRef.current = false;
+          return;
+        }
         closeSidebarContextMenu();
         closeChatSessionContextMenu();
         closeSelectedTextContextMenu();
@@ -1576,23 +2337,17 @@ function App() {
           <strong>viwork</strong>
         </div>
         <nav className="toolbar-actions" aria-label="页面工具">
-          <button type="button" className="toolbar-text-button" onClick={() => setActiveToolPanel('skills')}>
-            技能广场
-          </button>
           <button type="button" className="toolbar-text-button" onClick={() => setActiveToolPanel('wechat')}>
             微信接入
           </button>
-          <button type="button" className="toolbar-button active" aria-label="浅色风格" title="浅色风格">
-            ☼
-          </button>
-          <button type="button" className="toolbar-button" aria-label="深色风格" title="深色风格">
-            ◐
-          </button>
-          <button type="button" className="toolbar-button" aria-label="紧凑布局" title="紧凑布局">
-            ⊞
-          </button>
-          <button type="button" className="toolbar-button" aria-label="设置" title="设置">
-            ⚙
+          <button
+            type="button"
+            className="toolbar-text-button toolbar-theme-button"
+            onClick={() => setThemeMode(nextThemeMode(themeMode))}
+            aria-label={`切换主题，当前${themeModeLabel(themeMode)}`}
+            title={`切换主题，当前${themeModeLabel(themeMode)}`}
+          >
+            {themeModeIcon(themeMode)} {themeModeLabel(themeMode)}
           </button>
         </nav>
       </header>
@@ -1612,7 +2367,12 @@ function App() {
       {projectLoadState !== 'loading' ? (
         <main
           ref={workspaceGridRef}
-          className={`workspace-grid ${collapsedPanels.workspace ? 'workspace-grid--workspace-collapsed' : ''}`}
+          className={[
+            'workspace-grid',
+            collapsedPanels.workspace ? 'workspace-grid--workspace-collapsed' : '',
+            collapsedPanels.editor ? 'workspace-grid--editor-collapsed' : '',
+            collapsedPanels.chat ? 'workspace-grid--chat-collapsed' : '',
+          ].filter(Boolean).join(' ')}
           style={{ gridTemplateColumns: workspaceGridColumns() }}
         >
           <aside className="panel sidebar">
@@ -1660,7 +2420,9 @@ function App() {
                     type="button"
                     className={`workspace-section-root${dropTargetClass('global', null, '')}`}
                     title={WORKSPACE_SECTIONS[0].description}
-                    onClick={() => setActiveWorkspaceScope('global')}
+                    onClick={() => {
+                      setActiveWorkspaceScope('global');
+                    }}
                     onDragOver={(event) => handleDropTargetDragOver(event, { workspaceScope: 'global', projectId: null, parentPath: '' })}
                     onDragLeave={() => setDragOverTargetKey(null)}
                     onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'global', projectId: null, parentPath: '' })}
@@ -1732,7 +2494,7 @@ function App() {
                     </span>
                   </button>
                   <div className="project-list">
-                    {projects.length === 0 ? <p className="muted">暂无情景剧项目。</p> : null}
+                    {projects.length === 0 ? <p className="muted">暂无改编项目。</p> : null}
                     {projects.map((project) => {
                       const isSelectedProject = project.id === selectedProjectId;
                       return (
@@ -1743,6 +2505,7 @@ function App() {
                             onClick={() => {
                               setActiveWorkspaceScope('project');
                               setSelectedProjectId(project.id);
+                              setChatScope('project');
                             }}
                             onDragOver={(event) => handleDropTargetDragOver(event, { workspaceScope: 'project', projectId: project.id, parentPath: '' })}
                             onDragLeave={() => setDragOverTargetKey(null)}
@@ -1764,7 +2527,7 @@ function App() {
                                   {renderRenameEntryDraft(entry, 'project', project.id) ?? (
                                     <button
                                       type="button"
-                                      className={`file-node ${entry.type === 'directory' ? `directory-node${dropTargetClass('project', project.id, entry.path)}` : 'document-node'} ${entry.path === selectedPath ? 'selected' : ''}`}
+                                      className={`file-node ${entry.type === 'directory' ? `directory-node${dropTargetClass('project', project.id, entry.path)}` : 'document-node'} ${activeWorkspaceScope === 'project' && entry.path === selectedPath ? 'selected' : ''}`}
                                       draggable
                                       style={{ '--tree-depth': String(pathDepth(entry.path)) } as React.CSSProperties}
                                       onDragStart={(event) => handleEntryDragStart(event, 'project', project.id, entry)}
@@ -1806,6 +2569,110 @@ function App() {
                     })}
                   </div>
                 </div>
+
+                <div className="workspace-section temporary-workspace-section">
+                  <button
+                    type="button"
+                    className="workspace-section-root temporary-workspace-root"
+                    title="临时会话对应的后台工作目录，默认折叠但始终可见"
+                    onClick={() => setTemporaryWorkspaceCollapsed((current) => !current)}
+                    onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'temporary', projectId: selectedTemporaryProjectId })}
+                  >
+                    <span className="node-icon">{temporaryWorkspaceCollapsed ? '▸' : '▾'}</span>
+                    <span className="node-main">
+                      <strong>临时会话工作目录</strong>
+                      <small>{temporaryChatSessions.length} 个临时会话</small>
+                    </span>
+                  </button>
+                  {!temporaryWorkspaceCollapsed ? (
+                    <div className="project-list temporary-session-list">
+                      {temporaryChatSessions.length === 0 ? <p className="muted">暂无临时会话。</p> : null}
+                      {temporaryChatSessions.map((session) => {
+                        const isCollapsed = collapsedTemporarySessionIds.includes(session.id);
+                        const isSelectedTemporaryProject = activeWorkspaceScope === 'temporary' && selectedTemporaryProjectId === session.projectId;
+                        const sessionEntries = temporaryEntriesByProject[session.projectId] ?? [];
+                        const visibleTemporaryEntries = filterVisibleWorkspaceEntries(
+                          sessionEntries,
+                          collapsedDirectoriesByTemporaryProject[session.projectId] ?? [],
+                        );
+                        const entriesState = temporaryEntriesStateByProject[session.projectId] ?? 'idle';
+                        const entriesError = temporaryEntriesErrorByProject[session.projectId] ?? null;
+                        return (
+                          <div key={session.id} className={`project-node temporary-session-node ${isSelectedTemporaryProject ? 'selected' : ''}`}>
+                            <button
+                              type="button"
+                              className={`project-root temporary-session-root${dropTargetClass('temporary', session.projectId, '')}`}
+                              onClick={() => {
+                                setActiveWorkspaceScope('temporary');
+                                setSelectedTemporaryProjectId(session.projectId);
+                                toggleTemporarySession(session);
+                              }}
+                              onDragOver={(event) => handleDropTargetDragOver(event, { workspaceScope: 'temporary', projectId: session.projectId, parentPath: '' })}
+                              onDragLeave={() => setDragOverTargetKey(null)}
+                              onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'temporary', projectId: session.projectId, parentPath: '' })}
+                              onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'temporary', projectId: session.projectId })}
+                              title={session.title}
+                            >
+                              <span className="node-icon">{isCollapsed ? '▸' : '▾'}</span>
+                              <span className="node-main">
+                                <strong>{session.title}</strong>
+                                <small>{session.archivedAt ? '已归档' : `${session.messages.length} 条消息 · ${formatChatTime(session.updatedAt)}`}</small>
+                              </span>
+                            </button>
+                            {!isCollapsed ? (
+                              <div className="file-tree nested-tree">
+                                {entriesState === 'error' ? <p className="inline-error">{entriesError}</p> : null}
+                                {entriesState === 'loading' ? <p className="muted">正在加载临时文件...</p> : null}
+                                {renderCreateEntryDraft('temporary', session.projectId, '', 0)}
+                                {visibleTemporaryEntries.map((entry) => (
+                                  <Fragment key={entry.path}>
+                                    {renderRenameEntryDraft(entry, 'temporary', session.projectId) ?? (
+                                      <button
+                                        type="button"
+                                        className={`file-node ${entry.type === 'directory' ? `directory-node${dropTargetClass('temporary', session.projectId, entry.path)}` : 'document-node'} ${isSelectedTemporaryProject && entry.path === selectedPath ? 'selected' : ''}`}
+                                        draggable
+                                        style={{ '--tree-depth': String(pathDepth(entry.path)) } as React.CSSProperties}
+                                        onDragStart={(event) => handleEntryDragStart(event, 'temporary', session.projectId, entry)}
+                                        onDragEnd={() => {
+                                          setDragEntry(null);
+                                          setDragOverTargetKey(null);
+                                        }}
+                                        onDragOver={entry.type === 'directory' ? (event) => handleDropTargetDragOver(event, { workspaceScope: 'temporary', projectId: session.projectId, parentPath: entry.path }) : undefined}
+                                        onDragLeave={entry.type === 'directory' ? () => setDragOverTargetKey(null) : undefined}
+                                        onDrop={entry.type === 'directory' ? (event) => void handleDropOnDirectory(event, { workspaceScope: 'temporary', projectId: session.projectId, parentPath: entry.path }) : undefined}
+                                        onClick={() => {
+                                          setActiveWorkspaceScope('temporary');
+                                          setSelectedTemporaryProjectId(session.projectId);
+                                          setSelectedTemporaryPath(entry.path);
+                                          if (entry.type === 'directory') {
+                                            toggleTemporaryDirectory(session.projectId, entry.path);
+                                          }
+                                        }}
+                                        onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'temporary', projectId: session.projectId, entry })}
+                                        title={entry.path}
+                                      >
+                                        <span className="file-node-label">
+                                          <span className="file-node-icon">
+                                            {entry.type === 'directory'
+                                              ? (collapsedDirectoriesByTemporaryProject[session.projectId] ?? []).includes(entry.path) ? '▸' : '▾'
+                                              : '•'}
+                                          </span>
+                                          <span>{entry.name}</span>
+                                        </span>
+                                        {entry.type === 'file' ? <small>{formatFileSize(entry.size)}</small> : null}
+                                      </button>
+                                    )}
+                                    {entry.type === 'directory' ? renderCreateEntryDraft('temporary', session.projectId, entry.path, pathDepth(entry.path) + 1) : null}
+                                  </Fragment>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               {quickActionError ? <p className="inline-error">{quickActionError}</p> : null}
             </section>
@@ -1830,6 +2697,15 @@ function App() {
                 <button type="button" disabled={!hasUnsavedChanges || saveState === 'saving'} onClick={() => void saveFile()}>
                   {saveState === 'saving' ? '保存中...' : '保存'}
                 </button>
+                <button
+                  type="button"
+                  className="toolbar-button"
+                  onClick={() => setCollapsedPanels((current) => ({ ...current, editor: true }))}
+                  aria-label="折叠编辑器"
+                  title="折叠编辑器"
+                >
+                  ‹
+                </button>
               </div>
             </div>
 
@@ -1848,8 +2724,8 @@ function App() {
                           if (!selectedPath) return;
                           if (activeWorkspaceScope === 'global') {
                             void loadGlobalFile(selectedPath);
-                          } else if (selectedProjectId) {
-                            void loadFile(selectedProjectId, selectedPath);
+                          } else if (activeProjectWorkspaceId) {
+                            void loadFile(activeProjectWorkspaceId, selectedPath);
                           }
                         }}
                       >
@@ -1859,7 +2735,7 @@ function App() {
                   ) : null}
                   {renderEditorViewer({
                     entry: selectedEntry,
-                    selectedProjectId: selectedProjectId ?? 'global',
+                    selectedProjectId: activeProjectWorkspaceId ?? 'global',
                     fileContent,
                     savedContent: lastSavedContent,
                     fileState,
@@ -1888,14 +2764,18 @@ function App() {
 
           <aside className={`panel session-panel ${chatReadingMode ? 'session-panel--reading' : ''}`}>
             <div className="panel-heading session-heading">
-              <div>
-                <p className="eyebrow">AI Session</p>
-                <h2>创作助手</h2>
+              <div className="session-title-stack">
+                <div className="session-title-line">
+                  <h2>创作助手</h2>
+                  <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
+                    {runStatusLabel(runState, currentRun)}
+                  </span>
+                </div>
+                <span className="session-scope-line" title={activeChatScopeName}>
+                  {activeChatScopeName} · {displayedChatSessions.length} 个会话
+                </span>
               </div>
               <div className="session-heading-actions">
-                <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
-                  {runStatusLabel(runState, currentRun)}
-                </span>
                 <button
                   type="button"
                   className={`toolbar-button text-mode-button ${chatReadingMode ? 'active' : ''}`}
@@ -1908,109 +2788,112 @@ function App() {
                 <button type="button" className="toolbar-button" onClick={createNewChatSession} aria-label="新建会话" title="新建会话">
                   +
                 </button>
+                <button
+                  type="button"
+                  className="toolbar-button"
+                  onClick={() => setCollapsedPanels((current) => ({ ...current, chat: true }))}
+                  aria-label="折叠创作助手"
+                  title="折叠创作助手"
+                >
+                  ›
+                </button>
               </div>
             </div>
 
-            <div className="chat-session-view-toggle" aria-label="会话视图">
-              <button
-                type="button"
-                className={chatSessionView === 'active' ? 'active' : ''}
-                onClick={() => {
-                  setChatSessionView('active');
-                  setActiveChatSessionId(projectChatSessions[0]?.id ?? null);
-                }}
-              >
-                最近
-              </button>
-              <button
-                type="button"
-                className={chatSessionView === 'archived' ? 'active' : ''}
-                onClick={() => {
-                  setChatSessionView('archived');
-                  setActiveChatSessionId(archivedChatSessions[0]?.id ?? null);
-                }}
-              >
-                归档
-              </button>
+            <div className="chat-session-rail">
+              <div className="chat-session-view-toggle" aria-label="会话视图">
+                <button
+                  type="button"
+                  className={chatSessionView === 'active' ? 'active' : ''}
+                  onClick={() => {
+                    setChatSessionView('active');
+                    setActiveChatSessionId(projectChatSessions[0]?.id ?? null);
+                  }}
+                >
+                  最近
+                </button>
+                <button
+                  type="button"
+                  className={chatSessionView === 'archived' ? 'active' : ''}
+                  onClick={() => {
+                    setChatSessionView('archived');
+                    setActiveChatSessionId(archivedChatSessions[0]?.id ?? null);
+                  }}
+                >
+                  归档
+                </button>
+              </div>
+              <section className="chat-session-list" aria-label="历史会话">
+                {displayedChatSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    className={`chat-session-tab ${session.id === activeChatSession?.id ? 'active' : ''}`}
+                    onClick={() => openChatSession(session.id)}
+                    onContextMenu={(event) => openChatSessionContextMenu(event, session.id)}
+                    title={`${session.title} · ${session.messages.length} 条 · ${formatChatTime(session.updatedAt)}`}
+                  >
+                    <span className="chat-session-tab__title">{session.title}</span>
+                    <span className="chat-session-tab__meta">
+                      {session.messages.length} · {formatChatTime(session.updatedAt)}
+                    </span>
+                  </button>
+                ))}
+                {displayedChatSessions.length === 0 ? (
+                  <span className="chat-session-empty">{chatSessionView === 'archived' ? '暂无归档会话' : '暂无最近会话'}</span>
+                ) : null}
+              </section>
+              <div className="chat-context-compact">
+                {chatMode === 'assistant' && selectedProjectId ? (
+                  <button
+                    type="button"
+                    className="chat-scope-switch"
+                    onClick={() => switchChatScope(chatScope === 'project' ? 'temporary' : 'project')}
+                    aria-label={chatScope === 'project' ? '切换到临时工作目录' : '切换到当前项目会话'}
+                    title={chatScope === 'project' ? '切换到临时工作目录' : '切换到当前项目会话'}
+                  >
+                    {chatScope === 'project' ? '临时' : '项目'}
+                  </button>
+                ) : null}
+              </div>
             </div>
 
-            <section className="chat-session-list" aria-label="历史会话">
-              {displayedChatSessions.map((session) => (
-                <button
-                  key={session.id}
-                  type="button"
-                  className={`chat-session-tab ${session.id === activeChatSession?.id ? 'active' : ''}`}
-                  onClick={() => openChatSession(session.id)}
-                  onContextMenu={(event) => openChatSessionContextMenu(event, session.id)}
-                  title={session.title}
-                >
-                  <span className="chat-session-tab__title">{session.title}</span>
-                  <span className="chat-session-tab__meta">
-                    {session.messages.length} 条 · {formatChatTime(session.updatedAt)}
-                  </span>
-                </button>
-              ))}
-              {displayedChatSessions.length === 0 ? (
-                <span className="chat-session-empty">{chatSessionView === 'archived' ? '暂无归档会话' : '暂无最近会话'}</span>
-              ) : null}
-            </section>
-
-            <section className="chat-thread">
+            <section className="chat-thread" ref={chatThreadRef}>
               {activeChatSession?.messages.length ? (
                 activeChatSession.messages.map((message) => (
-                  <article key={message.id} className={`chat-message chat-message--${message.role}`}>
-                    <div className="chat-avatar">{message.role === 'user' ? '我' : 'AI'}</div>
-                    <div className="chat-bubble-wrap">
-                      <div className="chat-meta">
-                        <span>{message.role === 'user' ? '你' : '创作助手'}</span>
-                        <time dateTime={message.createdAt}>{formatChatTime(message.createdAt)}</time>
-                      </div>
-                      {message.referencedFiles.length > 0 ? (
-                        <div className="chat-reference-row">
-                          {message.referencedFiles.map((reference) => (
-                            <span key={`${message.id}-${reference.path}`} className="ctx-chip" title={reference.path}>
-                              @{reference.label}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className={`chat-bubble ${message.role === 'assistant' ? 'chat-bubble--assistant' : 'chat-bubble--user'}`}>
-                        {message.role === 'assistant' ? (
-                          <AssistantStreamBody message={message} />
-                        ) : (
-                          <p>{message.content}</p>
-                        )}
-                      </div>
-                      {message.role === 'assistant' && message.events && message.events.length > 0 ? (
-                        <details className="chat-events">
-                          <summary>执行详情</summary>
-                          <div className="chat-event-list">
-                            {message.events.map((event, index) => (
-                              <div key={`${message.id}-${event.type}-${index}`} className="chat-event-item">
-                                <strong>{event.type}</strong>
-                                <span>{eventSummary(event)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      ) : null}
-                    </div>
-                  </article>
+                  <ChatMessageItem
+                    key={message.id}
+                    message={message}
+                    onTextSelection={handleChatTextSelection}
+                    onOpenAttachment={(attachment) => {
+                      if (isTemporaryProjectId(attachment.projectId)) {
+                        setActiveWorkspaceScope('temporary');
+                        setSelectedTemporaryProjectId(attachment.projectId);
+                        setSelectedTemporaryPath(attachment.path);
+                        void loadTemporaryEntries(attachment.projectId, { keepSelectedPath: attachment.path, revealPath: attachment.path });
+                      } else {
+                        setActiveWorkspaceScope('project');
+                        setSelectedProjectId(attachment.projectId);
+                        setSelectedProjectPath(attachment.path);
+                        void loadEntries(attachment.projectId, { keepSelectedPath: attachment.path, revealPath: attachment.path });
+                      }
+                    }}
+                  />
                 ))
               ) : (
                 <div className="chat-empty">
                   <p>从右侧直接开始和创作助手对话。</p>
                   <p className="muted">
-                    {selectedProjectId
+                    {chatScope === 'project' && selectedProjectId
                       ? '输入 `@` 可以引用当前项目里的剧本、人物设定、分镜或制作文档。'
-                      : '未选择项目时会使用后台临时工作目录，不会出现在项目列表中。'}
+                      : '当前使用后台临时工作目录，不会出现在项目列表中。'}
                   </p>
                 </div>
               )}
             </section>
 
             <section className="composer">
-              {referencedFiles.length > 0 ? (
+              {referencedFiles.length > 0 || referencedSnippets.length > 0 || imageReferenceDrafts.length > 0 ? (
                 <div className="composer__ctx-row" role="list">
                   {referencedFiles.map((reference) => (
                     <span key={reference.path} className="ctx-chip" title={reference.path}>
@@ -2020,8 +2903,82 @@ function App() {
                       </button>
                     </span>
                   ))}
+                  {referencedSnippets.map((snippet) => (
+                    <span key={snippet.id} className="ctx-chip ctx-chip--snippet" title={snippet.text}>
+                      <span className="ctx-chip__label">“{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}”</span>
+                      <button type="button" className="ctx-chip__remove" onClick={() => removeReferencedSnippet(snippet.id)} aria-label={`移除 ${snippet.label}`}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {imageReferenceDrafts.map((draft) => (
+                    <span key={draft.id} className="ctx-chip ctx-chip--image" title={draft.name}>
+                      <span className="ctx-chip__label">图：{draft.name}</span>
+                      <button type="button" className="ctx-chip__remove" onClick={() => removeImageReferenceDraft(draft.id)} aria-label={`移除 ${draft.name}`}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
                 </div>
               ) : null}
+              <div className="image-composer-options">
+                <label>
+                  <span>文本</span>
+                  <select value={chatModel} onChange={(event) => setChatModel(event.target.value)} title={aigcHubModelError ?? '文本模型'}>
+                    {modelOptionsWithSelected(chatModelOptions, chatModel, '').map((model) => (
+                      <option key={model.id || '__default_chat__'} value={model.id}>{modelOptionLabel(model)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>图片</span>
+                  <select value={imageModel} onChange={(event) => setImageModel(event.target.value)} title={aigcHubModelError ?? '图片模型'}>
+                    {modelOptionsWithSelected(imageModelOptions, imageModel, '').map((model) => (
+                      <option key={model.id || '__default_image__'} value={model.id}>{modelOptionLabel(model)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>比例</span>
+                  <select value={imageAspectRatio} onChange={(event) => setImageAspectRatio(event.target.value as GeminiImageAspectRatio)}>
+                    <option value="1:1">1:1</option>
+                    <option value="16:9">16:9</option>
+                    <option value="9:16">9:16</option>
+                    <option value="4:3">4:3</option>
+                    <option value="3:4">3:4</option>
+                  </select>
+                </label>
+                <label>
+                  <span>思考</span>
+                  <select value={imageThinkingLevel} onChange={(event) => setImageThinkingLevel(event.target.value as ImageThinkingLevelOption)}>
+                    <option value="default">默认</option>
+                    <option value="minimal">最小</option>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                  </select>
+                </label>
+                <label>
+                  <span>数量</span>
+                  <select value={imageCount} onChange={(event) => setImageCount(Number(event.target.value))}>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                  </select>
+                </label>
+                <button type="button" className="image-reference-button" onClick={() => imageReferenceInputRef.current?.click()}>
+                  参考图
+                </button>
+                <input
+                  ref={imageReferenceInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  multiple
+                  hidden
+                  onChange={(event) => void handleImageReferenceFiles(event.currentTarget.files)}
+                />
+              </div>
               <div className="composer__main">
                 {referenceSuggestions.length > 0 && referenceQuery ? (
                   <div className="composer__menu" role="listbox" aria-label="引用文件">
@@ -2044,24 +3001,24 @@ function App() {
                 ) : null}
                 <textarea
                   id="ai-prompt"
-	                  ref={composerRef}
-	                  className="composer__textarea"
-	                  value={prompt}
-	                  placeholder={activeChatSessionArchived ? '归档会话只读，恢复后可继续对话' : selectedProjectId ? '描述这一场戏、角色动机或对白要求，输入 @ 引用项目文件' : '直接开始对话，后台会创建临时工作目录'}
-	                  disabled={activeChatSessionArchived}
-	                  onChange={handleComposerChange}
+                  ref={composerRef}
+                  className="composer__textarea"
+                  value={prompt}
+                  placeholder={activeChatSessionArchived ? '归档会话只读，恢复后可继续对话' : chatScope === 'project' && selectedProjectId ? '描述这一场戏、角色动机、对白要求或图片需求，输入 @ 引用项目文件' : '继续临时会话，可直接对话或生成图片'}
+                  disabled={activeChatSessionArchived}
+                  onChange={handleComposerChange}
                   onClick={(event) => updateReferenceMenu(prompt, event.currentTarget.selectionStart ?? prompt.length)}
                   onKeyDown={handleComposerKeyDown}
                 />
                 <div className="composer__toolbar">
                   <div className="composer__left">
-                    <span className="muted">{selectedProject ? selectedProject.name : temporaryProjectId ? '临时工作目录' : '未选择项目'}</span>
+                    <span className="muted">{chatScope === 'project' && selectedProject ? selectedProject.name : temporaryProjectId ? '临时工作目录' : '未选择项目'} · {imageAspectRatio} · {imageReferenceDrafts.length} 张参考图</span>
                   </div>
                   <div className="composer__right">
                     <button
-	                      type="button"
-	                      className="composer__send"
-	                      disabled={activeChatSessionArchived || !prompt.trim() || runState === 'running'}
+                      type="button"
+                      className="composer__send"
+                      disabled={activeChatSessionArchived || !prompt.trim() || runState === 'running'}
                       onClick={() => void submitPrompt()}
                       aria-label="发送"
                       title="发送"
@@ -2076,12 +3033,34 @@ function App() {
           {collapsedPanels.workspace ? (
             <button
               type="button"
-              className="workspace-expand-button"
+              className="panel-expand-button panel-expand-button--workspace"
               onClick={() => setCollapsedPanels((current) => ({ ...current, workspace: false }))}
               aria-label="展开工作区"
               title="展开工作区"
             >
               ›
+            </button>
+          ) : null}
+          {collapsedPanels.editor ? (
+            <button
+              type="button"
+              className="panel-expand-button panel-expand-button--editor"
+              onClick={() => setCollapsedPanels((current) => ({ ...current, editor: false }))}
+              aria-label="展开编辑器"
+              title="展开编辑器"
+            >
+              编辑
+            </button>
+          ) : null}
+          {collapsedPanels.chat ? (
+            <button
+              type="button"
+              className="panel-expand-button panel-expand-button--chat"
+              onClick={() => setCollapsedPanels((current) => ({ ...current, chat: false }))}
+              aria-label="展开创作助手"
+              title="展开创作助手"
+            >
+              AI
             </button>
           ) : null}
         </main>
@@ -2092,8 +3071,8 @@ function App() {
           <section className="modal-panel" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">{activeToolPanel === 'skills' ? 'Skills Plaza' : 'Remote WeChat'}</p>
-                <h2>{activeToolPanel === 'skills' ? '情景剧技能广场' : '远程微信接入'}</h2>
+                <p className="eyebrow">{activeToolPanel === 'skills' ? 'Agent Skills' : 'Remote WeChat'}</p>
+                <h2>{activeToolPanel === 'skills' ? 'Agent 技能' : '远程微信接入'}</h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
             </div>
@@ -2110,9 +3089,14 @@ function App() {
                         <span>{skill.scope === 'system' ? '系统' : '自定义'}</span>
                       </div>
                       <p>{skill.description}</p>
-                      <button type="button" onClick={() => void toggleSkill(skill)}>
-                        {skill.enabled ? '已启用' : '已停用'}
-                      </button>
+                      {skill.location ? <p className="muted">{skill.location}</p> : null}
+                      {skill.mutable === false ? (
+                        <span className="status-pill success">文件技能</span>
+                      ) : (
+                        <button type="button" onClick={() => void toggleSkill(skill)}>
+                          {skill.enabled ? '已启用' : '已停用'}
+                        </button>
+                      )}
                     </article>
                   ))}
                 </div>
@@ -2189,8 +3173,10 @@ function App() {
           className="sidebar-context-menu"
           style={{ left: selectedTextContextMenu.x, top: selectedTextContextMenu.y }}
           onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
         >
-          <button type="button" onClick={quoteSelectedTextToComposer}>引用到对话</button>
+          <button type="button" onClick={quoteSelectedTextToComposer}>引入到会话</button>
+          <button type="button" onClick={() => void copySelectedText()}>复制文字</button>
         </div>
       ) : null}
     </div>
@@ -2219,9 +3205,154 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function imageThinkingLevelLabel(level: ImageThinkingLevelOption): string {
+  switch (level) {
+    case 'minimal':
+      return '最小';
+    case 'low':
+      return '低';
+    case 'medium':
+      return '中';
+    case 'high':
+      return '高';
+    case 'default':
+    default:
+      return '默认';
+  }
+}
+
+const ChatMessageItem = memo(function ChatMessageItem({
+  message,
+  onTextSelection,
+  onOpenAttachment,
+}: {
+  message: ChatMessage;
+  onTextSelection: ChatMessageTextSelectionHandler;
+  onOpenAttachment: (attachment: ChatMessageAttachment) => void;
+}): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const canCopy = message.content.trim().length > 0;
+
+  async function copyMessageContent() {
+    if (!canCopy) {
+      return;
+    }
+    await copyTextToClipboard(message.content);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <article className={`chat-message chat-message--${message.role}`}>
+      <div className="chat-avatar">{message.role === 'user' ? '我' : 'AI'}</div>
+      <div className="chat-bubble-wrap">
+        <div className="chat-meta">
+          <span>{message.role === 'user' ? '你' : '创作助手'}</span>
+          <time dateTime={message.createdAt}>{formatChatTime(message.createdAt)}</time>
+        </div>
+        {message.referencedFiles.length > 0 || (message.referencedSnippets?.length ?? 0) > 0 ? (
+          <div className="chat-reference-row">
+            {message.referencedFiles.map((reference) => (
+              <span key={`${message.id}-${reference.path}`} className="ctx-chip" title={reference.path}>
+                @{reference.label}
+              </span>
+            ))}
+            {message.referencedSnippets?.map((snippet) => (
+              <span key={`${message.id}-${snippet.id}`} className="ctx-chip ctx-chip--snippet" title={snippet.text}>
+                “{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}”
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div
+          className={`chat-bubble ${message.role === 'assistant' ? 'chat-bubble--assistant' : 'chat-bubble--user'}`}
+          onMouseUp={(event) => onTextSelection(event, message)}
+          onContextMenu={(event) => onTextSelection(event, message)}
+        >
+          <button
+            type="button"
+            className="chat-copy-button"
+            data-copied={copied || undefined}
+            disabled={!canCopy}
+            onMouseDown={(event) => event.stopPropagation()}
+            onMouseUp={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.stopPropagation();
+              void copyMessageContent();
+            }}
+            aria-label={copied ? '已复制' : '复制消息'}
+            title={copied ? '已复制' : '复制'}
+          />
+          {message.role === 'assistant' ? (
+            <AssistantStreamBody message={message} />
+          ) : (
+            <p>{message.content}</p>
+          )}
+          {message.attachments?.length ? (
+            <div className="chat-image-grid">
+              {message.attachments.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  type="button"
+                  className={`chat-image-card chat-image-card--${attachment.kind}`}
+                  onClick={() => onOpenAttachment(attachment)}
+                  title={`${attachment.name} · ${attachment.path}`}
+                >
+                  <img src={`/api/projects/${encodeURIComponent(attachment.projectId)}/raw/${encodeWorkspacePath(attachment.path)}`} alt={attachment.name} />
+                  <span>{attachment.kind === 'reference-image' ? '参考' : '生成'} · {attachment.aspectRatio ?? ''}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {message.role === 'assistant' && message.events && message.events.length > 0 ? (
+          <details className="chat-events">
+            <summary>执行详情</summary>
+            <div className="chat-event-list">
+              {message.events.map((event, index) => (
+                <div key={`${message.id}-${event.type}-${index}`} className="chat-event-item">
+                  <strong>{event.type}</strong>
+                  <span>{eventSummary(event)}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
+    </article>
+  );
+});
+
 function timestampFromIso(value: string): number {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function pickPreferredChatSession(sessions: ChatSession[], preferredSessionId: string | null, view: ChatSessionView): ChatSession | null {
+  const sortedSessions = [...sessions].sort((a, b) => timestampFromIso(b.updatedAt) - timestampFromIso(a.updatedAt));
+  const preferredSession = preferredSessionId
+    ? sortedSessions.find((session) => session.id === preferredSessionId) ?? null
+    : null;
+
+  return preferredSession
+    ?? sortedSessions.find((session) => sessionMatchesView(session, view))
+    ?? sortedSessions.find((session) => !session.archivedAt)
+    ?? sortedSessions[0]
+    ?? null;
+}
+
+function sessionMatchesView(session: ChatSession, view: ChatSessionView): boolean {
+  return view === 'archived' ? Boolean(session.archivedAt) : !session.archivedAt;
+}
+
+function createSnippetReferenceId(input: Extract<SelectedTextContextMenu, { source: 'chat' }>): string {
+  let hash = 0;
+  const source = `${input.messageId}:${input.text}`;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = Math.imul(31, hash) + source.charCodeAt(index);
+  }
+  return `snippet-${input.messageId}-${Math.abs(hash).toString(36)}`;
 }
 
 function getSelectedTextFromEvent(event: React.MouseEvent): string {
@@ -2233,6 +3364,32 @@ function getSelectedTextFromEvent(event: React.MouseEvent): string {
   }
 
   return window.getSelection()?.toString() ?? '';
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back to a hidden textarea for browsers that deny Clipboard API in local dev.
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error('复制失败');
+  }
 }
 
 function readStoredChatReadingMode(): boolean {
@@ -2252,6 +3409,309 @@ function writeStoredChatReadingMode(enabled: boolean): void {
     window.localStorage.setItem(CHAT_READING_MODE_STORAGE_KEY, String(enabled));
   } catch {
     // Ignore storage failures; the toggle still works for the current session.
+  }
+}
+
+function readStoredModel(storageKey: string): string {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  return window.localStorage.getItem(storageKey) || '';
+}
+
+function writeStoredModel(storageKey: string, model: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (model) {
+      window.localStorage.setItem(storageKey, model);
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Ignore storage failures; the selected model still works for this page session.
+  }
+}
+
+function readStoredThemeMode(): ThemeMode {
+  if (typeof window === 'undefined') {
+    return 'light';
+  }
+
+  const themeMode = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
+  return themeMode === 'dark' || themeMode === 'soft' ? themeMode : 'light';
+}
+
+function writeStoredThemeMode(themeMode: ThemeMode): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
+  } catch {
+    // Ignore storage failures; theme switching still works for the current session.
+  }
+}
+
+function nextThemeMode(themeMode: ThemeMode): ThemeMode {
+  if (themeMode === 'light') {
+    return 'dark';
+  }
+  if (themeMode === 'dark') {
+    return 'soft';
+  }
+  return 'light';
+}
+
+function themeModeLabel(themeMode: ThemeMode): string {
+  if (themeMode === 'light') {
+    return '明亮';
+  }
+  if (themeMode === 'dark') {
+    return '黑暗';
+  }
+  return '柔和';
+}
+
+function themeModeIcon(themeMode: ThemeMode): string {
+  if (themeMode === 'light') {
+    return '☼';
+  }
+  if (themeMode === 'dark') {
+    return '◐';
+  }
+  return '◌';
+}
+
+function readStoredSelectedProjectId(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY) || null;
+}
+
+function writeStoredSelectedProjectId(projectId: string | null): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (projectId) {
+      window.localStorage.setItem(SELECTED_PROJECT_STORAGE_KEY, projectId);
+    } else {
+      window.localStorage.removeItem(SELECTED_PROJECT_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures; selection still works for the current session.
+  }
+}
+
+function readStoredChatScope(): ChatScope | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const scope = window.localStorage.getItem(CHAT_SCOPE_STORAGE_KEY);
+  return scope === 'project' || scope === 'temporary' ? scope : null;
+}
+
+function writeStoredChatScope(scope: ChatScope): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(CHAT_SCOPE_STORAGE_KEY, scope);
+  } catch {
+    // Ignore storage failures; scope still works for the current session.
+  }
+}
+
+function readStoredWorkspaceSelection(): StoredWorkspaceSelection | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(WORKSPACE_SELECTION_STORAGE_KEY) ?? 'null') as Partial<StoredWorkspaceSelection> | null;
+    if (!parsed) {
+      return null;
+    }
+
+    return {
+      activeWorkspaceScope: isWorkspaceScope(parsed.activeWorkspaceScope) ? parsed.activeWorkspaceScope : 'global',
+      selectedProjectPath: typeof parsed.selectedProjectPath === 'string' ? parsed.selectedProjectPath : null,
+      selectedGlobalPath: typeof parsed.selectedGlobalPath === 'string' ? parsed.selectedGlobalPath : null,
+      selectedTemporaryProjectId: typeof parsed.selectedTemporaryProjectId === 'string' ? parsed.selectedTemporaryProjectId : null,
+      selectedTemporaryPath: typeof parsed.selectedTemporaryPath === 'string' ? parsed.selectedTemporaryPath : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredWorkspaceSelection(selection: StoredWorkspaceSelection): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(WORKSPACE_SELECTION_STORAGE_KEY, JSON.stringify(selection));
+  } catch {
+    // Ignore storage failures; selection still works for the current session.
+  }
+}
+
+function isWorkspaceScope(value: unknown): value is WorkspaceScope {
+  return value === 'global' || value === 'project' || value === 'temporary';
+}
+
+function readInitialActiveChatSessionId(): string | null {
+  const chatScope = readStoredChatScope() ?? (readStoredSelectedProjectId() ? 'project' : 'temporary');
+  const stored = readStoredActiveChatSession();
+
+  if (chatScope === 'project') {
+    const projectId = readStoredSelectedProjectId();
+    return projectId ? stored.projectSessionIds[projectId] ?? null : null;
+  }
+
+  return stored.temporarySessionId ?? readStoredTemporaryChatSession()?.sessionId ?? null;
+}
+
+function readStoredActiveChatSession(): StoredActiveChatSession {
+  const fallback: StoredActiveChatSession = {
+    projectSessionIds: {},
+    temporarySessionId: null,
+    chatSessionView: 'active',
+  };
+
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ACTIVE_CHAT_SESSION_STORAGE_KEY) ?? 'null') as Partial<StoredActiveChatSession> | null;
+    if (!parsed) {
+      return fallback;
+    }
+
+    const projectSessionIds = parsed.projectSessionIds && typeof parsed.projectSessionIds === 'object' && !Array.isArray(parsed.projectSessionIds)
+      ? Object.fromEntries(
+        Object.entries(parsed.projectSessionIds).filter((entry): entry is [string, string] => (
+          typeof entry[0] === 'string' && typeof entry[1] === 'string'
+        )),
+      )
+      : {};
+
+    return {
+      projectSessionIds,
+      temporarySessionId: typeof parsed.temporarySessionId === 'string' ? parsed.temporarySessionId : null,
+      chatSessionView: parsed.chatSessionView === 'archived' ? 'archived' : 'active',
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredActiveChatSession(value: StoredActiveChatSession): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(ACTIVE_CHAT_SESSION_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures; the backend session still exists for the current page lifetime.
+  }
+}
+
+function writeStoredProjectActiveChatSession(projectId: string, sessionId: string): void {
+  const stored = readStoredActiveChatSession();
+  writeStoredActiveChatSession({
+    ...stored,
+    projectSessionIds: { ...stored.projectSessionIds, [projectId]: sessionId },
+  });
+}
+
+function writeStoredTemporaryActiveChatSession(sessionId: string): void {
+  const stored = readStoredActiveChatSession();
+  writeStoredActiveChatSession({
+    ...stored,
+    temporarySessionId: sessionId,
+  });
+}
+
+function writeStoredActiveChatSessionView(chatSessionView: ChatSessionView): void {
+  const stored = readStoredActiveChatSession();
+  writeStoredActiveChatSession({
+    ...stored,
+    chatSessionView,
+  });
+}
+
+function isSessionInActiveChatScope(session: ChatSession, chatScope: ChatScope, selectedProjectId: string | null): boolean {
+  return chatScope === 'temporary'
+    ? isTemporaryProjectId(session.projectId)
+    : Boolean(selectedProjectId && session.projectId === selectedProjectId);
+}
+
+function isSessionInActiveChatMode(session: ChatSession, chatMode: ChatMode, chatScope: ChatScope, selectedProjectId: string | null): boolean {
+  return isSessionInActiveChatScope(session, chatScope, selectedProjectId) && getSessionKind(session) === 'assistant';
+}
+
+function getSessionKind(session: ChatSession): ChatMode {
+  return session.kind === 'image' ? 'image' : 'assistant';
+}
+
+function isTemporaryProjectId(projectId: string): boolean {
+  return projectId.startsWith('temp-');
+}
+
+function readStoredTemporaryChatSession(): { projectId: string; sessionId: string | null } | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TEMPORARY_CHAT_SESSION_STORAGE_KEY) ?? 'null') as Partial<{ projectId: unknown; sessionId: unknown }> | null;
+    if (!parsed || typeof parsed.projectId !== 'string') {
+      return null;
+    }
+    return {
+      projectId: parsed.projectId,
+      sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredTemporaryChatSession(value: { projectId: string; sessionId: string | null }): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(TEMPORARY_CHAT_SESSION_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures; the backend session still exists for the current page lifetime.
+  }
+}
+
+function clearStoredTemporaryChatSession(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(TEMPORARY_CHAT_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
   }
 }
 
@@ -2317,6 +3777,14 @@ function eventSummary(event: RunEvent): string {
       return `${event.name}${event.output ? ` ${JSON.stringify(event.output)}` : ''}`;
     case 'file.changed':
       return `${event.path} ${event.change}`;
+    case 'agent.step.start':
+      return `${event.phase} ${event.agentId} 第 ${event.iteration} 轮开始`;
+    case 'agent.step.end':
+      return `${event.phase} ${event.agentId} 第 ${event.iteration} 轮 ${event.status}`;
+    case 'agent.review.reject':
+      return `${event.targetAgentId} 第 ${event.iteration} 轮打回：${event.reasons.join('；')}`;
+    case 'agent.workflow.end':
+      return event.outputPath ? `${event.status}: ${event.outputPath}` : event.status;
     case 'run.end':
       return event.error ? `${event.status}: ${event.error}` : event.status;
   }
@@ -2325,7 +3793,13 @@ function eventSummary(event: RunEvent): string {
 function createChatMessage(
   role: ChatMessage['role'],
   content: string,
-  options: { events?: RunEvent[]; referencedFiles?: ReferencedFile[]; streamEvents?: StreamEvent[]; status?: RunState } = {},
+  options: {
+    events?: RunEvent[];
+    referencedFiles?: ReferencedFile[];
+    referencedSnippets?: ReferencedChatSnippet[];
+    streamEvents?: StreamEvent[];
+    status?: RunState;
+  } = {},
 ): ChatMessage {
   return {
     id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2334,9 +3808,28 @@ function createChatMessage(
     createdAt: new Date().toISOString(),
     events: options.events,
     referencedFiles: options.referencedFiles ?? [],
+    referencedSnippets: options.referencedSnippets ?? [],
     streamEvents: options.streamEvents ?? [],
     status: options.status,
   };
+}
+
+function readImageReferenceDraft(file: File): Promise<ImageReferenceDraft> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const [, contentBase64 = ''] = result.split(',', 2);
+      resolve({
+        id: `image-ref-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name,
+        mimeType: file.type || 'image/png',
+        contentBase64,
+      });
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('参考图读取失败'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function assistantMessageFromEvents(events: RunEvent[]): string {
@@ -2350,118 +3843,62 @@ function assistantMessageFromEvents(events: RunEvent[]): string {
   return text || '已完成。';
 }
 
-function AssistantStreamBody({ message }: { message: ChatMessage }): JSX.Element {
-  if (message.streamEvents.length === 0) {
-    return (
-      <div className="chat-markdown">
-        <MarkdownReadPreview content={message.content || (message.status === 'running' ? '正在思考...' : '')} />
-      </div>
-    );
-  }
-
-  const thinking = collectThinkingBlocks(message.streamEvents);
-  const tools = collectToolCalls(message.streamEvents);
-
-  return (
-    <div className="assistant-stream">
-      {thinking.map((block) => (
-        <details key={block.sequence} className="thinking-block" open={message.status === 'running'}>
-          <summary>思考过程</summary>
-          <div>{block.text || '正在思考...'}</div>
-        </details>
-      ))}
-      {tools.length > 0 ? (
-        <div className="tool-call-list">
-          {tools.map((toolCall) => (
-            <details key={toolCall.id} className="tool-call-card">
-              <summary>
-                <span>{toolCall.name}</span>
-                <em>{toolCall.status}</em>
-              </summary>
-              {toolCall.input ? (
-                <pre>{toolCall.input}</pre>
-              ) : null}
-              {toolCall.output ? (
-                <pre>{toolCall.output}</pre>
-              ) : null}
-            </details>
-          ))}
-        </div>
-      ) : null}
-      <div className="chat-markdown">
-        <MarkdownReadPreview content={message.content || (message.status === 'running' ? '正在生成...' : '')} />
-      </div>
-    </div>
-  );
-}
-
-function collectThinkingBlocks(events: StreamEvent[]): Array<{ sequence: number; text: string }> {
-  const blocks = new Map<number, string>();
-
-  for (const event of events) {
-    if (event.type === 'thinking.delta') {
-      blocks.set(event.sequence, (blocks.get(event.sequence) ?? '') + event.delta);
-    }
-    if (event.type === 'thinking.end') {
-      blocks.set(event.sequence, event.text);
-    }
-  }
-
-  return [...blocks.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([sequence, text]) => ({ sequence, text }));
-}
-
-function collectToolCalls(events: StreamEvent[]): Array<{
-  id: string;
-  name: string;
-  input: string;
-  output: string;
-  status: string;
-}> {
-  const toolCalls = new Map<string, { id: string; name: string; input: string; output: string; status: string }>();
-
-  for (const event of events) {
-    if (event.type === 'tool_use.start') {
-      toolCalls.set(event.toolCallId, {
-        id: event.toolCallId,
-        name: event.toolName,
-        input: '',
-        output: '',
-        status: 'running',
-      });
-    }
-    if (event.type === 'tool_use.delta') {
-      const toolCall = toolCalls.get(event.toolCallId);
-      if (!toolCall) continue;
-      if (event.stream === 'input') {
-        toolCall.input += event.delta;
-      } else {
-        toolCall.output += event.delta;
-      }
-    }
-    if (event.type === 'tool_use.end') {
-      const toolCall = toolCalls.get(event.toolCallId) ?? {
-        id: event.toolCallId,
-        name: event.toolCallId,
-        input: '',
-        output: '',
-        status: event.status,
-      };
-      toolCall.status = event.status;
-      toolCall.output = event.outputText ?? toolCall.output;
-      if (event.errorMessage) {
-        toolCall.output = event.errorMessage;
-      }
-      toolCalls.set(event.toolCallId, toolCall);
-    }
-  }
-
-  return [...toolCalls.values()];
-}
-
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误';
+}
+
+function userFacingRunError(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return message || '未知错误';
+}
+
+function isImageGenerationPrompt(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized || /(不要|无需|不用|别).{0,8}(生成|创建|画|绘制|出图|生图|图片|图像)/.test(normalized)) {
+    return false;
+  }
+
+  return /(?:生成|创建|制作|画|绘制|出|生)(?:一张|张|个|幅|套|组)?[^，。！？\n]{0,24}(?:图片|图像|插画|海报|封面|剧照|分镜图|角色图|场景图|概念图|视觉图|表情包)/.test(normalized)
+    || /(?:图片|图像|插画|海报|封面|剧照|分镜图|角色图|场景图|概念图|视觉图|表情包)[^，。！？\n]{0,24}(?:生成|创建|制作|画|绘制|出图|生图)/.test(normalized)
+    || /(?:出图|生图|画一张|画个|画幅|draw an image|generate an image|create an image|make an image)/.test(normalized);
+}
+
+function modelsForCapability(models: AigcHubModelMetadata[], capability: 'chat' | 'image'): AigcHubModelMetadata[] {
+  const filtered = models.filter((model) => modelSupportsCapability(model, capability));
+  return filtered.length > 0 ? filtered : models;
+}
+
+function modelSupportsCapability(model: AigcHubModelMetadata, capability: 'chat' | 'image'): boolean {
+  if (model.capabilities.length === 0) {
+    return false;
+  }
+
+  const capabilityText = model.capabilities.join(' ').toLowerCase();
+  if (capability === 'chat') {
+    return /chat|text|response|responses|completion|completions|tool/.test(capabilityText);
+  }
+  return /image|vision|generation|generations/.test(capabilityText);
+}
+
+function preferredModelId(models: AigcHubModelMetadata[], capability: 'chat' | 'image'): string {
+  return modelsForCapability(models, capability)[0]?.id ?? '';
+}
+
+function modelOptionsWithSelected(models: AigcHubModelMetadata[], selected: string, fallback: string): AigcHubModelMetadata[] {
+  const options = [...models];
+  const selectedModel = selected || fallback;
+  if (selectedModel && !options.some((model) => model.id === selectedModel)) {
+    options.unshift({ id: selectedModel, label: selectedModel, capabilities: [] });
+  }
+  if (options.length === 0) {
+    options.push({ id: fallback, label: fallback || '默认模型', capabilities: [] });
+  }
+  return options;
+}
+
+function modelOptionLabel(model: AigcHubModelMetadata): string {
+  const capabilityLabel = model.capabilities.length > 0 ? ` · ${model.capabilities.join('/')}` : '';
+  return `${model.label || model.id}${capabilityLabel}`;
 }
 
 function formatChatTime(value: string): string {

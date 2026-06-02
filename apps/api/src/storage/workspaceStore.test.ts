@@ -48,9 +48,9 @@ describe('workspaceStore', () => {
       });
     }
 
-    const brief = await store.readWorkspaceFile(project.id, '01 基本设定/项目简介.md');
+    const brief = await store.readWorkspaceFile(project.id, '01 原著资料/项目简介.md');
     expect(brief).toEqual({
-      path: '01 基本设定/项目简介.md',
+      path: '01 原著资料/项目简介.md',
       content: expect.stringContaining('Office Misfits'),
     });
   });
@@ -103,7 +103,7 @@ describe('workspaceStore', () => {
     const globalFile = await store.readGlobalWorkspaceFile('Agent 配置/AGENTS.md');
     expect(globalFile).toEqual({
       path: 'Agent 配置/AGENTS.md',
-      content: expect.stringContaining('情景剧创作'),
+      content: expect.stringContaining('小说改编剧本'),
     });
   });
 
@@ -126,6 +126,124 @@ describe('workspaceStore', () => {
     await expect(readFile(path.join(root, '_global', 'AGENTS.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(path.join(root, '_global', 'auth.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(path.join(root, '_global', 'installation_id'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('updates the legacy default system agent without overwriting custom instructions', async () => {
+    const legacyAgent = '# 情景剧创作工作区\n\n## 工作目标\n\n围绕角色、故事、剧本、分镜和视频生成推进情景剧创作。\n';
+    await mkdir(path.join(root, '_global', 'Agent 配置'), { recursive: true });
+    await writeFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), legacyAgent, 'utf8');
+
+    const store = createWorkspaceStore(root);
+    await store.listGlobalWorkspaceEntries();
+
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('viwork system agent');
+
+    await writeFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), '# Custom\n', 'utf8');
+    await store.listGlobalWorkspaceEntries();
+
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toBe('# Custom\n');
+  });
+
+  it('updates the outdated default viwork system agent trace schema', async () => {
+    const outdatedAgent = [
+      '# viwork system agent',
+      '',
+      '1. 用户只是在探索想法时，使用 brainstorm-agent，结果仅在聊天中展示。',
+      '',
+      '你必须在关键节点输出独立 JSON block，供系统解析并展示 timeline。格式如下：',
+      '',
+      '```json',
+      '{"type":"agent.step.start","agentId":"story-agent","phase":"故事创作","iteration":1}',
+      '```',
+    ].join('\n');
+    await mkdir(path.join(root, '_global', 'Agent 配置'), { recursive: true });
+    await writeFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), outdatedAgent, 'utf8');
+
+    const store = createWorkspaceStore(root);
+    await store.listGlobalWorkspaceEntries();
+
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('"maxIterations":5');
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('脑暴不调用 reviewer-agent');
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('同一次回复里直接给出对应 agent 的实质内容');
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('小说改编剧本工作台');
+  });
+
+  it('updates the outdated default viwork system agent when it still allows routing-only replies', async () => {
+    const outdatedAgent = [
+      '# viwork system agent',
+      '',
+      '1. 用户只是在探索想法时，使用 brainstorm-agent 正常对话，结果仅在聊天中展示；脑暴不调用 reviewer-agent，不输出轮次，不进入质量闭环。',
+      '',
+      '正式故事/剧本创作和审稿时，你必须在关键节点输出独立 JSON block，供系统解析并展示 timeline。脑暴对话不需要输出 trace JSON。格式如下：',
+      '',
+      '```json',
+      '{"type":"agent.step.start","agentId":"story-agent","phase":"故事创作","iteration":1,"maxIterations":5}',
+      '```',
+      '',
+      '允许的 agentId：system、brainstorm-agent、story-agent、screenwriter-agent、reviewer-agent。',
+    ].join('\n');
+    await mkdir(path.join(root, '_global', 'Agent 配置'), { recursive: true });
+    await writeFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), outdatedAgent, 'utf8');
+
+    const store = createWorkspaceStore(root);
+    await store.listGlobalWorkspaceEntries();
+
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('同一次回复里直接给出对应 agent 的实质内容');
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'AGENTS.md'), 'utf8')).resolves.toContain('小说改编剧本工作台');
+  });
+
+  it('removes legacy default agent skills without deleting custom skill content', async () => {
+    const legacySkillRoot = path.join(root, '_global', 'Agent 配置', 'skills', '故事大纲技能');
+    const customSkillRoot = path.join(root, '_global', 'Agent 配置', 'skills', '人物设定技能');
+    await mkdir(legacySkillRoot, { recursive: true });
+    await mkdir(customSkillRoot, { recursive: true });
+    await writeFile(path.join(legacySkillRoot, 'SKILL.md'), '# 故事大纲技能\n\n围绕单集主题输出 A/B 故事与结尾反转。\n', 'utf8');
+    await writeFile(path.join(customSkillRoot, 'SKILL.md'), '# Custom Character Skill\n', 'utf8');
+
+    const store = createWorkspaceStore(root);
+    const entries = await store.listGlobalWorkspaceEntries();
+
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'Agent 配置/skills/source-analyst-agent/SKILL.md' }),
+      expect.objectContaining({ path: 'Agent 配置/skills/人物设定技能/SKILL.md' }),
+    ]));
+    expect(entries).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'Agent 配置/skills/故事大纲技能/SKILL.md' }),
+    ]));
+  });
+
+  it('updates outdated default skills and preserves custom skill bodies while adding required frontmatter', async () => {
+    const brainstormSkillRoot = path.join(root, '_global', 'Agent 配置', 'skills', 'brainstorm-agent');
+    const customSkillRoot = path.join(root, '_global', 'Agent 配置', 'skills', 'source-analyst-agent');
+    await mkdir(brainstormSkillRoot, { recursive: true });
+    await mkdir(customSkillRoot, { recursive: true });
+    await writeFile(
+      path.join(brainstormSkillRoot, 'SKILL.md'),
+      '# brainstorm-agent\n\n你是情景剧脑暴 agent，只负责探索故事种子，不负责写入正式项目文件。\n',
+      'utf8',
+    );
+    await writeFile(path.join(customSkillRoot, 'SKILL.md'), '# Custom Story Agent\n', 'utf8');
+
+    const store = createWorkspaceStore(root);
+    await store.listGlobalWorkspaceEntries();
+
+    await expect(readFile(path.join(brainstormSkillRoot, 'SKILL.md'), 'utf8')).resolves.toContain('不调用 reviewer-agent');
+    await expect(readFile(path.join(brainstormSkillRoot, 'SKILL.md'), 'utf8')).resolves.toContain('name: "brainstorm-agent"');
+    const customSkill = await readFile(path.join(customSkillRoot, 'SKILL.md'), 'utf8');
+    expect(customSkill).toContain('name: "source-analyst-agent"');
+    expect(customSkill).toContain('# Custom Story Agent');
+  });
+
+  it('adds the viwork agent runtime config without overwriting existing Codex config', async () => {
+    await mkdir(path.join(root, '_global', 'Agent 配置'), { recursive: true });
+    await writeFile(path.join(root, '_global', 'Agent 配置', 'config.toml'), 'model = "gpt-5"\n', 'utf8');
+
+    const store = createWorkspaceStore(root);
+    await store.listGlobalWorkspaceEntries();
+
+    await expect(readFile(path.join(root, '_global', 'Agent 配置', 'config.toml'), 'utf8')).resolves.toBe(
+      'model = "gpt-5"\n\n[viwork]\nmax_revision_rounds = 5\n',
+    );
   });
 
   it('writes and reads workspace files and returns file metadata in entries', async () => {

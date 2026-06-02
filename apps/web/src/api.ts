@@ -1,8 +1,19 @@
 import type {
+  AigcHubModelListResponse,
+  AigcHubModelMetadata,
   AgentRun,
+  AgentTraceEvent,
   ChatMessage,
+  ChatMessageAttachment,
   ChatSession,
+  GeminiImageAspectRatio,
+  GeminiImageModel,
+  GeminiImageThinkingLevel,
+  ImageGenerationReferenceImage,
+  ImageGenerationRequest,
+  ImageGenerationResponse,
   Project,
+  ReferencedChatSnippet,
   ReferencedFile,
   RunEvent,
   StreamEvent,
@@ -14,10 +25,21 @@ import type {
 } from '@viwork/shared';
 
 export type {
+  AigcHubModelListResponse,
+  AigcHubModelMetadata,
   AgentRun,
+  AgentTraceEvent,
   ChatMessage,
+  ChatMessageAttachment,
   ChatSession,
+  GeminiImageAspectRatio,
+  GeminiImageModel,
+  GeminiImageThinkingLevel,
+  ImageGenerationReferenceImage,
+  ImageGenerationRequest,
+  ImageGenerationResponse,
   Project,
+  ReferencedChatSnippet,
   ReferencedFile,
   RunEvent,
   StreamEvent,
@@ -48,15 +70,18 @@ export type ApiClient = {
   createAsset(projectId: string, input: CreateAssetInput): Promise<WorkspaceEntry>;
   moveEntry(projectId: string, sourcePath: string, targetPath: string): Promise<WorkspaceEntry>;
   deleteEntry(projectId: string, path: string): Promise<{ deleted: true }>;
-  listChatSessions(projectId: string, options?: { includeArchived?: boolean }): Promise<ChatSession[]>;
-  createChatSession(projectId: string): Promise<ChatSession>;
-  createTemporaryChatSession(): Promise<ChatSession>;
+  listChatSessions(projectId: string, options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
+  listTemporaryChatSessions(options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
+  createChatSession(projectId: string, input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
+  createTemporaryChatSession(input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
   updateChatSession(sessionId: string, input: { codexThreadId?: string | null; title?: string }): Promise<ChatSession>;
   archiveChatSession(sessionId: string): Promise<ChatSession>;
   restoreChatSession(sessionId: string): Promise<ChatSession>;
   appendChatMessage(sessionId: string, message: ChatMessage): Promise<ChatSession>;
   updateChatMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession>;
-  createMockRun(input: CreateMockRunInput): Promise<CreateMockRunResponse>;
+  listAigcHubModels(): Promise<AigcHubModelListResponse>;
+  createImageGeneration(input: ImageGenerationRequest): Promise<ImageGenerationResponse>;
+  createRun(input: CreateRunInput): Promise<CreateRunResponse>;
   streamRunEvents(runId: string, handlers: StreamRunHandlers): () => void;
   listSkills(): Promise<TheaterSkill[]>;
   createSkill(input: CreateSkillInput): Promise<TheaterSkill>;
@@ -71,15 +96,17 @@ export type CreateProjectInput = {
   description?: string;
 };
 
-export type CreateMockRunInput = {
+export type CreateRunInput = {
   projectId: string;
   sessionId?: string;
   codexThreadId?: string;
   prompt: string;
+  model?: string;
   referencedFiles?: ReferencedFile[];
+  referencedSnippets?: ReferencedChatSnippet[];
 };
 
-export type CreateMockRunResponse = {
+export type CreateRunResponse = {
   run: AgentRun;
   events?: RunEvent[];
 };
@@ -197,15 +224,29 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<ChatSession[]>(
         fetcher,
         baseUrl,
-        `/api/projects/${encodePathSegment(projectId)}/chat-sessions${options.includeArchived ? '?includeArchived=true' : ''}`,
+        withQuery(`/api/projects/${encodePathSegment(projectId)}/chat-sessions`, {
+          includeArchived: options.includeArchived ? 'true' : undefined,
+          kind: options.kind,
+        }),
       ),
-    createChatSession: (projectId) =>
+    listTemporaryChatSessions: (options = {}) =>
+      request<ChatSession[]>(
+        fetcher,
+        baseUrl,
+        withQuery('/api/temporary-chat-sessions', {
+          includeArchived: options.includeArchived ? 'true' : undefined,
+          kind: options.kind,
+        }),
+      ),
+    createChatSession: (projectId, input = {}) =>
       request<ChatSession>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/chat-sessions`, {
         method: 'POST',
+        body: JSON.stringify(input),
       }),
-    createTemporaryChatSession: () =>
+    createTemporaryChatSession: (input = {}) =>
       request<ChatSession>(fetcher, baseUrl, '/api/temporary-chat-sessions', {
         method: 'POST',
+        body: JSON.stringify(input),
       }),
     updateChatSession: (sessionId, input) =>
       request<ChatSession>(fetcher, baseUrl, `/api/chat-sessions/${encodePathSegment(sessionId)}`, {
@@ -230,8 +271,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'PUT',
         body: JSON.stringify(message),
       }),
-    createMockRun: (input) =>
-      request<CreateMockRunResponse>(fetcher, baseUrl, '/api/runs', {
+    listAigcHubModels: () => request<AigcHubModelListResponse>(fetcher, baseUrl, '/api/aigc-hub/models'),
+    createImageGeneration: (input) =>
+      request<ImageGenerationResponse>(fetcher, baseUrl, '/api/image-generations', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createRun: (input) =>
+      request<CreateRunResponse>(fetcher, baseUrl, '/api/runs', {
         method: 'POST',
         body: JSON.stringify(input),
       }),
@@ -331,6 +378,17 @@ function encodeWorkspacePath(path: string): string {
 
 function encodePathSegment(segment: string): string {
   return encodeURIComponent(segment);
+}
+
+function withQuery(path: string, query: Record<string, string | undefined>): string {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined) {
+      params.set(key, value);
+    }
+  });
+  const queryString = params.toString();
+  return queryString ? `${path}?${queryString}` : path;
 }
 
 function trimTrailingSlashes(value: string): string {

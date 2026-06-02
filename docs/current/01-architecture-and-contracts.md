@@ -32,7 +32,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 - `ChatSession` / `ChatMessage`：后端持久化会话和消息。
 - `RunEvent`：兼容一次性 run 返回的事件格式。
 - `StreamEvent`：当前 SSE 流式事件格式，包含文本、思考、工具调用、文件变更和结束事件。
-- `TheaterSkill`：技能广场条目。
+- `TheaterSkill`：全局 `Agent 配置/skills` 下的 Codex skill 条目。
 - `WechatStatus` / `WechatSetupSession`：微信接入状态。
 
 后续增加前后端共享数据结构时，应优先加到 `packages/shared/src/contracts.ts`，再在 `apps/web/src/api.ts` 和 API 路由中使用同一类型。

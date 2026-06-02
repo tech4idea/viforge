@@ -10,7 +10,7 @@ import hljs from 'highlight.js/lib/common';
 import 'highlight.js/styles/github.css';
 import '@milkdown/theme-nord/style.css';
 import '@fortune-sheet/react/dist/index.css';
-import { useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -194,13 +194,13 @@ function CodeEditor({
   );
 }
 
-export function MarkdownReadPreview({ content }: { content: string }): JSX.Element {
+export const MarkdownReadPreview = memo(function MarkdownReadPreview({ content }: { content: string }): JSX.Element {
   return (
     <div className="markdown-read-preview">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
-}
+});
 
 function parseSheetContent(filePath: string, content: string): Sheet[] {
   if (/\.csv$/i.test(filePath)) {

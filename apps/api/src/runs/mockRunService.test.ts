@@ -40,10 +40,24 @@ describe('mock run service', () => {
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
     });
-    expect(events.map((event) => event.type)).toEqual(['run.start', 'text.delta', 'tool.use', 'file.changed', 'run.end']);
+    expect(events.map((event) => event.type)).toEqual([
+      'run.start',
+      'agent.step.start',
+      'text.delta',
+      'agent.step.end',
+      'agent.step.start',
+      'agent.step.end',
+      'tool.use',
+      'file.changed',
+      'agent.workflow.end',
+      'run.end',
+    ]);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent.workflow.end', outputPath: '02 改编方案/01 第一集/单集改编方案.md' }),
+    ]));
 
-    const output = await store.readWorkspaceFile(project.id, `06 产物/01 第一集/${run.id}.md`);
-    expect(output).toEqual({ path: `06 产物/01 第一集/${run.id}.md`, content: expect.stringContaining(prompt) });
+    const output = await store.readWorkspaceFile(project.id, '02 改编方案/01 第一集/单集改编方案.md');
+    expect(output).toEqual({ path: '02 改编方案/01 第一集/单集改编方案.md', content: expect.stringContaining(prompt) });
   });
 
   it('defaults direct service calls to web source', async () => {

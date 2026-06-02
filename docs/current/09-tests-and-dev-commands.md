@@ -25,6 +25,14 @@ pnpm --filter @viwork/web dev
 - API：`3001`
 - Web：`5173`
 
+## 日志
+
+API 启动入口会把 `console.log/info/debug` 写入 `logs/api.log`，把 `console.warn/error` 同时写入 `logs/api.log` 和 `logs/api.error.log`。日志目录默认是仓库根目录下的 `logs/`，可通过 `LOGS_ROOT=/path/to/logs` 覆盖。
+
+Codex run 失败时，后端会先打印包含 `runId`、`projectId`、`sessionId`、`codexThreadId` 的原始错误，再向前端返回用户可读的错误文案。定位“连接中断”类问题时优先查看 `logs/api.error.log`。
+
+如果需要看一次聊天提交的完整输入输出链路，查看 `logs/api-runs.jsonl`。这个文件按 JSONL 记录 `POST /api/runs` 请求/响应、后端拼接后的 prompt、Codex HOME 摘要、线程参数、Codex SDK 事件、发给前端的流式事件以及最终错误状态。它会记录用户提交的 prompt 和工具输入输出，但不会记录 `auth.json` 内容或环境变量里的 token/key。
+
 ## 类型检查
 
 ```bash
@@ -88,4 +96,3 @@ pnpm --filter @viwork/web test -- chat-references.test.ts
 - 文件系统路径必须走后端安全路径校验，不要在前端拼绝对路径。
 - Codex run 是异步流式，不要假设 `POST /api/runs` 返回最终结果。
 - 会话消息流式更新要保持顺序，当前前端通过 `chatMessagePersistQueueRef` 串行化写入。
-

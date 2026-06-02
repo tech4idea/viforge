@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto';
+
 import { Hono } from 'hono';
 import { z } from 'zod';
 
 import type { RunEvent, StreamEvent } from '@viwork/shared';
 
-import type { RunService } from '../runs/codexRunService';
+import { appendJsonLog } from '../logger';
+import type { RunService } from '../runs/runService';
 import type { RunBus } from '../runs/runBus';
 
 const createRunSchema = z.object({
@@ -11,10 +14,21 @@ const createRunSchema = z.object({
   sessionId: z.string().transform((sessionId) => sessionId.trim()).pipe(z.string().min(1)).optional(),
   codexThreadId: z.string().transform((threadId) => threadId.trim()).pipe(z.string().min(1)).optional(),
   prompt: z.string().transform((prompt) => prompt.trim()).pipe(z.string().min(1)),
+  model: z.string().transform((model) => model.trim()).pipe(z.string().min(1)).optional(),
   referencedFiles: z.array(
     z.object({
       path: z.string().transform((path) => path.trim()).pipe(z.string().min(1)),
       label: z.string().transform((label) => label.trim()).pipe(z.string().min(1)),
+    }),
+  ).optional().default([]),
+  referencedSnippets: z.array(
+    z.object({
+      id: z.string().transform((id) => id.trim()).pipe(z.string().min(1)),
+      messageId: z.string().transform((messageId) => messageId.trim()).pipe(z.string().min(1)),
+      role: z.enum(['user', 'assistant']),
+      label: z.string().transform((label) => label.trim()).pipe(z.string().min(1)),
+      text: z.string().transform((text) => text.trim()).pipe(z.string().min(1)),
+      createdAt: z.string().transform((createdAt) => createdAt.trim()).pipe(z.string().min(1)),
     }),
   ).optional().default([]),
 });
@@ -23,20 +37,51 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
   const routes = new Hono();
 
   routes.post('/runs', async (context) => {
+    const requestId = `runs_req_${randomUUID()}`;
     const body = await parseJson(context.req.raw);
+    appendJsonLog('api-runs.jsonl', {
+      scope: 'runs.route',
+      stage: 'request.received',
+      requestId,
+      method: context.req.method,
+      path: context.req.path,
+      body,
+    });
     const parsed = createRunSchema.safeParse(body);
 
     if (!parsed.success) {
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'runs.route',
+        stage: 'request.invalid',
+        requestId,
+        issues: parsed.error.issues,
+      });
       return context.json({ error: 'Invalid run' }, 400);
     }
 
     try {
       const result = await service.createRun({ ...parsed.data, source: 'web' });
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'runs.route',
+        stage: 'response.created',
+        requestId,
+        runId: result.run.id,
+        sessionId: result.run.sessionId ?? null,
+        projectId: result.run.projectId,
+        codexThreadId: result.run.codexThreadId ?? null,
+        response: result,
+      });
       if (bus && result.events) {
         publishLegacyEvents(bus, result.events);
       }
       return context.json(result, 201);
     } catch (error) {
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'runs.route',
+        stage: 'request.failed',
+        requestId,
+        error,
+      });
       return handleKnownError(context, error);
     }
   });
@@ -72,6 +117,14 @@ function runEventToStreamEvent(event: RunEvent, emittedAt: string, sequence: num
       };
     case 'file.changed':
       return { type: 'file.changed', runId: event.runId, emittedAt, path: event.path, change: event.change };
+    case 'agent.step.start':
+      return { ...event, emittedAt };
+    case 'agent.step.end':
+      return { ...event, emittedAt };
+    case 'agent.review.reject':
+      return { ...event, emittedAt };
+    case 'agent.workflow.end':
+      return { ...event, emittedAt };
     case 'run.end':
       return {
         type: 'run.end',

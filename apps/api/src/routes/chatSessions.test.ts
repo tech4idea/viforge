@@ -40,6 +40,21 @@ describe('chat session routes', () => {
     await expect(listResponse.json()).resolves.toEqual([expect.objectContaining({ projectId: session.projectId })]);
   });
 
+  it('lists temporary workspace chat sessions across hidden temporary projects', async () => {
+    const firstResponse = await app.request('/api/temporary-chat-sessions', { method: 'POST' });
+    const first = await firstResponse.json() as { id: string; projectId: string };
+    const secondResponse = await app.request('/api/temporary-chat-sessions', { method: 'POST' });
+    const second = await secondResponse.json() as { id: string; projectId: string };
+    await app.request('/api/projects/project-1/chat-sessions', { method: 'POST' });
+
+    const response = await app.request('/api/temporary-chat-sessions?includeArchived=true');
+
+    expect(response.status).toBe(200);
+    const sessions = await response.json() as Array<{ id: string; projectId: string }>;
+    expect(sessions.map((session) => session.id)).toEqual(expect.arrayContaining([second.id, first.id]));
+    expect(sessions.every((session) => session.projectId.startsWith('temp-'))).toBe(true);
+  });
+
   it('lists sessions by recent activity and hides archived sessions', async () => {
     const olderResponse = await app.request('/api/projects/project-1/chat-sessions', { method: 'POST' });
     const older = await olderResponse.json() as { id: string };
@@ -139,5 +154,45 @@ describe('chat session routes', () => {
     await expect(messageUpdateResponse.json()).resolves.toMatchObject({
       messages: [expect.objectContaining({ id: 'assistant-1', content: '完成', status: 'success' })],
     });
+  });
+
+  it('hides stale empty assistant placeholders when loading history', async () => {
+    const createResponse = await app.request('/api/projects/project-1/chat-sessions', { method: 'POST' });
+    const session = await createResponse.json() as { id: string };
+
+    const firstAppendResponse = await app.request(`/api/chat-sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'assistant-stale',
+        role: 'assistant',
+        content: '',
+        createdAt: '2026-05-18T00:00:00.000Z',
+        referencedFiles: [],
+        streamEvents: [],
+        status: 'running',
+      }),
+    });
+    expect(firstAppendResponse.status).toBe(201);
+
+    const secondAppendResponse = await app.request(`/api/chat-sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'assistant-legacy-interrupted',
+        role: 'assistant',
+        content: '回复未完成，可能是服务重启或连接中断。可以发送“继续”让创作助手接着聊。',
+        createdAt: '2026-05-18T00:01:00.000Z',
+        referencedFiles: [],
+        streamEvents: [],
+        status: 'error',
+      }),
+    });
+    expect(secondAppendResponse.status).toBe(201);
+
+    const listResponse = await app.request('/api/projects/project-1/chat-sessions?includeArchived=true');
+    const sessions = await listResponse.json() as Array<{ messages: Array<{ id: string; content: string; status: string }> }>;
+
+    expect(sessions[0].messages).toEqual([]);
   });
 });

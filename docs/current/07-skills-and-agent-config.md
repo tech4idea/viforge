@@ -1,42 +1,35 @@
-# 技能广场与 Agent 配置
+# Agent Skills 与 Agent 配置
 
-## 技能广场
+## Agent Skills
 
-技能广场用于管理可启用/停用的情景剧创作技能。后端实现：
+Agent skills 只以全局工作区中的 Codex skills 目录为来源。后端实现：
 
 - Store：[apps/api/src/skills/skillStore.ts](../../apps/api/src/skills/skillStore.ts)
+- Agent skill scanner：[apps/api/src/skills/agentConfigSkills.ts](../../apps/api/src/skills/agentConfigSkills.ts)
 - Route：[apps/api/src/routes/skills.ts](../../apps/api/src/routes/skills.ts)
 
-持久化文件：
+持久化目录：
 
 ```text
-apps/api/data/skills/skills.json
+apps/api/data/workspaces/_global/Agent 配置/skills/*/SKILL.md
 ```
-
-默认系统技能：
-
-- `character-bio`：角色小传
-- `conflict-pass`：冲突强化
-- `storyboard-breakdown`：分镜拆解
-- `video-prompt`：视频提示词
 
 API：
 
-- `GET /api/skills`
-- `POST /api/skills`
-- `PATCH /api/skills/:slug`
+- `GET /api/skills`：扫描 `Agent 配置/skills` 并返回可用 Codex skills。
+- `POST /api/skills`：在 `Agent 配置/skills/<slug>/SKILL.md` 创建一个文件技能。
+- `PATCH /api/skills/:slug`：文件技能不支持启用/停用，当前会返回 404。
 
 前端入口在 [apps/web/src/main.tsx](../../apps/web/src/main.tsx)：
 
 - `loadSkills`
-- `toggleSkill`
 - `createSkill`
 
-当前技能广场 UI 通过顶部“技能广场”按钮打开 modal。
+旧的 `apps/api/data/skills/skills.json` 广场技能不再作为产品技能来源。新增或编辑 skill 时，应直接操作全局区的 `Agent 配置/skills` 目录。
 
 ## 全局 Agent 配置
 
-Agent 配置不是技能广场同一个系统。它是 Codex CLI 运行时配置源，存放在全局工作区：
+Agent 配置是 Codex CLI 运行时配置源，存放在全局工作区：
 
 ```text
 apps/api/data/workspaces/_global/Agent 配置
@@ -51,7 +44,22 @@ apps/api/data/workspaces/_global/Agent 配置
 - `skills/*/SKILL.md`
 - `plugins`（如果用户创建）
 
+默认 `AGENTS.md` 是 viwork system agent，负责路由 `brainstorm-agent`、`story-agent`、`screenwriter-agent`、`reviewer-agent`。其中 `brainstorm-agent` 只做普通对话式方向探索，不进入审稿或返工闭环；故事和剧本才进入创作/审稿/返工闭环。默认 `skills` 包含：
+
+- `brainstorm-agent`
+- `story-agent`
+- `screenwriter-agent`
+- `reviewer-agent`
+
+`SKILL.md` 必须带 Codex 要求的 YAML frontmatter，至少包含 `name` 和 `description`，否则 Codex CLI 启动时会报 `missing YAML frontmatter delimited by ---`。默认 viwork skills 都带 frontmatter。
+
+如果旧工作区仍使用历史默认 `AGENTS.md`，或使用已知的上一版 viwork 默认 system agent，初始化全局工作区时会升级为新的 system agent；用户自定义过的 `AGENTS.md` 不会被覆盖。已知的上一版默认 viwork agent skills 会升级为带 frontmatter 的版本；自定义 skill 不会被覆盖，但如果缺少 frontmatter，会自动在文件头部补一个最小可用 frontmatter，保留原正文。
+
+`config.toml` 中的 `[viwork].max_revision_rounds` 控制自动返工上限，默认值为 `5`。如果已有 `config.toml` 没有该配置，初始化全局工作区时会追加该配置，不覆盖现有 Codex 配置。
+
 初始化和迁移由 [apps/api/src/storage/workspaceStore.ts](../../apps/api/src/storage/workspaceStore.ts) 的 `ensureGlobalWorkspace()` 和 `migrateGlobalAgentConfig()` 处理。
+
+`buildCodexPrompt()` 会扫描 `Agent 配置/skills`，把默认四个 agent 之外的附加 skill 名称和描述写入提交给 CLI 的 prompt。`prepareCodexHome()` 会把整个 `skills` 目录复制进运行时 `CODEX_HOME/skills`，所以下一次新 run 或同一 session 的后续 run 都能看到最新 skill。
 
 ## Codex HOME 复制
 
@@ -88,12 +96,3 @@ apps/api/data/workspaces/.codex-home/<sessionId 或 runId>
 ```ts
 additionalDirectories: await getGlobalResourceDirectories(store)
 ```
-
-## 扩展建议
-
-如果要让技能广场和 Codex HOME 中的 `skills` 打通，需要明确同步方向：
-
-- 技能广场 -> `Agent 配置/skills`：适合 UI 管理 Codex skills。
-- `Agent 配置/skills` -> 技能广场：适合文件系统为主，UI 只做展示。
-
-当前版本二者是并行能力，不要假设 `skills.json` 会自动同步到 Codex HOME。

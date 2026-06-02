@@ -53,6 +53,7 @@ describe('api client', () => {
 
     await client.listChatSessions('project-1');
     await client.listChatSessions('project-1', { includeArchived: true });
+    await client.listTemporaryChatSessions({ includeArchived: true });
     await client.createChatSession('project-1');
     await client.createTemporaryChatSession();
     await client.updateChatSession('session-1', { codexThreadId: 'thread-1' });
@@ -64,6 +65,7 @@ describe('api client', () => {
     expect(fetchMock.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
       ['/base/api/projects/project-1/chat-sessions', 'GET'],
       ['/base/api/projects/project-1/chat-sessions?includeArchived=true', 'GET'],
+      ['/base/api/temporary-chat-sessions?includeArchived=true', 'GET'],
       ['/base/api/projects/project-1/chat-sessions', 'POST'],
       ['/base/api/temporary-chat-sessions', 'POST'],
       ['/base/api/chat-sessions/session-1', 'PATCH'],
@@ -93,12 +95,20 @@ describe('api client', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ run: { id: 'run_1' }, events: [] }));
     const client = createApiClient({ fetch: fetchMock, baseUrl: '/base' });
 
-    await client.createMockRun({
+    await client.createRun({
       projectId: 'project-1',
       sessionId: 'session-1',
       codexThreadId: 'thread-1',
       prompt: '参考设定补写第一场',
       referencedFiles: [{ path: 'characters.md', label: 'characters.md' }],
+      referencedSnippets: [{
+        id: 'snippet-1',
+        messageId: 'message-1',
+        role: 'assistant',
+        label: '创作助手片段',
+        text: '商场失物招领处',
+        createdAt: '2026-05-18T00:00:00.000Z',
+      }],
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -111,6 +121,14 @@ describe('api client', () => {
           codexThreadId: 'thread-1',
           prompt: '参考设定补写第一场',
           referencedFiles: [{ path: 'characters.md', label: 'characters.md' }],
+          referencedSnippets: [{
+            id: 'snippet-1',
+            messageId: 'message-1',
+            role: 'assistant',
+            label: '创作助手片段',
+            text: '商场失物招领处',
+            createdAt: '2026-05-18T00:00:00.000Z',
+          }],
         }),
       }),
     );

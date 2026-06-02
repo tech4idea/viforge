@@ -100,7 +100,7 @@ export function createWechatStore(statePath: string, workspaceStore: WorkspaceSt
       const projects = await workspaceStore.listProjects();
       const project = projects[0] ?? await workspaceStore.createProject({
         name: '远程微信灵感箱',
-        description: '从微信远程收集的情景剧创作灵感。',
+        description: '从微信远程收集的小说改编创作灵感。',
       });
       const notePath = `remote-wechat/${new Date().toISOString().replace(/[:.]/g, '-')}.md`;
       await workspaceStore.createWorkspaceFile(

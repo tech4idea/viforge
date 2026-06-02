@@ -44,7 +44,11 @@ describe('runs routes', () => {
       referencedFiles: [],
       status: 'success',
     });
-    expect(body.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'file.changed' })]));
+    expect(body.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent.step.start', agentId: 'adaptation-planner-agent' }),
+      expect.objectContaining({ type: 'agent.workflow.end', outputPath: '02 改编方案/01 第一集/单集改编方案.md' }),
+      expect.objectContaining({ type: 'file.changed' }),
+    ]));
   });
 
   it('accepts referenced files and returns them on the run', async () => {
@@ -57,12 +61,21 @@ describe('runs routes', () => {
         projectId: project.id,
         prompt: '根据设定写对白',
         referencedFiles: [{ path: 'characters.md', label: 'characters.md' }],
+        referencedSnippets: [{
+          id: 'snippet-1',
+          messageId: 'message-1',
+          role: 'assistant',
+          label: '创作助手片段',
+          text: '商场失物招领处',
+          createdAt: '2026-05-18T00:00:00.000Z',
+        }],
       }),
     });
 
     expect(response.status).toBe(201);
     const body = await response.json();
     expect(body.run.referencedFiles).toEqual([{ path: 'characters.md', label: 'characters.md' }]);
+    expect(body.run.referencedSnippets).toEqual([expect.objectContaining({ text: '商场失物招领处' })]);
     expect(body.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: 'text.delta', text: expect.stringContaining('参考文件：characters.md') }),

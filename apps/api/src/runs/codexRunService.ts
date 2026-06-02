@@ -1,26 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { access, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import { constants, type Dirent } from 'node:fs';
+import { access, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { Codex, type Input, type ThreadEvent, type ThreadItem, type ThreadOptions, type TurnOptions } from '@openai/codex-sdk';
-import type { AgentRun, ReferencedFile, RunEvent, RunSource, StreamEvent } from '@viwork/shared';
+import type { AgentRun, StreamEvent } from '@viwork/shared';
 
+import { appendJsonLog } from '../logger';
+import { isDefaultAgentSkill, listAgentConfigSkillDefinitions } from '../skills/agentConfigSkills';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { RunBus } from './runBus';
-
-export type CreateRunInput = {
-  projectId: string;
-  sessionId?: string;
-  codexThreadId?: string;
-  prompt: string;
-  referencedFiles?: ReferencedFile[];
-  source?: RunSource;
-};
-
-export type RunService = {
-  createRun(input: CreateRunInput): Promise<{ run: AgentRun; events?: RunEvent[] }>;
-};
+import type { CreateRunInput, RunService } from './runService';
 
 type CodexThread = {
   runStreamed(input: Input, options?: TurnOptions): Promise<{ events: AsyncIterable<ThreadEvent> }>;
@@ -38,12 +29,23 @@ type CodexRunOptions = {
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 };
 
+type RunEndStreamEvent = Extract<StreamEvent, { type: 'run.end' }>;
+type ToolStatus = 'running' | 'succeeded' | 'failed';
+
+const RUN_DIAGNOSTIC_LOG = 'api-runs.jsonl';
+const RUN_TEXT_LOG_LIMIT = 50_000;
+
 type ItemState = {
   textByItemId: Map<string, string>;
+  agentTraceKeys: Set<string>;
   thinkingByItemId: Map<string, { sequence: number; text: string }>;
   toolInputByItemId: Map<string, string>;
   toolOutputByItemId: Map<string, string>;
+  toolStatusByItemId: Map<string, ToolStatus>;
   toolStarted: Set<string>;
+  completedActionStatuses: ToolStatus[];
+  pendingRunEnd: RunEndStreamEvent | null;
+  runEnded: boolean;
   textSequence: number;
   toolSequence: number;
   thinkingSequence: number;
@@ -69,11 +71,23 @@ export function createCodexRunService(
         codexThreadId: input.codexThreadId,
         prompt: input.prompt,
         referencedFiles: input.referencedFiles ?? [],
+        referencedSnippets: input.referencedSnippets ?? [],
         source: input.source ?? 'web',
         status: 'running',
         createdAt: timestamp,
         updatedAt: timestamp,
       };
+
+      appendRunDiagnostic('createRun.accepted', {
+        runId: run.id,
+        projectId: input.projectId,
+        sessionId: input.sessionId ?? null,
+        codexThreadId: input.codexThreadId ?? null,
+        source: input.source ?? 'web',
+        prompt: textLogValue(input.prompt),
+        referencedFiles: input.referencedFiles ?? [],
+        referencedSnippets: input.referencedSnippets ?? [],
+      });
 
       void executeCodexRun({
         bus,
@@ -112,44 +126,114 @@ async function executeCodexRun({
 }): Promise<void> {
   const state: ItemState = {
     textByItemId: new Map(),
+    agentTraceKeys: new Set(),
     thinkingByItemId: new Map(),
     toolInputByItemId: new Map(),
     toolOutputByItemId: new Map(),
+    toolStatusByItemId: new Map(),
     toolStarted: new Set(),
+    completedActionStatuses: [],
+    pendingRunEnd: null,
+    runEnded: false,
     textSequence: 0,
     toolSequence: 0,
     thinkingSequence: 0,
   };
   const abortController = new AbortController();
-  const publish = (event: StreamEvent) => bus.publish(event);
+  const publish = (event: StreamEvent) => {
+    appendRunDiagnostic('stream.publish', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      event: summarizeStreamEvent(event),
+    });
+    bus.publish(event);
+  };
   const emittedAt = () => new Date().toISOString();
 
+  appendRunDiagnostic('execute.start', {
+    runId: run.id,
+    projectId: input.projectId,
+    sessionId: input.sessionId ?? null,
+    codexThreadId: input.codexThreadId ?? null,
+  });
   publish({ type: 'run.start', runId: run.id, emittedAt: emittedAt() });
 
   try {
     const prompt = await buildCodexPrompt(store, input);
+    appendRunDiagnostic('prompt.built', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      prompt: textLogValue(prompt),
+      referencedFileCount: input.referencedFiles?.length ?? 0,
+      referencedSnippetCount: input.referencedSnippets?.length ?? 0,
+    });
     const codexHome = await prepareCodexHome(store, input.sessionId ?? run.id);
+    appendRunDiagnostic('codex.home.prepared', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      codexHome,
+      codexHomeSummary: await summarizeCodexHome(codexHome),
+    });
     const resolvedCodexPath = await resolveCodexPathOverride(codexPathOverride);
+    appendRunDiagnostic('codex.path.resolved', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      codexPath: resolvedCodexPath,
+      usingInjectedCodexClient: Boolean(codex),
+    });
     const runtimeCodex = codex ?? new Codex({
       codexPathOverride: resolvedCodexPath,
       env: buildCodexEnv(codexHome),
+      config: {
+        show_raw_agent_reasoning: true,
+      },
     });
+    const additionalDirectories = await getGlobalResourceDirectories(store);
     const threadOptions: ThreadOptions = {
       workingDirectory: store.getProjectRoot(input.projectId),
-      additionalDirectories: await getGlobalResourceDirectories(store),
+      additionalDirectories,
       skipGitRepoCheck: true,
-      sandboxMode: 'workspace-write',
+      sandboxMode: 'danger-full-access',
       approvalPolicy: 'never',
-      networkAccessEnabled: false,
+      networkAccessEnabled: true,
       ...(model ? { model } : {}),
       modelReasoningEffort: reasoningEffort,
     };
+    appendRunDiagnostic('thread.options', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      threadMode: input.codexThreadId ? 'resume' : 'start',
+      threadOptions,
+    });
     const thread = input.codexThreadId
       ? runtimeCodex.resumeThread(input.codexThreadId, threadOptions)
       : runtimeCodex.startThread(threadOptions);
+    appendRunDiagnostic('thread.runStreamed.input', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      codexThreadId: input.codexThreadId ?? null,
+      prompt: textLogValue(prompt),
+    });
     const streamed = await thread.runStreamed(prompt, { signal: abortController.signal });
+    appendRunDiagnostic('codex.stream.opened', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+    });
 
     for await (const event of streamed.events as AsyncIterable<ThreadEvent>) {
+      appendRunDiagnostic('codex.event', {
+        runId: run.id,
+        projectId: input.projectId,
+        sessionId: input.sessionId ?? null,
+        event: summarizeThreadEvent(event),
+      });
       handleCodexEvent(event, {
         emittedAt,
         publish,
@@ -157,14 +241,57 @@ async function executeCodexRun({
         state,
       });
     }
+    appendRunDiagnostic('codex.stream.completed', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      state: summarizeItemState(state),
+    });
+    publishRunEnd(state.pendingRunEnd ?? {
+      type: 'run.end',
+      runId: run.id,
+      emittedAt: emittedAt(),
+      status: 'success',
+      errorMessage: null,
+    }, state, publish);
   } catch (error) {
-    publish({
+    if (recoverPostToolCompletionFailure(error, state, {
+      emittedAt,
+      publish,
+      runId: run.id,
+    })) {
+      appendRunDiagnostic('execute.recovered_after_tool_completion', {
+        runId: run.id,
+        projectId: input.projectId,
+        sessionId: input.sessionId ?? null,
+        codexThreadId: input.codexThreadId ?? null,
+        error,
+        state: summarizeItemState(state),
+      });
+      return;
+    }
+
+    appendRunDiagnostic('execute.error', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      codexThreadId: input.codexThreadId ?? null,
+      error,
+      state: summarizeItemState(state),
+    });
+    console.error('[codex-run] failed', {
+      runId: run.id,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      codexThreadId: input.codexThreadId ?? null,
+    }, error);
+    publishRunEnd({
       type: 'run.end',
       runId: run.id,
       emittedAt: emittedAt(),
       status: 'error',
-      errorMessage: error instanceof Error ? error.message : 'Codex run failed',
-    });
+      errorMessage: cliRunErrorMessage(error, state),
+    }, state, publish);
   }
 }
 
@@ -176,7 +303,7 @@ async function prepareCodexHome(store: WorkspaceStore, sessionKey: string): Prom
 
   await mkdir(targetRoot, { recursive: true });
 
-  for (const entryName of ['AGENTS.md', 'config.toml', 'auth.json', 'installation_id']) {
+  for (const entryName of ['AGENTS.md', 'auth.json', 'installation_id']) {
     const source = path.join(sourceRoot, entryName);
     const target = path.join(targetRoot, entryName);
     if (!(await pathExists(source))) {
@@ -184,6 +311,8 @@ async function prepareCodexHome(store: WorkspaceStore, sessionKey: string): Prom
     }
     await writeFile(target, await readFile(source, 'utf8'), 'utf8');
   }
+
+  await writeSanitizedCodexConfig(sourceRoot, targetRoot);
 
   for (const entryName of ['skills', 'plugins']) {
     const source = path.join(sourceRoot, entryName);
@@ -196,6 +325,128 @@ async function prepareCodexHome(store: WorkspaceStore, sessionKey: string): Prom
   }
 
   return targetRoot;
+}
+
+const CODEX_BUNDLED_SKILL_BLOCK_HEADER = [
+  '# viwork: do not let Codex load its own bundled skills or unrelated user skills.',
+  '# These rules keep the sitcom-creation context clean: only _global/Agent 配置/skills stays visible.',
+  '[skills.bundled]',
+  'enabled = false',
+  '',
+].join('\n');
+
+const CODEX_USER_SKILL_BLOCK_HEADER = [
+  '# viwork: explicitly disable user-level skills that Codex picks up from outside CODEX_HOME',
+  '# (for example, ~/.agents/skills or the user home).',
+];
+
+async function writeSanitizedCodexConfig(sourceRoot: string, targetRoot: string): Promise<void> {
+  const sourceConfig = path.join(sourceRoot, 'config.toml');
+  const targetConfig = path.join(targetRoot, 'config.toml');
+  let baseContent = '';
+  if (await pathExists(sourceConfig)) {
+    baseContent = await readFile(sourceConfig, 'utf8');
+  }
+  const sanitizedBase = sanitizeCodexConfig(baseContent);
+  const disabledUserSkills = await listDisablingUserSkillRules();
+  const finalContent = [
+    sanitizedBase,
+    '',
+    CODEX_BUNDLED_SKILL_BLOCK_HEADER,
+    ...CODEX_USER_SKILL_BLOCK_HEADER,
+    ...disabledUserSkills,
+  ].join('\n');
+  await writeFile(targetConfig, finalContent, 'utf8');
+}
+
+function sanitizeCodexConfig(content: string): string {
+  // Keep viwork-relevant top-level model/auth settings and the [viwork] section.
+  // Drop unrelated sections (other-project trust levels, TUI tweaks, etc.) that
+  // should not leak from a developer's personal ~/.codex into a viwork session.
+  const lines = content.split(/\r?\n/);
+  const keepTopLevel = new Set([
+    'model',
+    'model_provider',
+    'model_reasoning_effort',
+    'disable_response_storage',
+    'approval_policy',
+    'sandbox_mode',
+  ]);
+  const keepSectionPrefixes = ['model_providers', 'viwork'];
+  const out: string[] = [];
+  let currentSection: string | null = null;
+  let buffer: string[] = [];
+  const flushSection = () => {
+    const section = currentSection;
+    if (section === null) {
+      out.push(...buffer);
+    } else if (keepSectionPrefixes.some((prefix) => section === prefix || section.startsWith(`${prefix}.`))) {
+      out.push(...buffer);
+    }
+    buffer = [];
+    currentSection = null;
+  };
+  for (const line of lines) {
+    const sectionMatch = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (sectionMatch) {
+      flushSection();
+      currentSection = sectionMatch[1].trim();
+      buffer.push(line);
+      continue;
+    }
+    if (currentSection === null) {
+      const topLevelMatch = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      if (topLevelMatch) {
+        const key = topLevelMatch[1];
+        if (keepTopLevel.has(key)) {
+          buffer.push(line);
+        }
+      } else if (line.trim() === '' || line.trim().startsWith('#')) {
+        buffer.push(line);
+      }
+    } else {
+      buffer.push(line);
+    }
+  }
+  flushSection();
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function listDisablingUserSkillRules(): Promise<string[]> {
+  // The user home may have additional Codex skills under ~/.codex/skills or ~/.agents/skills.
+  // We do not want those to leak into a viwork session, but viwork still needs to expose its
+  // own skills under <CODEX_HOME>/skills. We only know about the user-level skill names that
+  // are present on the current machine, so we enumerate them defensively. The rule order
+  // means later rules win, so a developer can still opt in by appending a positive rule.
+  const userSkillRoots = [
+    path.join(os.homedir(), '.codex', 'skills'),
+    path.join(os.homedir(), '.agents', 'skills'),
+  ];
+  const names = new Set<string>();
+  for (const root of userSkillRoots) {
+    if (!(await pathExists(root))) continue;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.name.startsWith('.')) {
+        names.add(entry.name);
+      } else if (entry.isFile() && entry.name === 'SKILL.md') {
+        names.add(path.basename(root));
+      }
+    }
+  }
+  if (names.size === 0) return [];
+  const blocks: string[] = [];
+  for (const name of [...names].sort()) {
+    blocks.push('[[skills.config]]');
+    blocks.push(`name = ${JSON.stringify(name)}`);
+    blocks.push('enabled = false');
+  }
+  return blocks;
 }
 
 function sanitizeCodexHomeKey(key: string): string {
@@ -213,8 +464,17 @@ async function getGlobalResourceDirectories(store: WorkspaceStore): Promise<stri
 }
 
 export function buildCodexEnv(codexHome: string): Record<string, string> {
+  const cacheHome = path.join(codexHome, '.cache');
   const env = Object.fromEntries(
-    Object.entries({ ...process.env, CODEX_HOME: codexHome }).filter(
+    Object.entries({
+      ...process.env,
+      CODEX_HOME: codexHome,
+      XDG_CACHE_HOME: cacheHome,
+      UV_CACHE_DIR: path.join(cacheHome, 'uv'),
+      PIP_CACHE_DIR: path.join(cacheHome, 'pip'),
+      NPM_CONFIG_CACHE: path.join(cacheHome, 'npm'),
+      npm_config_cache: path.join(cacheHome, 'npm'),
+    }).filter(
       (entry): entry is [string, string] => typeof entry[1] === 'string',
     ),
   );
@@ -262,6 +522,140 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+function appendRunDiagnostic(stage: string, data: Record<string, unknown>): void {
+  appendJsonLog(RUN_DIAGNOSTIC_LOG, {
+    scope: 'codex-run',
+    stage,
+    ...data,
+  });
+}
+
+function textLogValue(text: string, limit = RUN_TEXT_LOG_LIMIT): { text: string; length: number; truncated: boolean } {
+  return {
+    text: text.length > limit ? `${text.slice(0, limit)}...[truncated ${text.length - limit} chars]` : text,
+    length: text.length,
+    truncated: text.length > limit,
+  };
+}
+
+async function summarizeCodexHome(codexHome: string): Promise<Record<string, unknown>> {
+  try {
+    const rootEntries = await readdir(codexHome, { withFileTypes: true });
+    const skillRoot = path.join(codexHome, 'skills');
+    const skillEntries = await safeReaddir(skillRoot);
+    const skills = await Promise.all(
+      skillEntries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const skillPath = path.join(skillRoot, entry.name, 'SKILL.md');
+          try {
+            const content = await readFile(skillPath, 'utf8');
+            return {
+              name: entry.name,
+              hasSkillFile: true,
+              hasYamlFrontmatter: content.trimStart().startsWith('---'),
+              firstLine: content.split(/\r?\n/, 1)[0] ?? '',
+            };
+          } catch (error) {
+            return {
+              name: entry.name,
+              hasSkillFile: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }),
+    );
+
+    return {
+      path: codexHome,
+      rootEntries: rootEntries.map((entry) => ({ name: entry.name, type: entry.isDirectory() ? 'directory' : 'file' })),
+      skills,
+    };
+  } catch (error) {
+    return {
+      path: codexHome,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function safeReaddir(directory: string): Promise<Dirent[]> {
+  try {
+    return await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function summarizeThreadEvent(event: ThreadEvent): Record<string, unknown> {
+  if (!event || typeof event !== 'object') {
+    return { value: event };
+  }
+
+  const typedEvent = event as { item?: unknown; [key: string]: unknown };
+  const { item, ...rest } = typedEvent;
+  return {
+    ...rest,
+    ...(item ? { item: summarizeThreadItem(item) } : {}),
+  };
+}
+
+function summarizeThreadItem(item: unknown): unknown {
+  if (!item || typeof item !== 'object') {
+    return item;
+  }
+
+  const typedItem = item as { [key: string]: unknown };
+  const summary: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(typedItem)) {
+    summary[key] = summarizeLogField(key, value);
+  }
+  return summary;
+}
+
+function summarizeStreamEvent(event: StreamEvent): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event)) {
+    summary[key] = summarizeLogField(key, value);
+  }
+  return summary;
+}
+
+function summarizeLogField(key: string, value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  if (['text', 'delta', 'command', 'aggregated_output', 'outputText', 'errorMessage', 'message', 'query'].includes(key)) {
+    return textLogValue(value);
+  }
+
+  return value;
+}
+
+function summarizeItemState(state: ItemState): Record<string, unknown> {
+  return {
+    textItemCount: state.textByItemId.size,
+    thinkingItemCount: state.thinkingByItemId.size,
+    toolInputItemCount: state.toolInputByItemId.size,
+    toolOutputItemCount: state.toolOutputByItemId.size,
+    toolStatusByItemId: Object.fromEntries(state.toolStatusByItemId.entries()),
+    toolStartedCount: state.toolStarted.size,
+    completedActionStatuses: state.completedActionStatuses,
+    pendingRunEnd: state.pendingRunEnd,
+    runEnded: state.runEnded,
+    textSequence: state.textSequence,
+    toolSequence: state.toolSequence,
+    thinkingSequence: state.thinkingSequence,
+    latestTextByItemId: Object.fromEntries([...state.textByItemId.entries()].map(([id, text]) => [id, textLogValue(text, 8_000)])),
+    latestToolInputByItemId: Object.fromEntries([...state.toolInputByItemId.entries()].map(([id, text]) => [id, textLogValue(text, 8_000)])),
+    latestToolOutputByItemId: Object.fromEntries([...state.toolOutputByItemId.entries()].map(([id, text]) => [id, textLogValue(text, 8_000)])),
+  };
+}
+
 function handleCodexEvent(
   event: ThreadEvent,
   context: {
@@ -282,30 +676,88 @@ function handleCodexEvent(
   }
 
   if (event.type === 'turn.completed') {
-    context.publish({ type: 'run.end', runId: context.runId, emittedAt: context.emittedAt(), status: 'success', errorMessage: null });
+    context.state.pendingRunEnd = { type: 'run.end', runId: context.runId, emittedAt: context.emittedAt(), status: 'success', errorMessage: null };
     return;
   }
 
   if (event.type === 'turn.failed') {
-    context.publish({
+    context.state.pendingRunEnd = {
       type: 'run.end',
       runId: context.runId,
       emittedAt: context.emittedAt(),
       status: 'error',
-      errorMessage: event.error.message,
-    });
+      errorMessage: errorMessage(event.error.message),
+    };
     return;
   }
 
   if (event.type === 'error') {
-    context.publish({
+    context.state.pendingRunEnd = {
       type: 'run.end',
       runId: context.runId,
       emittedAt: context.emittedAt(),
       status: 'error',
-      errorMessage: event.message,
-    });
+      errorMessage: errorMessage(event.message),
+    };
   }
+}
+
+function publishRunEnd(
+  event: RunEndStreamEvent,
+  state: ItemState,
+  publish: (event: StreamEvent) => void,
+): void {
+  if (state.runEnded) return;
+  state.runEnded = true;
+  publish(event);
+}
+
+function recoverPostToolCompletionFailure(
+  error: unknown,
+  state: ItemState,
+  context: {
+    emittedAt: () => string;
+    publish: (event: StreamEvent) => void;
+    runId: string;
+  },
+): boolean {
+  if (!isPostToolFinalResponseFailure(error, state)) {
+    return false;
+  }
+
+  const fallbackText = state.textSequence === 0
+    ? `操作已执行；Codex CLI 最终回复失败：${errorMessage(error)}`
+    : `\n\n操作已执行；Codex CLI 最终回复失败：${errorMessage(error)}`;
+  context.publish({
+    type: 'text.delta',
+    runId: context.runId,
+    emittedAt: context.emittedAt(),
+    delta: fallbackText,
+    sequence: ++state.textSequence,
+  });
+  publishRunEnd({
+    type: 'run.end',
+    runId: context.runId,
+    emittedAt: context.emittedAt(),
+    status: 'success',
+    errorMessage: null,
+  }, state, context.publish);
+  return true;
+}
+
+function isPostToolFinalResponseFailure(error: unknown, state: ItemState): boolean {
+  const actionStatuses = state.completedActionStatuses.length > 0
+    ? state.completedActionStatuses
+    : [...state.toolStatusByItemId.values()];
+  const hasSuccessfulAction = actionStatuses.some((status) => status === 'succeeded');
+  const lastActionStatus = actionStatuses[actionStatuses.length - 1] ?? null;
+  if (!hasSuccessfulAction || lastActionStatus !== 'succeeded') {
+    return false;
+  }
+
+  const message = errorMessage(error);
+  return /Codex Exec exited with code 1:\s*Reading prompt from stdin/i.test(message) ||
+    /response\.failed|stream disconnected before completion|response\.completed|Reconnecting/i.test(message);
 }
 
 function handleCodexItem(
@@ -334,7 +786,12 @@ function handleCodexItem(
   if (typedItem.type === 'command_execution') {
     const command = typeof typedItem.command === 'string' ? typedItem.command : 'command';
     const output = typeof typedItem.aggregated_output === 'string' ? typedItem.aggregated_output : '';
-    const status = typedItem.status === 'failed' ? 'failed' : typedItem.status === 'completed' ? 'succeeded' : 'running';
+    const exitCode = typeof typedItem.exit_code === 'number' ? typedItem.exit_code : null;
+    const status = typedItem.status === 'failed' || (completed && exitCode !== null && exitCode !== 0) || (completed && isFailedCommandOutput(output))
+      ? 'failed'
+      : typedItem.status === 'completed'
+        ? 'succeeded'
+        : 'running';
     publishToolLifecycle(typedItem.id, 'command_execution', command, output, completed, status, context);
     return;
   }
@@ -360,11 +817,13 @@ function handleCodexItem(
   }
 
   if (typedItem.type === 'file_change' && Array.isArray(typedItem.changes) && completed) {
+    let publishedChange = false;
     for (const change of typedItem.changes) {
       if (!change || typeof change !== 'object') continue;
       const path = 'path' in change && typeof change.path === 'string' ? change.path : '';
       const kind = 'kind' in change && typeof change.kind === 'string' ? change.kind : 'update';
       if (!path) continue;
+      publishedChange = true;
       context.publish({
         type: 'file.changed',
         runId: context.runId,
@@ -372,6 +831,9 @@ function handleCodexItem(
         path,
         change: kind === 'add' ? 'created' : kind === 'delete' ? 'deleted' : 'modified',
       });
+    }
+    if (publishedChange) {
+      context.state.completedActionStatuses.push('succeeded');
     }
     return;
   }
@@ -389,6 +851,7 @@ function publishTextDelta(
   const previous = context.state.textByItemId.get(itemId) ?? '';
   const delta = nextText.startsWith(previous) ? nextText.slice(previous.length) : nextText;
   context.state.textByItemId.set(itemId, nextText);
+  publishAgentTraceEvents(nextText, context);
   if (!delta) return;
   context.publish({
     type: 'text.delta',
@@ -397,6 +860,113 @@ function publishTextDelta(
     delta,
     sequence: ++context.state.textSequence,
   });
+}
+
+function publishAgentTraceEvents(
+  text: string,
+  context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string; state: ItemState },
+): void {
+  for (const candidate of extractJsonCodeBlocks(text)) {
+    const event = parseAgentTraceCandidate(candidate, context.runId, context.emittedAt());
+    if (!event) continue;
+    const key = agentTraceEventKey(event);
+    if (context.state.agentTraceKeys.has(key)) continue;
+    context.state.agentTraceKeys.add(key);
+    context.publish(event);
+  }
+}
+
+function agentTraceEventKey(event: StreamEvent): string {
+  switch (event.type) {
+    case 'agent.step.start':
+      return `${event.type}:${event.agentId}:${event.phase}:${event.iteration}:${event.maxIterations ?? ''}`;
+    case 'agent.step.end':
+      return `${event.type}:${event.agentId}:${event.phase}:${event.iteration}:${event.maxIterations ?? ''}:${event.status}`;
+    case 'agent.review.reject':
+      return `${event.type}:${event.targetAgentId}:${event.iteration}:${event.maxIterations ?? ''}:${JSON.stringify(event.reasons)}`;
+    case 'agent.workflow.end':
+      return `${event.type}:${event.status}:${event.outputPath ?? ''}`;
+    default:
+      return JSON.stringify(event);
+  }
+}
+
+function extractJsonCodeBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const fencedBlockPattern = /```json\s*([\s\S]*?)```/gi;
+  for (const match of text.matchAll(fencedBlockPattern)) {
+    if (match[1]) blocks.push(match[1].trim());
+  }
+  return blocks;
+}
+
+function parseAgentTraceCandidate(candidate: string, runId: string, emittedAt: string): StreamEvent | null {
+  try {
+    const value = JSON.parse(candidate) as Partial<StreamEvent> & Record<string, unknown>;
+    const maxIterations = parseOptionalPositiveInteger(value.maxIterations);
+    if (value.type === 'agent.step.start') {
+      if (typeof value.agentId !== 'string' || typeof value.phase !== 'string' || typeof value.iteration !== 'number') return null;
+      return {
+        type: 'agent.step.start',
+        runId,
+        emittedAt,
+        agentId: value.agentId,
+        phase: value.phase,
+        iteration: value.iteration,
+        ...(maxIterations ? { maxIterations } : {}),
+      };
+    }
+    if (value.type === 'agent.step.end') {
+      if (
+        typeof value.agentId !== 'string' ||
+        typeof value.phase !== 'string' ||
+        typeof value.iteration !== 'number' ||
+        !['passed', 'rejected', 'failed'].includes(String(value.status))
+      ) return null;
+      return {
+        type: 'agent.step.end',
+        runId,
+        emittedAt,
+        agentId: value.agentId,
+        phase: value.phase,
+        iteration: value.iteration,
+        ...(maxIterations ? { maxIterations } : {}),
+        status: value.status as 'passed' | 'rejected' | 'failed',
+      };
+    }
+    if (value.type === 'agent.review.reject') {
+      if (typeof value.targetAgentId !== 'string' || typeof value.iteration !== 'number' || !Array.isArray(value.reasons)) return null;
+      return {
+        type: 'agent.review.reject',
+        runId,
+        emittedAt,
+        targetAgentId: value.targetAgentId,
+        iteration: value.iteration,
+        ...(maxIterations ? { maxIterations } : {}),
+        reasons: value.reasons.filter((reason): reason is string => typeof reason === 'string'),
+      };
+    }
+    if (value.type === 'agent.workflow.end') {
+      if (!['passed', 'stopped'].includes(String(value.status))) return null;
+      return {
+        type: 'agent.workflow.end',
+        runId,
+        emittedAt,
+        status: value.status as 'passed' | 'stopped',
+        ...(typeof value.outputPath === 'string' ? { outputPath: value.outputPath } : {}),
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseOptionalPositiveInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+  return value;
 }
 
 function publishThinking(
@@ -427,6 +997,8 @@ function publishToolLifecycle(
   status: 'running' | 'succeeded' | 'failed',
   context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string; state: ItemState },
 ): void {
+  context.state.toolStatusByItemId.set(itemId, status);
+
   if (!context.state.toolStarted.has(itemId)) {
     context.state.toolStarted.add(itemId);
     context.publish({ type: 'tool_use.start', runId: context.runId, emittedAt: context.emittedAt(), toolCallId: itemId, toolName });
@@ -436,6 +1008,7 @@ function publishToolLifecycle(
   publishToolDelta(itemId, 'output', output, context);
 
   if (completed) {
+    context.state.completedActionStatuses.push(status);
     context.publish({
       type: 'tool_use.end',
       runId: context.runId,
@@ -473,6 +1046,10 @@ function publishToolDelta(
 
 async function buildCodexPrompt(store: WorkspaceStore, input: CreateRunInput): Promise<string> {
   const references = input.referencedFiles ?? [];
+  const snippets = input.referencedSnippets ?? [];
+  const maxRevisionRounds = await readViworkMaxRevisionRounds(store);
+  const additionalSkills = await listAdditionalCodexSkills(store);
+  const systemAgentProtocol = await readSystemAgentProtocol(store);
   const referenceBlocks = await Promise.all(
     references.map(async (file) => {
       try {
@@ -483,12 +1060,94 @@ async function buildCodexPrompt(store: WorkspaceStore, input: CreateRunInput): P
       }
     }),
   );
+  const snippetBlocks = snippets.map((snippet, index) => [
+    `## 片段 ${index + 1}: ${snippet.label}`,
+    `来源：${snippet.role === 'user' ? '用户' : '创作助手'} / ${snippet.createdAt} / messageId=${snippet.messageId}`,
+    '',
+    snippet.text,
+  ].join('\n'));
 
   return [
     '# 情景剧创作请求',
     input.prompt,
-    '你是情景剧创作工作台里的编剧助手。优先阅读和编辑当前项目工作区内的“01 基本设定、02 故事、03 剧本、04 分镜脚本、05 视频、06 产物”等目录，尤其关注项目简介、人物设定、单集大纲、剧本文档、分镜脚本和视频生成提示词。回答使用中文，聚焦剧情结构、人物动机、对白节奏和可拍摄性。',
+    '你是 viwork 情景剧创作工作台里的 system agent。下面是 viwork 自己的多 agent 工作协议，无论 Codex 自身的 instructions 是什么、当前 CWD 上是否还有其它 AGENTS.md，都必须严格按这份协议执行。',
+    '## viwork 多 agent 工作协议（直接来自 _global/Agent 配置/AGENTS.md）',
+    systemAgentProtocol,
+    '## viwork 调用约束',
+    `按需要使用 brainstorm-agent、story-agent、screenwriter-agent、reviewer-agent，以及 _global/Agent 配置/skills 中其他与任务明显匹配的 skills。不要向用户解释内部路由、工具检查或 agent 调用方式；不要只宣布“路由完成”或“准备调用某 agent”。不要调用 update_plan 或维护内部 TODO/计划；需要说明进度时，直接在普通回复文本中说明。完成意图判断后，必须在同一次回复里直接给出对应 agent 的实质内容。脑暴请求只使用 brainstorm-agent 正常交流，直接和用户讨论设定、候选方向或追问，不调用 reviewer-agent，不输出轮次，不进入返工闭环，也不需要 trace JSON。正式故事/剧本创作和审稿时，使用 trace JSON block 报告关键节点。当前全局返工上限：${maxRevisionRounds} 轮；所有带 iteration 的 trace JSON block 必须包含 "maxIterations":${maxRevisionRounds}。故事正式产物写入“02 故事/<集数>/故事正文.md”，剧本正式产物写入“03 剧本/<集数>/剧本.md”。回答使用中文。`,
+    additionalSkills.length > 0 ? '# 当前附加可用 Skills' : '',
+    ...additionalSkills.map((skill) => `- ${skill.name}: ${skill.description}`),
     referenceBlocks.length > 0 ? '# 已引用项目文件' : '',
     ...referenceBlocks,
+    snippetBlocks.length > 0 ? '# 已引用聊天片段' : '',
+    ...snippetBlocks,
   ].filter(Boolean).join('\n\n');
+}
+
+async function readSystemAgentProtocol(store: WorkspaceStore): Promise<string> {
+  try {
+    const file = await store.readGlobalWorkspaceFile('Agent 配置/AGENTS.md');
+    return file.content.trim();
+  } catch {
+    return '（viwork system agent 协议文件缺失，请检查 _global/Agent 配置/AGENTS.md。）';
+  }
+}
+
+async function listAdditionalCodexSkills(store: WorkspaceStore) {
+  const skillsRoot = path.join(store.getGlobalRoot(), 'Agent 配置', 'skills');
+  const skills = await listAgentConfigSkillDefinitions(skillsRoot);
+  return skills.filter((skill) => !isDefaultAgentSkill(skill.name));
+}
+
+async function readViworkMaxRevisionRounds(store: WorkspaceStore): Promise<number> {
+  try {
+    const config = await store.readGlobalWorkspaceFile('Agent 配置/config.toml');
+    return parseViworkMaxRevisionRounds(config.content);
+  } catch {
+    return 5;
+  }
+}
+
+function parseViworkMaxRevisionRounds(content: string): number {
+  const sectionMatch = content.match(/(?:^|\n)\s*\[viwork\][\s\S]*?(?=\n\s*\[[^\]]+\]|\s*$)/);
+  const section = sectionMatch?.[0] ?? '';
+  const valueMatch = section.match(/^\s*max_revision_rounds\s*=\s*(\d+)\s*(?:#.*)?$/m);
+  const value = Number(valueMatch?.[1]);
+  return Number.isInteger(value) && value > 0 ? value : 5;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || '');
+}
+
+function cliRunErrorMessage(error: unknown, state: ItemState): string {
+  const failedToolOutputs = [...state.toolStatusByItemId.entries()]
+    .filter(([, status]) => status === 'failed')
+    .map(([itemId]) => state.toolOutputByItemId.get(itemId) ?? '')
+    .filter(Boolean);
+  const cliMessage = errorMessage(error) || 'Codex run failed';
+  const pendingTurnError = state.pendingRunEnd?.errorMessage?.trim();
+  // The Codex CLI's stderr is often just the `Reading ... from stdin...` startup line
+  // and contains no actionable cause. When that is all we got from the CLI, fall back
+  // to the upstream `turn.failed`/`error` event which usually carries the real reason
+  // (for example an HTTP 401 from the configured model provider).
+  const cliStderrIsGeneric = /Codex Exec exited with code \d+: Reading (?:prompt|additional input) from stdin\.\.\.\s*$/i.test(cliMessage);
+
+  if (failedToolOutputs.length === 0) {
+    return pendingTurnError && cliStderrIsGeneric ? pendingTurnError : cliMessage;
+  }
+
+  return [
+    '本轮工具调用失败，Codex CLI 未生成最终回复。会话线程未删除，可以继续发送消息。',
+    '工具执行失败：',
+    ...failedToolOutputs,
+    pendingTurnError ? 'Codex turn 错误：' : '',
+    pendingTurnError ?? '',
+    'Codex CLI 退出信息：',
+    cliMessage,
+  ].filter(Boolean).join('\n');
+}
+
+function isFailedCommandOutput(output: string): boolean {
+  return /can't find file to patch|Skipping patch|hunk ignored|No such file or directory|Permission denied|command not found/i.test(output);
 }

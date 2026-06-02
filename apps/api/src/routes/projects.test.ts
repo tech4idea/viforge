@@ -28,7 +28,9 @@ describe('projects routes', () => {
     const files = await listResponse.json();
     expect(files).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'Agent 配置/AGENTS.md', name: 'AGENTS.md', type: 'file' }),
-      expect.objectContaining({ path: 'Agent 配置/skills/人物设定技能/SKILL.md', name: 'SKILL.md', type: 'file' }),
+      expect.objectContaining({ path: 'Agent 配置/skills/source-analyst-agent/SKILL.md', name: 'SKILL.md', type: 'file' }),
+      expect.objectContaining({ path: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md', name: 'SKILL.md', type: 'file' }),
+      expect.objectContaining({ path: 'Agent 配置/skills/reviewer-agent/SKILL.md', name: 'SKILL.md', type: 'file' }),
       expect.objectContaining({ path: '模板库/剧本文档模板.md', name: '剧本文档模板.md', type: 'file' }),
     ]));
 
@@ -36,7 +38,7 @@ describe('projects routes', () => {
     expect(readResponse.status).toBe(200);
     await expect(readResponse.json()).resolves.toEqual({
       path: 'Agent 配置/AGENTS.md',
-      content: expect.stringContaining('情景剧创作'),
+      content: expect.stringContaining('viwork system agent'),
     });
   });
 
@@ -89,8 +91,9 @@ describe('projects routes', () => {
     expect(response.status).toBe(200);
     const files = await response.json();
     expect(files).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: '01 基本设定/项目简介.md', name: '项目简介.md', type: 'file' }),
-      expect.objectContaining({ path: '03 剧本/01 第一集/第一版剧本.md', name: '第一版剧本.md', type: 'file' }),
+      expect.objectContaining({ path: '01 原著资料/项目简介.md', name: '项目简介.md', type: 'file' }),
+      expect.objectContaining({ path: '02 改编方案/01 第一集/单集改编方案.md', name: '单集改编方案.md', type: 'file' }),
+      expect.objectContaining({ path: '03 剧本/01 第一集/剧本.md', name: '剧本.md', type: 'file' }),
       expect.objectContaining({ path: '04 分镜脚本/01 第一集/01 第一分镜/分镜脚本.md', name: '分镜脚本.md', type: 'file' }),
     ]));
   });
@@ -98,11 +101,11 @@ describe('projects routes', () => {
   it('reads a project file', async () => {
     const project = await createProject('Brief Readers');
 
-    const response = await app.request(`/api/projects/${project.id}/files/${encodePath('01 基本设定/项目简介.md')}`);
+    const response = await app.request(`/api/projects/${project.id}/files/${encodePath('01 原著资料/项目简介.md')}`);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      path: '01 基本设定/项目简介.md',
+      path: '01 原著资料/项目简介.md',
       content: expect.stringContaining('Brief Readers'),
     });
   });
@@ -110,24 +113,24 @@ describe('projects routes', () => {
   it('writes project file content', async () => {
     const project = await createProject('Script Writers');
 
-    const response = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/第一版剧本.md')}`, {
+    const response = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/剧本.md')}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ content: 'INT. OFFICE - DAY' }),
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ path: '03 剧本/01 第一集/第一版剧本.md', content: 'INT. OFFICE - DAY' });
+    await expect(response.json()).resolves.toEqual({ path: '03 剧本/01 第一集/剧本.md', content: 'INT. OFFICE - DAY' });
 
-    const readResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/第一版剧本.md')}`);
-    await expect(readResponse.json()).resolves.toEqual({ path: '03 剧本/01 第一集/第一版剧本.md', content: 'INT. OFFICE - DAY' });
+    const readResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/剧本.md')}`);
+    await expect(readResponse.json()).resolves.toEqual({ path: '03 剧本/01 第一集/剧本.md', content: 'INT. OFFICE - DAY' });
   });
 
   it('rejects missing or non-string file content', async () => {
     const project = await createProject('Content Validators');
 
     for (const body of [{}, { content: 42 }]) {
-      const response = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/第一版剧本.md')}`, {
+      const response = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/剧本.md')}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),

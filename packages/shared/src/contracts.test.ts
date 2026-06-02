@@ -3,21 +3,22 @@ import { DEFAULT_SITCOM_FILES, GLOBAL_WORKSPACE_TREE, createDefaultWorkspaceFile
 import type { AgentRun, RunEvent, StreamEvent } from './contracts';
 
 describe('shared contracts', () => {
-  it('defines the default sitcom workspace files', () => {
+  it('defines the default novel adaptation workspace files', () => {
     expect(DEFAULT_SITCOM_FILES.map((file) => file.path)).toEqual(expect.arrayContaining([
-      '01 基本设定/项目简介.md',
-      '01 基本设定/人物设定.md',
-      '02 故事/整季故事线.md',
-      '02 故事/01 第一集/单集大纲.md',
-      '03 剧本/01 第一集/第一版剧本.md',
+      '01 原著资料/项目简介.md',
+      '01 原著资料/原著梗概.md',
+      '01 原著资料/人物关系.md',
+      '02 改编方案/全季改编方案.md',
+      '02 改编方案/01 第一集/单集改编方案.md',
+      '03 剧本/01 第一集/剧本.md',
       '04 分镜脚本/01 第一集/01 第一分镜/分镜脚本.md',
       '05 视频/01 第一集/01 第一分镜/视频生成提示词.md',
       '06 产物/01 第一集/素材清单.md',
     ]));
-    expect(createDefaultWorkspaceFiles('都市轻喜剧')).toContainEqual(
+    expect(createDefaultWorkspaceFiles('长夜')).toContainEqual(
       expect.objectContaining({
-        path: '01 基本设定/项目简介.md',
-        content: expect.stringContaining('都市轻喜剧'),
+        path: '01 原著资料/项目简介.md',
+        content: expect.stringContaining('长夜'),
       }),
     );
   });
@@ -29,12 +30,14 @@ describe('shared contracts', () => {
         type: 'directory',
         children: expect.arrayContaining([
           expect.objectContaining({ name: 'AGENTS.md', type: 'file' }),
+          expect.objectContaining({ name: 'config.toml', type: 'file' }),
           expect.objectContaining({
             name: 'skills',
             type: 'directory',
             children: expect.arrayContaining([
-              expect.objectContaining({ name: '人物设定技能', type: 'directory' }),
-              expect.objectContaining({ name: '视频生成提示词技能', type: 'directory' }),
+              expect.objectContaining({ name: 'source-analyst-agent', type: 'directory' }),
+              expect.objectContaining({ name: 'adaptation-planner-agent', type: 'directory' }),
+              expect.objectContaining({ name: 'reviewer-agent', type: 'directory' }),
             ]),
           }),
         ]),
@@ -62,12 +65,21 @@ describe('shared contracts', () => {
       source: 'web',
       prompt: '改写第一幕',
       referencedFiles: [{ path: 'script.md', label: 'script.md' }],
+      referencedSnippets: [{
+        id: 'snippet-1',
+        messageId: 'message-1',
+        role: 'assistant',
+        label: '创作助手 片段',
+        text: '商场失物招领处',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }],
       status: 'success',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
 
     expect(run.referencedFiles[0]).toEqual({ path: 'script.md', label: 'script.md' });
+    expect(run.referencedSnippets?.[0].text).toBe('商场失物招领处');
   });
 
   it('allows streaming text, thinking, tool and terminal events', () => {
@@ -95,6 +107,7 @@ describe('shared contracts', () => {
         errorMessage: null,
       },
       { type: 'text.delta', runId: 'run_1', emittedAt: '2026-01-01T00:00:00.005Z', sequence: 1, delta: '这里是一版对白。' },
+      { type: 'agent.step.start', runId: 'run_1', emittedAt: '2026-01-01T00:00:00.005Z', agentId: 'adaptation-planner-agent', phase: '改编方案', iteration: 1, maxIterations: 5 },
       { type: 'run.end', runId: 'run_1', emittedAt: '2026-01-01T00:00:00.006Z', status: 'success', errorMessage: null },
     ];
 
@@ -106,6 +119,7 @@ describe('shared contracts', () => {
       'tool_use.delta',
       'tool_use.end',
       'text.delta',
+      'agent.step.start',
       'run.end',
     ]);
   });

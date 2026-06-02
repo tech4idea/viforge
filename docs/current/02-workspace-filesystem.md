@@ -6,13 +6,16 @@
 
 根目录：
 
-- 默认：`apps/api/data/workspaces`
+- 默认：`~/.viwork/data/workspaces`（解析 `process.env.HOME` 后拼出 `${HOME}/.viwork/data/workspaces`）
 - 环境变量覆盖：`WORKSPACES_ROOT`
+
+默认根目录故意落在 viwork 源码树之外。Codex CLI 启动时会从 `--cd` 指定的目录向上递归查找 `AGENTS.md` 并把它注入 system prompt；如果根目录在 `apps/api/data/workspaces` 里，向上回溯就会命中 `/home/wbo/project/viwork/AGENTS.md`，把 viwork 仓库的编码规范混进情景剧 system agent 的提示词。落到 `~/.viwork/data/workspaces` 之后，CWD 与 `<CODEX_HOME>/AGENTS.md` 都不在源码树里，那份仓库根 `AGENTS.md` 不会再上溯。仍想用旧路径（`apps/api/data/workspaces`）的开发者只要显式 `export WORKSPACES_ROOT=...` 即可。
 
 特殊目录：
 
 - `_global`：全局区域。
 - `<projectId>`：情景剧项目区域。
+- `temp-*`：临时会话工作目录，由临时创作助手会话创建，不出现在正式项目列表中。
 - `project.json`：项目元数据文件。
 
 ## WorkspaceStore 能力
@@ -102,12 +105,19 @@
 - `projects`
 - `entries`
 - `globalEntries`
+- `temporaryEntriesByProject`
 - `activeWorkspaceScope`
 - `selectedProjectId`
 - `selectedProjectPath`
 - `selectedGlobalPath`
+- `selectedTemporaryProjectId`
+- `selectedTemporaryPath`
 - `collapsedGlobalPaths`
 - `collapsedDirectoriesByProject`
+- `collapsedTemporarySessionIds`
+- `collapsedDirectoriesByTemporaryProject`
+
+工作区树包含全局区域、正式情景剧项目和临时会话工作目录。临时会话工作目录位于情景剧区域下方，始终可见但默认折叠；展开后每个临时会话对应一个 `temp-*` workspace 节点，临时会话节点也默认折叠。展开节点后复用项目文件 API 完成预览、编辑、上传、重命名、删除和同目录内拖拽移动。
 
 工作区树可右键新建、上传、重命名、删除，也支持拖拽移动。拖拽移动入口：
 
@@ -129,4 +139,3 @@
 - [apps/api/src/storage/workspaceStore.test.ts](../../apps/api/src/storage/workspaceStore.test.ts)
 - [apps/api/src/routes/projects.test.ts](../../apps/api/src/routes/projects.test.ts)
 - [apps/web/src/workspace-tree.test.ts](../../apps/web/src/workspace-tree.test.ts)
-

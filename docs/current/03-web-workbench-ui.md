@@ -48,6 +48,16 @@ const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, edito
 
 默认加载后目录折叠，选中或新建目标路径时用 `revealPath` 展开祖先目录。
 
+## 刷新后的选择恢复
+
+前端会把最近一次工作区选择写入浏览器 localStorage：
+
+```text
+viwork.workspaceSelection.v1
+```
+
+记录内容包括当前工作区范围、项目文件路径、全局文件路径、临时工作目录 projectId 和临时文件路径。页面刷新后先恢复路径，再从后端重新读取文件树和文件正文；如果路径已不存在，就回退到第一个可编辑文本文件。这里不缓存完整文件正文，避免展示过期内容。
+
 ## 右键菜单
 
 当前有三种右键菜单：
@@ -90,4 +100,3 @@ const [chatReadingMode, setChatReadingMode] = useState(() => readStoredChatReadi
 ```ts
 viwork.chatReadingMode.v1
 ```
-

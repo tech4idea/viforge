@@ -26,6 +26,15 @@ export type ReferencedFile = {
   label: string;
 };
 
+export type ReferencedChatSnippet = {
+  id: string;
+  messageId: string;
+  role: 'user' | 'assistant';
+  label: string;
+  text: string;
+  createdAt: string;
+};
+
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled';
 
 export type RunSource = 'web' | 'schedule' | 'qq' | 'wechat';
@@ -37,7 +46,9 @@ export type AgentRun = {
   codexThreadId?: string;
   source: RunSource;
   prompt: string;
+  model?: string;
   referencedFiles: ReferencedFile[];
+  referencedSnippets?: ReferencedChatSnippet[];
   status: RunStatus;
   createdAt: string;
   updatedAt: string;
@@ -48,15 +59,34 @@ export type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  attachments?: ChatMessageAttachment[];
   events?: RunEvent[];
   referencedFiles: ReferencedFile[];
+  referencedSnippets?: ReferencedChatSnippet[];
   streamEvents: StreamEvent[];
   status?: 'idle' | 'running' | 'success' | 'error';
 };
 
+export type ChatMessageAttachment = {
+  id: string;
+  kind: 'reference-image' | 'generated-image';
+  name: string;
+  path: string;
+  projectId: string;
+  mimeType: string;
+  prompt?: string;
+  model?: string;
+  aspectRatio?: GeminiImageAspectRatio;
+  thinkingLevel?: GeminiImageThinkingLevel;
+  createdAt: string;
+};
+
+export type ChatSessionKind = 'assistant' | 'image';
+
 export type ChatSession = {
   id: string;
   projectId: string;
+  kind?: ChatSessionKind;
   codexThreadId?: string | null;
   title: string;
   createdAt: string;
@@ -65,10 +95,63 @@ export type ChatSession = {
   messages: ChatMessage[];
 };
 
+export type GeminiImageModel = 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview';
+
+export type GeminiImageAspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+
+export type GeminiImageThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+
+export type ImageGenerationReferenceImage = {
+  name: string;
+  mimeType: string;
+  contentBase64: string;
+};
+
+export type ImageGenerationRequest = {
+  sessionId?: string;
+  prompt: string;
+  model?: string;
+  aspectRatio: GeminiImageAspectRatio;
+  thinkingLevel?: GeminiImageThinkingLevel;
+  count: number;
+  referenceImages?: ImageGenerationReferenceImage[];
+};
+
+export type ImageGenerationResponse = {
+  session: ChatSession;
+  userMessage: ChatMessage;
+  assistantMessage: ChatMessage;
+};
+
+export type AigcHubModelMetadata = {
+  id: string;
+  label: string;
+  provider?: string;
+  capabilities: string[];
+};
+
+export type AigcHubModelListResponse = {
+  configured: boolean;
+  models: AigcHubModelMetadata[];
+  error?: string;
+};
+
 export type RunEvent =
   | { type: 'run.start'; runId: string }
   | { type: 'text.delta'; runId: string; text: string }
   | { type: 'text.message'; runId: string; text: string }
+  | { type: 'agent.step.start'; runId: string; agentId: string; phase: string; iteration: number; maxIterations?: number }
+  | {
+    type: 'agent.step.end';
+    runId: string;
+    agentId: string;
+    phase: string;
+    iteration: number;
+    maxIterations?: number;
+    status: Exclude<AgentTraceStatus, 'running' | 'stopped'>;
+  }
+  | { type: 'agent.review.reject'; runId: string; targetAgentId: string; iteration: number; maxIterations?: number; reasons: string[] }
+  | { type: 'agent.workflow.end'; runId: string; status: 'passed' | 'stopped'; outputPath?: string }
   | { type: 'tool.use'; runId: string; name: string; input?: unknown }
   | { type: 'tool.result'; runId: string; name: string; output?: unknown }
   | { type: 'file.changed'; runId: string; path: string; change: 'created' | 'modified' | 'deleted' }
@@ -77,6 +160,23 @@ export type RunEvent =
 export type StreamRunStatus = 'success' | 'error' | 'cancelled';
 
 export type StreamToolStatus = 'running' | 'succeeded' | 'failed';
+
+export type AgentTraceStatus = 'running' | 'passed' | 'rejected' | 'failed' | 'stopped';
+
+export type AgentTraceEvent =
+  | { type: 'agent.step.start'; runId: string; emittedAt: string; agentId: string; phase: string; iteration: number; maxIterations?: number }
+  | {
+    type: 'agent.step.end';
+    runId: string;
+    emittedAt: string;
+    agentId: string;
+    phase: string;
+    iteration: number;
+    maxIterations?: number;
+    status: Exclude<AgentTraceStatus, 'running' | 'stopped'>;
+  }
+  | { type: 'agent.review.reject'; runId: string; emittedAt: string; targetAgentId: string; iteration: number; maxIterations?: number; reasons: string[] }
+  | { type: 'agent.workflow.end'; runId: string; emittedAt: string; status: 'passed' | 'stopped'; outputPath?: string };
 
 export type StreamEvent =
   | { type: 'run.start'; runId: string; emittedAt: string }
@@ -104,7 +204,8 @@ export type StreamEvent =
     errorMessage: string | null;
   }
   | { type: 'file.changed'; runId: string; emittedAt: string; path: string; change: 'created' | 'modified' | 'deleted' }
-  | { type: 'run.end'; runId: string; emittedAt: string; status: StreamRunStatus; errorMessage: string | null };
+  | { type: 'run.end'; runId: string; emittedAt: string; status: StreamRunStatus; errorMessage: string | null }
+  | AgentTraceEvent;
 
 export type TheaterSkill = {
   slug: string;
@@ -115,6 +216,9 @@ export type TheaterSkill = {
   scope: 'system' | 'user';
   createdAt: string;
   updatedAt: string;
+  source?: 'plaza' | 'agent-config';
+  mutable?: boolean;
+  location?: string;
 };
 
 export type WechatStatus = {

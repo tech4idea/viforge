@@ -2,14 +2,14 @@ import { GLOBAL_WORKSPACE_TREE, type WorkspaceTreeNode } from '@viwork/shared';
 import type { WorkspaceEntry } from './api';
 
 export type WorkspaceSection = {
-  key: 'global' | 'sitcoms';
+  key: 'global' | 'adaptations';
   title: string;
   description: string;
 };
 
 export const WORKSPACE_SECTIONS: WorkspaceSection[] = [
   { key: 'global', title: '全局区域', description: '创作规范、技能、知识库与模板库' },
-  { key: 'sitcoms', title: '情景剧区域', description: '每个项目独立管理设定、故事、剧本、分镜、视频和产物' },
+  { key: 'adaptations', title: '改编项目区域', description: '每个项目独立管理原著资料、改编方案、剧本、分镜、视频和产物' },
 ];
 
 export const GLOBAL_TREE = GLOBAL_WORKSPACE_TREE;
