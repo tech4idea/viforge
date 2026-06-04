@@ -238,16 +238,11 @@ textarea::selection {
 }
 
 .logo-mark {
-  display: inline-grid;
   width: 28px;
   height: 28px;
-  place-items: center;
   border-radius: 9px;
-  background: linear-gradient(135deg, #60a5fa, #8b5cf6);
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 900;
-  text-transform: uppercase;
+  display: block;
+  box-shadow: 0 8px 18px rgba(16, 24, 32, 0.18);
 }
 
 .brand-line strong {

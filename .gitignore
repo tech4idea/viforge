@@ -74,3 +74,5 @@ apps/api/data/
 
 # Claude/superpowers worktrees
 .worktrees/
+.qoder/
+var/
