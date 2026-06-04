@@ -1,6 +1,7 @@
 import { memo, useMemo } from 'react';
 
 import type { AgentTraceEvent, ChatMessage, RunEvent, StreamEvent } from './api';
+import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 import { MarkdownReadPreview } from './viewer-components';
 
 type TraceSnapshot = {
@@ -55,7 +56,7 @@ export const AssistantStreamBody = memo(function AssistantStreamBody({ message }
   );
 });
 
-function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }): JSX.Element {
+const AgentTraceTimeline = memo(function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }): JSX.Element {
   const snapshot = currentTraceSnapshot(events);
   const timelineEvents = events.filter((event): event is Extract<AgentTraceEvent, { type: 'agent.step.start' | 'agent.step.end' | 'agent.review.reject' }> =>
     event.type === 'agent.step.start' || event.type === 'agent.step.end' || event.type === 'agent.review.reject',
@@ -139,7 +140,7 @@ function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }): JSX.Elem
       ) : null}
     </div>
   );
-}
+});
 
 function currentTraceSnapshot(events: AgentTraceEvent[]): TraceSnapshot | null {
   return events.reduce<TraceSnapshot | null>((snapshot, event) => {
@@ -308,15 +309,7 @@ function collectToolCalls(events: StreamEvent[]): Array<{
 }
 
 function agentLabel(agentId: string): string {
-  const labels: Record<string, string> = {
-    system: 'system',
-    'brainstorm-agent': '脑暴',
-    'source-analyst-agent': '原著分析',
-    'adaptation-planner-agent': '改编方案',
-    'screenwriter-agent': '编剧',
-    'reviewer-agent': '审稿',
-  };
-  return labels[agentId] ?? agentId;
+  return ACTIVE_PRODUCT_PROFILE.agentLabels[agentId] ?? agentId;
 }
 
 function statusLabel(status: TraceSnapshot['status']): string {

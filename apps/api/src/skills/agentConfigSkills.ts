@@ -56,14 +56,14 @@ export async function listAgentConfigSkillDefinitions(skillsRoot: string): Promi
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hans-CN'));
 }
 
-export function toTheaterSkill(skill: AgentConfigSkillDefinition): TheaterSkill {
+export function toTheaterSkill(skill: AgentConfigSkillDefinition, defaultAgentSkillNames = DEFAULT_AGENT_SKILL_NAMES): TheaterSkill {
   return {
     slug: `agent-config:${skill.name}`,
     title: skill.name,
     description: skill.description,
     prompt: '',
     enabled: true,
-    scope: DEFAULT_AGENT_SKILL_NAMES.has(skill.name) ? 'system' : 'user',
+    scope: defaultAgentSkillNames.has(skill.name) ? 'system' : 'user',
     createdAt: skill.createdAt,
     updatedAt: skill.updatedAt,
     source: 'agent-config',
@@ -72,8 +72,8 @@ export function toTheaterSkill(skill: AgentConfigSkillDefinition): TheaterSkill 
   };
 }
 
-export function isDefaultAgentSkill(name: string): boolean {
-  return DEFAULT_AGENT_SKILL_NAMES.has(name);
+export function isDefaultAgentSkill(name: string, defaultAgentSkillNames = DEFAULT_AGENT_SKILL_NAMES): boolean {
+  return defaultAgentSkillNames.has(name);
 }
 
 async function safeReaddir(directory: string) {

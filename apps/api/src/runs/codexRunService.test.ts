@@ -142,14 +142,14 @@ describe('codex run service', () => {
     await expect(readFile(path.join(root, '.codex-home', run.id, 'AGENTS.md'), 'utf8')).resolves.toEqual(
       expect.stringContaining('viwork system agent'),
     );
-    const storySkill = await readFile(path.join(root, '.codex-home', run.id, 'skills', 'story-agent', 'SKILL.md'), 'utf8');
-    expect(storySkill).toContain('name: "story-agent"');
-    expect(storySkill).toContain('# story-agent');
+    const sourceAnalystSkill = await readFile(path.join(root, '.codex-home', run.id, 'skills', 'source-analyst-agent', 'SKILL.md'), 'utf8');
+    expect(sourceAnalystSkill).toContain('name: "source-analyst-agent"');
+    expect(sourceAnalystSkill).toContain('# source-analyst-agent');
     const geminiSkill = await readFile(path.join(root, '.codex-home', run.id, 'skills', 'gemini-api-dev', 'SKILL.md'), 'utf8');
     expect(geminiSkill).toContain('name: gemini-api-dev');
     await expect(readFile(path.join(root, '.codex-home', run.id, 'auth.json'), 'utf8')).resolves.toBe('{"OPENAI_API_KEY":"test"}\n');
     await expect(readFile(path.join(root, '.codex-home', run.id, 'installation_id'), 'utf8')).resolves.toBe('installation-1\n');
-    expect(capturedInput).toEqual(expect.stringContaining('# 情景剧创作请求'));
+    expect(capturedInput).toEqual(expect.stringContaining('# 小说改编剧本创作请求'));
     expect(capturedInput).toEqual(expect.stringContaining('当前全局返工上限：7 轮'));
     expect(capturedInput).toEqual(expect.stringContaining('"maxIterations":7'));
     expect(capturedInput).toEqual(expect.stringContaining('脑暴请求只使用 brainstorm-agent 正常交流'));

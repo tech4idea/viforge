@@ -21,6 +21,22 @@ afterEach(async () => {
 });
 
 describe('projects routes', () => {
+  it('exposes the active product profile', async () => {
+    const response = await app.request('/api/product-profile');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      id: 'novel-adaptation',
+      documentTitle: 'viwork 小说改编剧本工作台',
+      defaultProjectName: '长夜改编计划',
+      workspaceSections: {
+        project: expect.objectContaining({ title: '改编项目区域' }),
+      },
+      defaultAgentSkillNames: expect.arrayContaining(['brainstorm-agent', 'reviewer-agent']),
+      artifactPaths: expect.objectContaining({ script: '03 剧本/01 第一集/剧本.md' }),
+    });
+  });
+
   it('lists and reads global workspace files', async () => {
     const listResponse = await app.request('/api/global/files');
 
@@ -65,6 +81,17 @@ describe('projects routes', () => {
     await expect(listResponse.json()).resolves.toEqual([created]);
   });
 
+  it('deletes a project and its workspace', async () => {
+    const project = await createProject('Deleted Project');
+
+    const deleteResponse = await app.request(`/api/projects/${project.id}`, { method: 'DELETE' });
+
+    expect(deleteResponse.status).toBe(200);
+    await expect(deleteResponse.json()).resolves.toEqual({ deleted: true });
+    await expect(app.request(`/api/projects/${project.id}`)).resolves.toMatchObject({ status: 404 });
+    await expect(app.request(`/api/projects/${project.id}/files`)).resolves.toMatchObject({ status: 404 });
+  });
+
   it('rejects missing or blank project names', async () => {
     for (const body of [{}, { name: '   ' }]) {
       const response = await app.request('/api/projects', {
@@ -94,7 +121,11 @@ describe('projects routes', () => {
       expect.objectContaining({ path: '01 原著资料/项目简介.md', name: '项目简介.md', type: 'file' }),
       expect.objectContaining({ path: '02 改编方案/01 第一集/单集改编方案.md', name: '单集改编方案.md', type: 'file' }),
       expect.objectContaining({ path: '03 剧本/01 第一集/剧本.md', name: '剧本.md', type: 'file' }),
-      expect.objectContaining({ path: '04 分镜脚本/01 第一集/01 第一分镜/分镜脚本.md', name: '分镜脚本.md', type: 'file' }),
+    ]));
+    expect(files).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: expect.stringContaining('04 分镜脚本') }),
+      expect.objectContaining({ path: expect.stringContaining('05 视频') }),
+      expect.objectContaining({ path: expect.stringContaining('06 产物') }),
     ]));
   });
 

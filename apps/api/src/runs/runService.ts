@@ -1,4 +1,11 @@
-import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunSource } from '@viwork/shared';
+import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunImageGenerationOptions, RunSource } from '@viwork/shared';
+import type { WechatIlinkClient } from '../wechat/wechatIlinkClient';
+
+export type WechatSendContext = {
+  ilinkClient: WechatIlinkClient;
+  userId: string;
+  contextToken: string;
+};
 
 export type CreateRunInput = {
   projectId: string;
@@ -6,9 +13,11 @@ export type CreateRunInput = {
   codexThreadId?: string;
   prompt: string;
   model?: string;
+  imageGeneration?: RunImageGenerationOptions;
   referencedFiles?: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
   source?: RunSource;
+  wechat?: WechatSendContext;
 };
 
 export type RunService = {

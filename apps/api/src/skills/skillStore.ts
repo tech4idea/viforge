@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TheaterSkill } from '@viwork/shared';
+import type { ProductProfile, TheaterSkill } from '@viwork/shared';
+
+import { PRODUCT_PROFILE } from '../env';
 
 import { listAgentConfigSkillDefinitions, toTheaterSkill } from './agentConfigSkills';
 
@@ -13,13 +15,15 @@ export type SkillStore = {
 
 type SkillStoreOptions = {
   agentConfigSkillsRoot: string;
+  productProfile?: ProductProfile;
 };
 
 export function createSkillStore(options: SkillStoreOptions): SkillStore {
+  const defaultAgentSkillNames = new Set((options.productProfile ?? PRODUCT_PROFILE).defaultAgentSkillNames);
   return {
     async listSkills() {
       const skills = await listAgentConfigSkillDefinitions(options.agentConfigSkillsRoot);
-      return skills.map(toTheaterSkill);
+      return skills.map((skill) => toTheaterSkill(skill, defaultAgentSkillNames));
     },
 
     async setEnabled() {

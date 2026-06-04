@@ -12,6 +12,7 @@ import type {
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
+  ProductProfile,
   Project,
   ReferencedChatSnippet,
   ReferencedFile,
@@ -20,6 +21,7 @@ import type {
   TheaterSkill,
   WechatSetupSession,
   WechatStatus,
+  ChatSessionModelConfig,
   WorkspaceEntry,
   WorkspaceFile,
 } from '@viwork/shared';
@@ -38,6 +40,7 @@ export type {
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
+  ProductProfile,
   Project,
   ReferencedChatSnippet,
   ReferencedFile,
@@ -51,6 +54,7 @@ export type {
 } from '@viwork/shared';
 
 export type ApiClient = {
+  getProductProfile(): Promise<ProductProfile>;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
   readGlobalWorkspaceFile(path: string): Promise<WorkspaceFile>;
   writeGlobalWorkspaceFile(path: string, content: string): Promise<WorkspaceFile>;
@@ -61,6 +65,7 @@ export type ApiClient = {
   deleteGlobalEntry(path: string): Promise<{ deleted: true }>;
   listProjects(): Promise<Project[]>;
   createProject(input: CreateProjectInput): Promise<Project>;
+  deleteProject(projectId: string): Promise<{ deleted: true }>;
   getProject(projectId: string): Promise<Project>;
   listWorkspaceEntries(projectId: string): Promise<WorkspaceEntry[]>;
   readWorkspaceFile(projectId: string, path: string): Promise<WorkspaceFile>;
@@ -74,7 +79,7 @@ export type ApiClient = {
   listTemporaryChatSessions(options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   createChatSession(projectId: string, input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
   createTemporaryChatSession(input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
-  updateChatSession(sessionId: string, input: { codexThreadId?: string | null; title?: string }): Promise<ChatSession>;
+  updateChatSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession>;
   archiveChatSession(sessionId: string): Promise<ChatSession>;
   restoreChatSession(sessionId: string): Promise<ChatSession>;
   appendChatMessage(sessionId: string, message: ChatMessage): Promise<ChatSession>;
@@ -89,7 +94,9 @@ export type ApiClient = {
   getWechatStatus(): Promise<WechatStatus>;
   createWechatSetupSession(): Promise<WechatSetupSession>;
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
+  disconnectWechat(): Promise<{ disconnected: boolean }>;
 };
+
 
 export type CreateProjectInput = {
   name: string;
@@ -102,6 +109,12 @@ export type CreateRunInput = {
   codexThreadId?: string;
   prompt: string;
   model?: string;
+  imageGeneration?: {
+    model?: string;
+    aspectRatio?: GeminiImageAspectRatio;
+    thinkingLevel?: GeminiImageThinkingLevel;
+    count?: number;
+  };
   referencedFiles?: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
 };
@@ -148,6 +161,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   const baseUrl = trimTrailingSlashes(options.baseUrl ?? defaultBaseUrl);
 
   return {
+    getProductProfile: () => request<ProductProfile>(fetcher, baseUrl, '/api/product-profile'),
     listGlobalWorkspaceEntries: () => request<WorkspaceEntry[]>(fetcher, baseUrl, '/api/global/files'),
     readGlobalWorkspaceFile: (path) =>
       request<WorkspaceFile>(fetcher, baseUrl, `/api/global/files/${encodeWorkspacePath(path)}`),
@@ -185,6 +199,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<Project>(fetcher, baseUrl, '/api/projects', {
         method: 'POST',
         body: JSON.stringify(input),
+      }),
+    deleteProject: (projectId) =>
+      request<{ deleted: true }>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}`, {
+        method: 'DELETE',
       }),
     getProject: (projectId) => request<Project>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}`),
     listWorkspaceEntries: (projectId) =>
@@ -328,6 +346,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    disconnectWechat: () =>
+      request<{ disconnected: boolean }>(fetcher, baseUrl, '/api/wechat/connection', {
+        method: 'DELETE',
+      }),
+
   };
 }
 

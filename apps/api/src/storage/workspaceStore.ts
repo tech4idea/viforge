@@ -3,16 +3,16 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import path from 'node:path';
 
 import {
-  createDefaultGlobalWorkspaceFiles,
-  createDefaultWorkspaceFiles,
-  DEFAULT_DIRECTORIES,
-  DEFAULT_GLOBAL_DIRECTORIES,
+  createDefaultWorkspaceFilesForProfile,
+  resolveProductProfile,
+  type ProductProfile,
   type Project,
   type WorkspaceEntry,
   type WorkspaceFile,
 } from '@viwork/shared';
 
-import { WORKSPACES_ROOT } from '../env';
+import { PRODUCT_PROFILE, WORKSPACES_ROOT } from '../env';
+import { createDefaultGlobalWorkspaceFilesFromProfile } from '../productProfileDefaults';
 
 const METADATA_FILE = 'project.json';
 const GLOBAL_ROOT_NAME = '_global';
@@ -26,6 +26,7 @@ export type CreateProjectInput = {
 export type WorkspaceStore = {
   createProject(input: CreateProjectInput): Promise<Project>;
   createTemporaryProject(): Promise<Project>;
+  deleteProject(projectId: string): Promise<{ deleted: true }>;
   listProjects(): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
   getProjectRoot(projectId: string): string;
@@ -50,8 +51,9 @@ export type WorkspaceStore = {
   deleteWorkspaceEntry(projectId: string, entryPath: string): Promise<{ deleted: true }>;
 };
 
-export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
+export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productProfile?: ProductProfile } = {}): WorkspaceStore {
   const workspacesRoot = path.resolve(root);
+  const productProfile = options.productProfile ?? PRODUCT_PROFILE ?? resolveProductProfile();
 
   function projectRoot(projectId: string): string {
     const rootPath = path.resolve(workspacesRoot, projectId);
@@ -121,16 +123,17 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
 
   async function ensureGlobalWorkspace(): Promise<string> {
     const rootPath = globalRoot();
+    const defaultGlobalFiles = await createDefaultGlobalWorkspaceFilesFromProfile(productProfile);
     await mkdir(rootPath, { recursive: true });
     await migrateGlobalAgentConfig(rootPath);
-    await Promise.all(DEFAULT_GLOBAL_DIRECTORIES.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
+    await Promise.all(productProfile.globalDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
     await updateLegacyDefaultSystemAgent(rootPath);
     await removeLegacyDefaultAgentSkills(rootPath);
     await updateOutdatedDefaultAgentSkills(rootPath);
     await ensureAgentSkillFrontmatter(rootPath);
     await ensureViworkAgentConfig(rootPath);
     await Promise.all(
-      createDefaultGlobalWorkspaceFiles().map(async (file) => {
+      defaultGlobalFiles.map(async (file) => {
         const { absolutePath } = assertSafeGlobalWorkspacePath(file.path);
         try {
           await stat(absolutePath);
@@ -162,7 +165,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
       if (!isLegacyDefaultSystemAgent(currentContent) && !isOutdatedDefaultViworkSystemAgent(currentContent)) {
         return;
       }
-      const defaultAgent = createDefaultGlobalWorkspaceFiles().find((file) => file.path === `${GLOBAL_AGENT_CONFIG_DIR}/AGENTS.md`);
+      const defaultAgent = (await createDefaultGlobalWorkspaceFilesFromProfile(productProfile)).find((file) => file.path === `${GLOBAL_AGENT_CONFIG_DIR}/AGENTS.md`);
       if (defaultAgent) {
         await writeFile(agentsPath, defaultAgent.content, 'utf8');
       }
@@ -269,7 +272,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
       if (!isOutdated(content)) {
         return;
       }
-      const defaultSkill = createDefaultGlobalWorkspaceFiles().find(
+      const defaultSkill = (await createDefaultGlobalWorkspaceFilesFromProfile(productProfile)).find(
         (file) => file.path === `${GLOBAL_AGENT_CONFIG_DIR}/skills/${skillName}/SKILL.md`,
       );
       if (defaultSkill) {
@@ -447,9 +450,9 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
 
       const rootPath = projectRoot(project.id);
       await mkdir(rootPath, { recursive: true });
-      await Promise.all(DEFAULT_DIRECTORIES.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
+      await Promise.all(productProfile.projectDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
       await Promise.all(
-        createDefaultWorkspaceFiles(input.name).map(async (file) => {
+        createDefaultWorkspaceFilesForProfile(productProfile, input.name).map(async (file) => {
           const { absolutePath } = assertSafeWorkspacePath(project.id, file.path);
           await writeTextFile(absolutePath, file.content);
         }),
@@ -474,6 +477,15 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT): WorkspaceStore {
       await writeFile(metadataPath(project.id), JSON.stringify(project, null, 2), 'utf8');
 
       return project;
+    },
+
+    async deleteProject(projectId) {
+      const project = await readProject(projectId);
+      if (!project || project.temporary) {
+        throw new Error('Project not found');
+      }
+      await rm(projectRoot(projectId), { recursive: true, force: false });
+      return { deleted: true };
     },
 
     async listProjects() {

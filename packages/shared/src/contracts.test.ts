@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PRODUCT_PROFILES, createDefaultWorkspaceFilesForProfile, resolveProductProfile } from './productProfiles';
 import { DEFAULT_SITCOM_FILES, GLOBAL_WORKSPACE_TREE, createDefaultWorkspaceFiles } from './templates';
 import type { AgentRun, RunEvent, StreamEvent } from './contracts';
 
@@ -11,9 +12,11 @@ describe('shared contracts', () => {
       '02 改编方案/全季改编方案.md',
       '02 改编方案/01 第一集/单集改编方案.md',
       '03 剧本/01 第一集/剧本.md',
-      '04 分镜脚本/01 第一集/01 第一分镜/分镜脚本.md',
-      '05 视频/01 第一集/01 第一分镜/视频生成提示词.md',
-      '06 产物/01 第一集/素材清单.md',
+    ]));
+    expect(DEFAULT_SITCOM_FILES.map((file) => file.path)).not.toEqual(expect.arrayContaining([
+      expect.stringContaining('04 分镜脚本'),
+      expect.stringContaining('05 视频'),
+      expect.stringContaining('06 产物'),
     ]));
     expect(createDefaultWorkspaceFiles('长夜')).toContainEqual(
       expect.objectContaining({
@@ -45,6 +48,26 @@ describe('shared contracts', () => {
       expect.objectContaining({ name: '知识库', type: 'directory' }),
       expect.objectContaining({ name: '模板库', type: 'directory' }),
     ]);
+  });
+
+  it('defines selectable product profiles for workspace initialization and UI labels', () => {
+    for (const profile of Object.values(PRODUCT_PROFILES)) {
+      expect(profile.defaultProjectName).toEqual(expect.any(String));
+      expect(profile.workspaceSections.global.title).toBeTruthy();
+      expect(profile.workspaceSections.project.title).toBeTruthy();
+      expect(profile.defaultAgentSkillNames).toEqual(expect.arrayContaining(['brainstorm-agent', 'reviewer-agent']));
+      expect(profile.agentLabels['reviewer-agent']).toBeTruthy();
+      expect(profile.artifactPaths.script).toBeTruthy();
+      expect(createDefaultWorkspaceFilesForProfile(profile, '长夜')).toContainEqual(
+        expect.objectContaining({
+          path: profile.projectFiles[0]?.path,
+          content: expect.stringContaining('长夜'),
+        }),
+      );
+    }
+
+    expect(resolveProductProfile('sitcom')).toMatchObject({ id: 'sitcom', documentTitle: 'viwork 情景剧创作工作台' });
+    expect(resolveProductProfile('unknown')).toMatchObject({ id: 'novel-adaptation' });
   });
 
   it('allows the minimal run event sequence', () => {

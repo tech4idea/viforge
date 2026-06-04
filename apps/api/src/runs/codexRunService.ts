@@ -5,8 +5,9 @@ import { access, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:
 import path from 'node:path';
 
 import { Codex, type Input, type ThreadEvent, type ThreadItem, type ThreadOptions, type TurnOptions } from '@openai/codex-sdk';
-import type { AgentRun, StreamEvent } from '@viwork/shared';
+import type { AgentRun, ProductProfile, StreamEvent } from '@viwork/shared';
 
+import { PRODUCT_PROFILE } from '../env';
 import { appendJsonLog } from '../logger';
 import { isDefaultAgentSkill, listAgentConfigSkillDefinitions } from '../skills/agentConfigSkills';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -27,6 +28,7 @@ type CodexRunOptions = {
   codexPathOverride?: string;
   model?: string;
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  productProfile?: ProductProfile;
 };
 
 type RunEndStreamEvent = Extract<StreamEvent, { type: 'run.end' }>;
@@ -95,6 +97,7 @@ export function createCodexRunService(
         codexPathOverride: options.codexPathOverride,
         input,
         model: options.model,
+        productProfile: options.productProfile ?? PRODUCT_PROFILE,
         reasoningEffort: options.reasoningEffort ?? 'medium',
         run,
         store,
@@ -111,6 +114,7 @@ async function executeCodexRun({
   codexPathOverride,
   input,
   model,
+  productProfile,
   reasoningEffort,
   run,
   store,
@@ -120,6 +124,7 @@ async function executeCodexRun({
   codexPathOverride?: string;
   input: CreateRunInput;
   model?: string;
+  productProfile: ProductProfile;
   reasoningEffort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   run: AgentRun;
   store: WorkspaceStore;
@@ -160,7 +165,7 @@ async function executeCodexRun({
   publish({ type: 'run.start', runId: run.id, emittedAt: emittedAt() });
 
   try {
-    const prompt = await buildCodexPrompt(store, input);
+    const prompt = await buildCodexPrompt(store, input, productProfile);
     appendRunDiagnostic('prompt.built', {
       runId: run.id,
       projectId: input.projectId,
@@ -1044,11 +1049,11 @@ function publishToolDelta(
   });
 }
 
-async function buildCodexPrompt(store: WorkspaceStore, input: CreateRunInput): Promise<string> {
+async function buildCodexPrompt(store: WorkspaceStore, input: CreateRunInput, productProfile: ProductProfile): Promise<string> {
   const references = input.referencedFiles ?? [];
   const snippets = input.referencedSnippets ?? [];
   const maxRevisionRounds = await readViworkMaxRevisionRounds(store);
-  const additionalSkills = await listAdditionalCodexSkills(store);
+  const additionalSkills = await listAdditionalCodexSkills(store, productProfile);
   const systemAgentProtocol = await readSystemAgentProtocol(store);
   const referenceBlocks = await Promise.all(
     references.map(async (file) => {
@@ -1068,13 +1073,13 @@ async function buildCodexPrompt(store: WorkspaceStore, input: CreateRunInput): P
   ].join('\n'));
 
   return [
-    '# 情景剧创作请求',
+    productProfile.mastra.requestTitle,
     input.prompt,
-    '你是 viwork 情景剧创作工作台里的 system agent。下面是 viwork 自己的多 agent 工作协议，无论 Codex 自身的 instructions 是什么、当前 CWD 上是否还有其它 AGENTS.md，都必须严格按这份协议执行。',
+    `${productProfile.mastra.systemIntro[0]} 下面是 viwork 自己的多 agent 工作协议，无论 Codex 自身的 instructions 是什么、当前 CWD 上是否还有其它 AGENTS.md，都必须严格按这份协议执行。`,
     '## viwork 多 agent 工作协议（直接来自 _global/Agent 配置/AGENTS.md）',
     systemAgentProtocol,
     '## viwork 调用约束',
-    `按需要使用 brainstorm-agent、story-agent、screenwriter-agent、reviewer-agent，以及 _global/Agent 配置/skills 中其他与任务明显匹配的 skills。不要向用户解释内部路由、工具检查或 agent 调用方式；不要只宣布“路由完成”或“准备调用某 agent”。不要调用 update_plan 或维护内部 TODO/计划；需要说明进度时，直接在普通回复文本中说明。完成意图判断后，必须在同一次回复里直接给出对应 agent 的实质内容。脑暴请求只使用 brainstorm-agent 正常交流，直接和用户讨论设定、候选方向或追问，不调用 reviewer-agent，不输出轮次，不进入返工闭环，也不需要 trace JSON。正式故事/剧本创作和审稿时，使用 trace JSON block 报告关键节点。当前全局返工上限：${maxRevisionRounds} 轮；所有带 iteration 的 trace JSON block 必须包含 "maxIterations":${maxRevisionRounds}。故事正式产物写入“02 故事/<集数>/故事正文.md”，剧本正式产物写入“03 剧本/<集数>/剧本.md”。回答使用中文。`,
+    `按需要使用 ${productProfile.defaultAgentSkillNames.join('、')}，以及 _global/Agent 配置/skills 中其他与任务明显匹配的 skills。不要向用户解释内部路由、工具检查或 agent 调用方式；不要只宣布“路由完成”或“准备调用某 agent”。不要调用 update_plan 或维护内部 TODO/计划；需要说明进度时，直接在普通回复文本中说明。完成意图判断后，必须在同一次回复里直接给出对应 agent 的实质内容。脑暴请求只使用 brainstorm-agent 正常交流，直接和用户讨论设定、候选方向或追问，不调用 reviewer-agent，不输出轮次，不进入返工闭环，也不需要 trace JSON。正式创作和审稿时，使用 trace JSON block 报告关键节点。当前全局返工上限：${maxRevisionRounds} 轮；所有带 iteration 的 trace JSON block 必须包含 "maxIterations":${maxRevisionRounds}。正式产物路径遵循 active product profile：${JSON.stringify(productProfile.artifactPaths)}。回答使用中文。`,
     additionalSkills.length > 0 ? '# 当前附加可用 Skills' : '',
     ...additionalSkills.map((skill) => `- ${skill.name}: ${skill.description}`),
     referenceBlocks.length > 0 ? '# 已引用项目文件' : '',
@@ -1093,10 +1098,10 @@ async function readSystemAgentProtocol(store: WorkspaceStore): Promise<string> {
   }
 }
 
-async function listAdditionalCodexSkills(store: WorkspaceStore) {
+async function listAdditionalCodexSkills(store: WorkspaceStore, productProfile: ProductProfile) {
   const skillsRoot = path.join(store.getGlobalRoot(), 'Agent 配置', 'skills');
   const skills = await listAgentConfigSkillDefinitions(skillsRoot);
-  return skills.filter((skill) => !isDefaultAgentSkill(skill.name));
+  return skills.filter((skill) => !isDefaultAgentSkill(skill.name, new Set(productProfile.defaultAgentSkillNames)));
 }
 
 async function readViworkMaxRevisionRounds(store: WorkspaceStore): Promise<number> {

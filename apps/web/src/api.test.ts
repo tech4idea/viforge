@@ -28,12 +28,14 @@ describe('api client', () => {
 
     await client.createFolder('project-1', 'episodes/episode-02');
     await client.moveEntry('project-1', 'drafts/scene.md', 'episodes/episode-02/script.md');
+    await client.deleteProject('project-1');
     await client.updateSkill('conflict-pass', { enabled: false });
     await client.createWechatSetupSession();
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/base/api/projects/project-1/folders',
       '/base/api/projects/project-1/files/drafts/scene.md/move',
+      '/base/api/projects/project-1',
       '/base/api/skills/conflict-pass',
       '/base/api/wechat/setup-sessions',
     ]);
@@ -89,6 +91,15 @@ describe('api client', () => {
       '/base/api/global/files/Agent%20%E9%85%8D%E7%BD%AE/AGENTS.md',
       '/base/api/global/files/Agent%20%E9%85%8D%E7%BD%AE/AGENTS.md',
     ]);
+  });
+
+  it('calls the product profile endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 'novel-adaptation' }));
+    const client = createApiClient({ fetch: fetchMock, baseUrl: '/base' });
+
+    await expect(client.getProductProfile()).resolves.toEqual({ id: 'novel-adaptation' });
+
+    expect(fetchMock).toHaveBeenCalledWith('/base/api/product-profile', expect.objectContaining({ method: 'GET' }));
   });
 
   it('sends referenced files with run requests', async () => {

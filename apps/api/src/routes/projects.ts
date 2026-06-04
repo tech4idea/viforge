@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import type { WorkspaceStore } from '../storage/workspaceStore';
+import { PRODUCT_PROFILE } from '../env';
 
 const createProjectSchema = z.object({
   name: z.string().transform((name) => name.trim()).pipe(z.string().min(1)),
@@ -34,6 +35,8 @@ const moveEntrySchema = z.object({
 
 export function createProjectsRoutes(store: WorkspaceStore): Hono {
   const routes = new Hono();
+
+  routes.get('/product-profile', (context) => context.json(PRODUCT_PROFILE));
 
   routes.get('/global/files', async (context) => {
     try {
@@ -183,6 +186,14 @@ export function createProjectsRoutes(store: WorkspaceStore): Hono {
       }
 
       return context.json(project);
+    } catch (error) {
+      return handleKnownError(context, error, 'Project not found');
+    }
+  });
+
+  routes.delete('/projects/:projectId', async (context) => {
+    try {
+      return context.json(await store.deleteProject(context.req.param('projectId')));
     } catch (error) {
       return handleKnownError(context, error, 'Project not found');
     }

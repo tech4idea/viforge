@@ -1,5 +1,6 @@
-import { GLOBAL_WORKSPACE_TREE, type WorkspaceTreeNode } from '@viwork/shared';
+import type { WorkspaceTreeNode } from '@viwork/shared';
 import type { WorkspaceEntry } from './api';
+import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 
 export type WorkspaceSection = {
   key: 'global' | 'adaptations';
@@ -8,11 +9,11 @@ export type WorkspaceSection = {
 };
 
 export const WORKSPACE_SECTIONS: WorkspaceSection[] = [
-  { key: 'global', title: '全局区域', description: '创作规范、技能、知识库与模板库' },
-  { key: 'adaptations', title: '改编项目区域', description: '每个项目独立管理原著资料、改编方案、剧本、分镜、视频和产物' },
+  { key: 'global', ...ACTIVE_PRODUCT_PROFILE.workspaceSections.global },
+  { key: 'adaptations', title: ACTIVE_PRODUCT_PROFILE.workspaceSections.project.title, description: ACTIVE_PRODUCT_PROFILE.workspaceSections.project.description },
 ];
 
-export const GLOBAL_TREE = GLOBAL_WORKSPACE_TREE;
+export const GLOBAL_TREE = ACTIVE_PRODUCT_PROFILE.globalTree;
 
 export function buildDefaultCollapsedGlobalPaths(nodes: WorkspaceTreeNode[]): string[] {
   return nodes.flatMap((node) => {

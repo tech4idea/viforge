@@ -1,0 +1,56 @@
+{
+  "id": "sitcom",
+  "name": "viwork 情景剧创作工作台",
+  "documentTitle": "viwork 情景剧创作工作台",
+  "defaultProjectName": "办公室喜剧计划",
+  "defaultProjectDescription": "围绕角色、场景和单集冲突展开的情景剧创作项目。",
+  "workspaceSections": {
+    "global": { "title": "全局区域", "description": "创作规范、技能、知识库与模板库" },
+    "project": {
+      "title": "情景剧项目区域",
+      "description": "每个项目独立管理设定、故事、剧本、分镜、视频和产物",
+      "emptyText": "暂无情景剧项目。"
+    }
+  },
+  "promptPlaceholder": {
+    "archived": "归档会话只读，恢复后可继续对话",
+    "project": "描述这一场戏、角色动机、对白要求或图片需求，输入 @ 引用项目文件",
+    "temporary": "继续临时会话，可直接对话或生成图片"
+  },
+  "defaultSkillDraft": {
+    "title": "故事脑暴助手",
+    "description": "根据角色、场景和冲突生成情景剧故事方向。",
+    "prompt": "请基于当前设定提出 3 个情景剧单集故事方向，并说明核心冲突和结尾反转。"
+  },
+  "promptSuggestions": [
+    "根据题材生成 3 集情景剧大纲",
+    "完善主角和反派的人物设定",
+    "把这一场改得更有冲突",
+    "把剧本拆成分镜表",
+    "整理需要生成的视频素材清单"
+  ],
+  "defaultAgentSkillNames": ["brainstorm-agent", "story-agent", "screenwriter-agent", "reviewer-agent"],
+  "agentLabels": {
+    "system": "系统",
+    "brainstorm-agent": "脑暴",
+    "story-agent": "故事",
+    "screenwriter-agent": "编剧",
+    "reviewer-agent": "审稿"
+  },
+  "mastra": {
+    "requestTitle": "# 情景剧创作请求",
+    "systemIntro": [
+      "你是 viwork 情景剧创作工作台里的 system agent，负责情景剧创作的全流程工作。",
+      "你拥有读取、列出和写入项目工作区文件的工具。所有文件读写必须通过这些工具完成。",
+      "用户可能请求：脑暴故事、制定故事线、创作剧本、审稿修改。请根据请求主动分步完成，每一步都使用工具读写文件。",
+      "工作流程参考：先用 list_workspace_entries 了解项目文件结构 → 读取已有的设定和故事 → 创作并写入故事大纲 → 编写剧本并写入 → 最后总结已完成的工作。",
+      "每完成一个步骤，立即使用 write_workspace_file 将结果写入工作区。不要只说不做，要实际产出文件。",
+      "回答使用中文。"
+    ],
+    "fallbackProtocol": "# viwork system agent\n\n你负责情景剧创作的全流程：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取已有的设定和故事文件\n3. 根据用户请求创作内容，使用 write_workspace_file 写入对应目录\n4. 每个步骤都要实际产出文件，不要空谈。\n\n关键目录：\n- 01 基本设定：角色、世界观等基本设定\n- 02 故事：故事线和剧本大纲\n- 03 剧本：具体剧本内容"
+  },
+  "artifactPaths": {
+    "plan": ["02 故事/整季故事线.md", "02 故事/01 第一集/单集大纲.md"],
+    "script": "03 剧本/01 第一集/定稿剧本.md"
+  }
+}

@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 
 import {
   apiClient,
@@ -152,6 +153,7 @@ function App() {
   const imageReferenceInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const chatThreadRef = useRef<HTMLElement | null>(null);
+  const autoScrollRef = useRef(true);
   const workspaceGridRef = useRef<HTMLElement | null>(null);
   const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pendingChatMessageUpdatesRef = useRef<Map<string, PendingChatMessageUpdate>>(new Map());
@@ -161,11 +163,12 @@ function App() {
   const renameEntryInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameEntryBlurRef = useRef(false);
   const suppressNextShellClickRef = useRef(false);
+  const streamBatchRef = useRef<Map<string, { sessionId: string; messageId: string; runProjectId: string; events: StreamEvent[] }>>(new Map());
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initState = useMemo(() => readInitialStoredState(), []);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => readStoredSelectedProjectId());
-  const [temporaryProjectId, setTemporaryProjectId] = useState<string | null>(
-    () => readStoredTemporaryChatSession()?.projectId ?? readStoredWorkspaceSelection()?.selectedTemporaryProjectId ?? null,
-  );
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initState.selectedProjectId);
+  const [temporaryProjectId, setTemporaryProjectId] = useState<string | null>(initState.selectedTemporaryProjectId);
   const [projectLoadState, setProjectLoadState] = useState<LoadState>('idle');
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -181,21 +184,11 @@ function App() {
   const [temporaryEntriesStateByProject, setTemporaryEntriesStateByProject] = useState<Record<string, LoadState>>({});
   const [temporaryEntriesErrorByProject, setTemporaryEntriesErrorByProject] = useState<Record<string, string | null>>({});
 
-  const [activeWorkspaceScope, setActiveWorkspaceScope] = useState<WorkspaceScope>(
-    () => readStoredWorkspaceSelection()?.activeWorkspaceScope ?? 'global',
-  );
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
-    () => readStoredWorkspaceSelection()?.selectedProjectPath ?? null,
-  );
-  const [selectedGlobalPath, setSelectedGlobalPath] = useState<string | null>(
-    () => readStoredWorkspaceSelection()?.selectedGlobalPath ?? null,
-  );
-  const [selectedTemporaryProjectId, setSelectedTemporaryProjectId] = useState<string | null>(
-    () => readStoredWorkspaceSelection()?.selectedTemporaryProjectId ?? null,
-  );
-  const [selectedTemporaryPath, setSelectedTemporaryPath] = useState<string | null>(
-    () => readStoredWorkspaceSelection()?.selectedTemporaryPath ?? null,
-  );
+  const [activeWorkspaceScope, setActiveWorkspaceScope] = useState<WorkspaceScope>(initState.activeWorkspaceScope);
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(initState.selectedProjectPath);
+  const [selectedGlobalPath, setSelectedGlobalPath] = useState<string | null>(initState.selectedGlobalPath);
+  const [selectedTemporaryProjectId, setSelectedTemporaryProjectId] = useState<string | null>(initState.selectedTemporaryProjectId);
+  const [selectedTemporaryPath, setSelectedTemporaryPath] = useState<string | null>(initState.selectedTemporaryPath);
   const [fileContent, setFileContent] = useState('');
   const [lastSavedContent, setLastSavedContent] = useState('');
   const [fileState, setFileState] = useState<LoadState>('idle');
@@ -212,27 +205,25 @@ function App() {
   const [referenceSuggestions, setReferenceSuggestions] = useState<ReferenceSuggestion[]>([]);
   const [referenceQuery, setReferenceQuery] = useState<{ start: number; end: number; query: string } | null>(null);
   const [activeReferenceIndex, setActiveReferenceIndex] = useState(0);
-  const [chatReadingMode, setChatReadingMode] = useState(() => readStoredChatReadingMode());
+  const [chatReadingMode, setChatReadingMode] = useState(initState.chatReadingMode);
   const [chatMode, setChatMode] = useState<ChatMode>('assistant');
   const [aigcHubModels, setAigcHubModels] = useState<AigcHubModelMetadata[]>([]);
   const [aigcHubModelError, setAigcHubModelError] = useState<string | null>(null);
-  const [chatModel, setChatModel] = useState(() => readStoredModel(CHAT_MODEL_STORAGE_KEY));
-  const [imageModel, setImageModel] = useState(() => readStoredModel(IMAGE_MODEL_STORAGE_KEY));
+  const [chatModel, setChatModel] = useState(initState.chatModel);
+  const [imageModel, setImageModel] = useState(initState.imageModel);
   const [imageAspectRatio, setImageAspectRatio] = useState<GeminiImageAspectRatio>('1:1');
   const [imageThinkingLevel, setImageThinkingLevel] = useState<ImageThinkingLevelOption>('default');
   const [imageCount, setImageCount] = useState(1);
   const [imageReferenceDrafts, setImageReferenceDrafts] = useState<ImageReferenceDraft[]>([]);
   const [chatSessions, setChatSessionsState] = useState<ChatSession[]>([]);
   const chatSessionsRef = useRef<ChatSession[]>([]);
-  const [chatScope, setChatScope] = useState<ChatScope>(() =>
-    readStoredChatScope() ?? (readStoredSelectedProjectId() ? 'project' : 'temporary'),
-  );
+  const [chatScope, setChatScope] = useState<ChatScope>(initState.chatScope);
   const [chatSessionsProjectId, setChatSessionsProjectId] = useState<string | null>(null);
-  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => readInitialActiveChatSessionId());
-  const [chatSessionView, setChatSessionView] = useState<ChatSessionView>(() => readStoredActiveChatSession().chatSessionView);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(initState.activeChatSessionId);
+  const [chatSessionView, setChatSessionView] = useState<ChatSessionView>(initState.chatSessionView);
   const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, editor: false, chat: false });
   const [panelWidths, setPanelWidths] = useState({ workspace: 238, chat: 340 });
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
+  const [themeMode, setThemeMode] = useState<ThemeMode>(initState.themeMode);
   const [temporaryWorkspaceCollapsed, setTemporaryWorkspaceCollapsed] = useState(true);
   const [collapsedGlobalPaths, setCollapsedGlobalPaths] = useState<string[]>([]);
   const [collapsedDirectoriesByProject, setCollapsedDirectoriesByProject] = useState<Record<string, string[]>>({});
@@ -252,6 +243,8 @@ function App() {
     : null;
   const [quickActionError, setQuickActionError] = useState<string | null>(null);
   const [uploadTarget, setUploadTarget] = useState<WorkspaceTarget | null>(null);
+  const [uploadMode, setUploadMode] = useState<'files' | 'folder'>('files');
+  const [uploadState, setUploadState] = useState<'idle' | 'uploading'>('idle');
   const [dragEntry, setDragEntry] = useState<DragEntryDraft | null>(null);
   const [dragOverTargetKey, setDragOverTargetKey] = useState<string | null>(null);
   const [skills, setSkills] = useState<TheaterSkill[]>([]);
@@ -371,6 +364,24 @@ function App() {
       createdAt: message.createdAt,
     });
   }, []);
+  const openAttachmentFnRef = useRef<(attachment: ChatMessageAttachment) => void>(() => {});
+  openAttachmentFnRef.current = (attachment: ChatMessageAttachment) => {
+    if (isTemporaryProjectId(attachment.projectId)) {
+      setActiveWorkspaceScope('temporary');
+      setSelectedTemporaryProjectId(attachment.projectId);
+      setSelectedTemporaryPath(attachment.path);
+      void loadTemporaryEntries(attachment.projectId, { keepSelectedPath: attachment.path, revealPath: attachment.path });
+    } else {
+      setActiveWorkspaceScope('project');
+      setSelectedProjectId(attachment.projectId);
+      setSelectedProjectPath(attachment.path);
+      void loadEntries(attachment.projectId, { keepSelectedPath: attachment.path, revealPath: attachment.path });
+    }
+  };
+  const handleOpenChatAttachment = useCallback(
+    (attachment: ChatMessageAttachment) => openAttachmentFnRef.current(attachment),
+    [],
+  );
 
   function setChatSessions(update: ChatSessionsUpdate) {
     const nextSessions = typeof update === 'function' ? update(chatSessionsRef.current) : update;
@@ -427,6 +438,10 @@ function App() {
     void loadGlobalEntries();
     void loadTemporaryChatSessions({ activate: false });
     void loadAigcHubModels();
+  }, []);
+
+  useEffect(() => () => {
+    if (streamFlushTimerRef.current) clearTimeout(streamFlushTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -632,6 +647,10 @@ function App() {
   }, [activeChatSessionId]);
 
   useEffect(() => {
+    if (!autoScrollRef.current) {
+      return;
+    }
+
     const thread = chatThreadRef.current;
     if (!thread) {
       return;
@@ -647,6 +666,26 @@ function App() {
     activeChatLastMessage?.content,
   ]);
 
+  useEffect(() => {
+    const el = chatThreadRef.current;
+    if (!el) return;
+
+    let ticking = false;
+    const scrollEl = el;
+    function handleScroll() {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 32;
+          autoScrollRef.current = atBottom;
+          ticking = false;
+        });
+        ticking = true;
+      }
+    }
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
   async function loadProjects() {
     setProjectLoadState('loading');
     setProjectLoadError(null);
@@ -1146,54 +1185,74 @@ function App() {
     return { workspaceScope, projectId, parentPath };
   }
 
-  function startUpload(context: SidebarContextMenu | null = null) {
+  function startUpload(context: SidebarContextMenu | null = null, mode: 'files' | 'folder' = 'files') {
     const target = resolveUploadTarget(context);
-    setUploadTarget(target);
-    setActiveWorkspaceScope(target.workspaceScope);
-    if (target.workspaceScope === 'project' && target.projectId) {
-      setSelectedProjectId(target.projectId);
-    }
-    if (target.workspaceScope === 'temporary' && target.projectId) {
-      setSelectedTemporaryProjectId(target.projectId);
-    }
+    flushSync(() => {
+      setUploadTarget(target);
+      setUploadMode(mode);
+      setQuickActionError(null);
+      setActiveWorkspaceScope(target.workspaceScope);
+      if (target.workspaceScope === 'project' && target.projectId) {
+        setSelectedProjectId(target.projectId);
+      }
+      if (target.workspaceScope === 'temporary' && target.projectId) {
+        setSelectedTemporaryProjectId(target.projectId);
+      }
+    });
     fileUploadRef.current?.click();
   }
 
-  async function uploadAsset(file: File) {
+  async function uploadAssets(files: File[]) {
+    if (files.length === 0) {
+      setUploadTarget(null);
+      setUploadMode('files');
+      return;
+    }
+    setUploadState('uploading');
     setQuickActionError(null);
+    const target = uploadTarget ?? resolveUploadTarget();
+    let lastPath: string | null = null;
     try {
-      const contentBase64 = await fileToBase64(file);
-      const target = uploadTarget ?? resolveUploadTarget();
-      const assetPath = joinWorkspacePath(target.parentPath, file.name);
-      if (target.workspaceScope === 'global') {
-        const asset = await apiClient.createGlobalAsset({
+      for (const file of files) {
+        const contentBase64 = await fileToBase64(file);
+        const assetPath = joinWorkspacePath(target.parentPath, uploadRelativePath(file));
+        if (target.workspaceScope === 'global') {
+          const asset = await apiClient.createGlobalAsset({
+            path: assetPath,
+            contentBase64,
+            mimeType: file.type || undefined,
+          });
+          lastPath = asset.path;
+          continue;
+        }
+
+        if (!target.projectId) return;
+        const asset = await apiClient.createAsset(target.projectId, {
           path: assetPath,
           contentBase64,
           mimeType: file.type || undefined,
         });
-        await loadGlobalEntries({ keepSelectedPath: asset.path, revealPath: asset.path });
-        setSelectedGlobalPath(asset.path);
-        return;
+        lastPath = asset.path;
       }
 
-      if (!target.projectId) return;
-      const asset = await apiClient.createAsset(target.projectId, {
-        path: assetPath,
-        contentBase64,
-        mimeType: file.type || undefined,
-      });
-      if (target.workspaceScope === 'temporary') {
-        await loadTemporaryEntries(target.projectId, { keepSelectedPath: asset.path, revealPath: asset.path });
+      if (target.workspaceScope === 'global') {
+        await loadGlobalEntries({ keepSelectedPath: lastPath, revealPath: lastPath });
+        setSelectedGlobalPath(lastPath);
+      } else if (target.projectId && target.workspaceScope === 'temporary') {
+        await loadTemporaryEntries(target.projectId, { keepSelectedPath: lastPath, revealPath: lastPath });
         setSelectedTemporaryProjectId(target.projectId);
-        setSelectedTemporaryPath(asset.path);
+        setSelectedTemporaryPath(lastPath);
       } else {
-        await loadEntries(target.projectId, { keepSelectedPath: asset.path, revealPath: asset.path });
-        setSelectedProjectPath(asset.path);
+        if (!target.projectId) return;
+        await loadEntries(target.projectId, { keepSelectedPath: lastPath, revealPath: lastPath });
+        setSelectedProjectPath(lastPath);
       }
     } catch (error) {
       setQuickActionError(errorToMessage(error));
     } finally {
       setUploadTarget(null);
+      setUploadMode('files');
+      setUploadState('idle');
     }
   }
 
@@ -1332,12 +1391,19 @@ function App() {
       return;
     }
 
-    if (isImageGenerationPrompt(messageText)) {
+    if (chatMode === 'image' && isImageGenerationPrompt(messageText)) {
       await submitAssistantImagePrompt(session, messageText);
       return;
     }
 
     const runProjectId = session.projectId;
+    const sessionModelConfig = {
+      chatModel: chatModel || undefined,
+      imageModel: imageModel || undefined,
+      imageAspectRatio,
+      imageThinkingLevel: imageThinkingLevel === 'default' ? undefined : imageThinkingLevel,
+      imageCount,
+    };
 
     const attachedReferences = chatScope === 'project' ? [...referencedFiles] : [];
     const attachedSnippets = [...referencedSnippets];
@@ -1357,9 +1423,18 @@ function App() {
         sessionId: session.id,
         codexThreadId: session.codexThreadId ?? undefined,
         prompt: messageText,
-        model: chatModel || undefined,
+        model: sessionModelConfig.chatModel,
+        imageGeneration: {
+          model: session.modelConfig?.imageModel ?? sessionModelConfig.imageModel,
+          aspectRatio: session.modelConfig?.imageAspectRatio ?? sessionModelConfig.imageAspectRatio,
+          thinkingLevel: session.modelConfig?.imageThinkingLevel ?? sessionModelConfig.imageThinkingLevel,
+          count: session.modelConfig?.imageCount ?? sessionModelConfig.imageCount,
+        },
         referencedFiles: attachedReferences,
         referencedSnippets: attachedSnippets,
+      });
+      void apiClient.updateChatSession(session.id, { modelConfig: sessionModelConfig }).catch((error) => {
+        setRunError(errorToMessage(error));
       });
       setCurrentRun(response.run);
 
@@ -1444,6 +1519,16 @@ function App() {
         count: imageCount,
         referenceImages: imageReferenceDrafts.map(({ name, mimeType, contentBase64 }) => ({ name, mimeType, contentBase64 })),
       });
+      void apiClient.updateChatSession(session.id, {
+        modelConfig: {
+          imageModel: imageModel || undefined,
+          imageAspectRatio,
+          imageThinkingLevel: imageThinkingLevel === 'default' ? undefined : imageThinkingLevel,
+          imageCount,
+        },
+      }).catch((error) => {
+        setRunError(errorToMessage(error));
+      });
       setImageReferenceDrafts([]);
 
       setChatSessions((currentSessions) => [response.session, ...currentSessions.filter((current) => current.id !== response.session.id)]);
@@ -1510,6 +1595,8 @@ function App() {
   }
 
   function handleRunStreamEvent(sessionId: string, messageId: string, runProjectId: string, event: StreamEvent) {
+    autoScrollRef.current = true;
+
     if (event.type === 'thread.started') {
       setChatSessions((currentSessions) =>
         currentSessions.map((session) =>
@@ -1523,21 +1610,39 @@ function App() {
       });
     }
 
-    updateMessageInSession(sessionId, messageId, (message) => {
-      const content = event.type === 'text.delta'
-        ? message.content + event.delta
-        : event.type === 'run.end' && event.status === 'error' && !message.content
-          ? `运行失败：${userFacingRunError(event.errorMessage)}`
-          : message.content;
-      return {
-        ...message,
-        content,
-        streamEvents: [...message.streamEvents, event],
-        status: event.type === 'run.end' ? (event.status === 'success' ? 'success' : 'error') : 'running',
-      };
-    });
+    if (event.type === 'file.changed' || event.type === 'image.generated') {
+      const revealPath = event.type === 'image.generated' ? event.attachment.path : event.path;
+      if (isTemporaryProjectId(runProjectId)) {
+        void loadTemporaryEntries(runProjectId, {
+          keepSelectedPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+          revealPath,
+        });
+      } else if (selectedProjectId === runProjectId) {
+        void loadEntries(runProjectId, {
+          keepSelectedPath: selectedProjectPath,
+          revealPath,
+        });
+      }
+    }
+
+    const batchKey = `${sessionId}:${messageId}`;
+    const existing = streamBatchRef.current.get(batchKey);
+    if (existing) {
+      existing.events.push(event);
+    } else {
+      streamBatchRef.current.set(batchKey, { sessionId, messageId, runProjectId, events: [event] });
+    }
+
+    if (!streamFlushTimerRef.current) {
+      streamFlushTimerRef.current = setTimeout(flushStreamBatch, 100);
+    }
 
     if (event.type === 'run.end') {
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
+      flushStreamBatch();
       setRunState(event.status === 'success' ? 'success' : 'error');
       if (event.errorMessage) {
         setRunError(userFacingRunError(event.errorMessage));
@@ -1551,6 +1656,64 @@ function App() {
         void refreshWorkspaceAfterRun(runProjectId);
       }
     }
+  }
+
+  function flushStreamBatch() {
+    streamFlushTimerRef.current = null;
+    const pending = streamBatchRef.current;
+    streamBatchRef.current = new Map();
+
+    if (pending.size === 0) return;
+
+    const sessionUpdates = new Map<string, Array<{ messageId: string; events: StreamEvent[] }>>();
+    for (const { sessionId, messageId, events } of pending.values()) {
+      if (!sessionUpdates.has(sessionId)) sessionUpdates.set(sessionId, []);
+      sessionUpdates.get(sessionId)!.push({ messageId, events });
+    }
+
+    setChatSessions((currentSessions) =>
+      currentSessions.map((session) => {
+        const updates = sessionUpdates.get(session.id);
+        if (!updates) return session;
+
+        return {
+          ...session,
+          updatedAt: new Date().toISOString(),
+          messages: session.messages.map((message) => {
+            const update = updates.find((u) => u.messageId === message.id);
+            if (!update) return message;
+
+            let content = message.content;
+            let finalStatus = message.status;
+            const attachments = [...(message.attachments ?? [])];
+            for (const event of update.events) {
+              if (event.type === 'text.delta') {
+                content += event.delta;
+              } else if (event.type === 'image.generated') {
+                if (!attachments.some((attachment) => attachment.id === event.attachment.id || attachment.path === event.attachment.path)) {
+                  attachments.push(event.attachment);
+                }
+              } else if (event.type === 'run.end' && event.status === 'error' && !content) {
+                content = `运行失败：${userFacingRunError(event.errorMessage)}`;
+              }
+              if (event.type === 'run.end') {
+                finalStatus = event.status === 'success' ? 'success' : 'error';
+              }
+            }
+
+            const updated = {
+              ...message,
+              content,
+              attachments,
+              streamEvents: [...message.streamEvents, ...update.events],
+              status: finalStatus,
+            };
+            persistChatMessageUpdate(session.id, message.id, updated);
+            return updated;
+          }),
+        };
+      }),
+    );
   }
 
   function openSidebarContextMenu(
@@ -2397,18 +2560,20 @@ function App() {
                   </button>
                   <button type="button" className="sidebar-tool-button" onClick={() => startUpload()} aria-label="上传素材" title="上传素材">
                     ↑
+                  {uploadState === 'uploading' ? <span className="muted">上传中...</span> : null}
                   </button>
                 </div>
               </div>
               <input
                 ref={fileUploadRef}
                 type="file"
-                hidden
+                className="visually-hidden"
+                multiple
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = '';
-                  if (file) void uploadAsset(file);
-                  else setUploadTarget(null);
+                  const fileArray = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
+                  event.currentTarget.value = '';
+                  if (fileArray.length === 0) return;
+                  void uploadAssets(fileArray);
                 }}
               />
 
@@ -2865,19 +3030,7 @@ function App() {
                     key={message.id}
                     message={message}
                     onTextSelection={handleChatTextSelection}
-                    onOpenAttachment={(attachment) => {
-                      if (isTemporaryProjectId(attachment.projectId)) {
-                        setActiveWorkspaceScope('temporary');
-                        setSelectedTemporaryProjectId(attachment.projectId);
-                        setSelectedTemporaryPath(attachment.path);
-                        void loadTemporaryEntries(attachment.projectId, { keepSelectedPath: attachment.path, revealPath: attachment.path });
-                      } else {
-                        setActiveWorkspaceScope('project');
-                        setSelectedProjectId(attachment.projectId);
-                        setSelectedProjectPath(attachment.path);
-                        void loadEntries(attachment.projectId, { keepSelectedPath: attachment.path, revealPath: attachment.path });
-                      }
-                    }}
+                    onOpenAttachment={handleOpenChatAttachment}
                   />
                 ))
               ) : (
@@ -2975,7 +3128,7 @@ function App() {
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   multiple
-                  hidden
+                  className="visually-hidden"
                   onChange={(event) => void handleImageReferenceFiles(event.currentTarget.files)}
                 />
               </div>
@@ -3112,19 +3265,14 @@ function App() {
             {activeToolPanel === 'wechat' ? (
               <div className="wechat-panel">
                 {wechatState === 'loading' ? <p className="muted">正在读取微信接入状态...</p> : null}
-                <p className={`status-pill ${wechatStatus?.state === 'connected' ? 'success' : 'idle'}`}>
-                  {wechatStatus?.state === 'connected' ? `已连接：${wechatStatus.connection?.displayName}` : '未连接'}
-                </p>
-                <div className="wechat-card">
-                  <button type="button" onClick={() => void createWechatSetup()}>生成连接码</button>
-                  {wechatSetup ? (
-                    <>
-                      <code>{wechatSetup.qrUrl}</code>
-                      <button type="button" onClick={() => void completeWechatSetup()}>模拟扫码完成</button>
-                    </>
-                  ) : null}
-                </div>
-                <p className="muted">微信入站消息会写入当前工作区的 remote-wechat 目录，作为远程灵感和修改请求。</p>
+
+                <WechatPanelBody
+                  wechatStatus={wechatStatus}
+                  wechatSetup={wechatSetup}
+                  wechatState={wechatState}
+                  onCreateSetup={() => void createWechatSetup()}
+                  onDisconnect={async () => { await apiClient.disconnectWechat(); await loadWechatStatus(); }}
+                />
               </div>
             ) : null}
           </section>
@@ -3723,6 +3871,14 @@ function joinWorkspacePath(base: string | null, leaf: string): string {
   return [base, leaf].filter(Boolean).join('/');
 }
 
+
+function uploadRelativePath(file: File): string {
+  const path = 'webkitRelativePath' in file && typeof file.webkitRelativePath === 'string'
+    ? file.webkitRelativePath
+    : '';
+  return path || file.name;
+}
+
 function entryTitleFromPath(path: string): string {
   return path.split('/').pop()?.replace(/\.(md|markdown|txt)$/i, '') || '新文档';
 }
@@ -3798,6 +3954,7 @@ function createChatMessage(
     referencedFiles?: ReferencedFile[];
     referencedSnippets?: ReferencedChatSnippet[];
     streamEvents?: StreamEvent[];
+    attachments?: ChatMessageAttachment[];
     status?: RunState;
   } = {},
 ): ChatMessage {
@@ -3806,6 +3963,7 @@ function createChatMessage(
     role,
     content,
     createdAt: new Date().toISOString(),
+    attachments: options.attachments ?? [],
     events: options.events,
     referencedFiles: options.referencedFiles ?? [],
     referencedSnippets: options.referencedSnippets ?? [],
@@ -3905,6 +4063,101 @@ function formatChatTime(value: string): string {
   const date = new Date(value);
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
+
+
+function readInitialStoredState(): {
+  selectedProjectId: string | null;
+  selectedTemporaryProjectId: string | null;
+  activeWorkspaceScope: WorkspaceScope;
+  selectedProjectPath: string | null;
+  selectedGlobalPath: string | null;
+  selectedTemporaryPath: string | null;
+  chatReadingMode: boolean;
+  chatModel: string;
+  imageModel: string;
+  chatScope: ChatScope;
+  activeChatSessionId: string | null;
+  chatSessionView: ChatSessionView;
+  themeMode: ThemeMode;
+} {
+  // Read all localStorage in one shot to avoid ~16 sync getItem calls during mount
+  const workspaceSelection = readStoredWorkspaceSelection();
+  const temporarySession = readStoredTemporaryChatSession();
+  const activeChatSession = readStoredActiveChatSession();
+  const selectedProjectId = readStoredSelectedProjectId();
+  const chatScope = readStoredChatScope() ?? (selectedProjectId ? 'project' : 'temporary');
+
+  return {
+    selectedProjectId,
+    selectedTemporaryProjectId: temporarySession?.projectId ?? workspaceSelection?.selectedTemporaryProjectId ?? null,
+    activeWorkspaceScope: workspaceSelection?.activeWorkspaceScope ?? 'global',
+    selectedProjectPath: workspaceSelection?.selectedProjectPath ?? null,
+    selectedGlobalPath: workspaceSelection?.selectedGlobalPath ?? null,
+    selectedTemporaryPath: workspaceSelection?.selectedTemporaryPath ?? null,
+    chatReadingMode: readStoredChatReadingMode(),
+    chatModel: readStoredModel(CHAT_MODEL_STORAGE_KEY),
+    imageModel: readStoredModel(IMAGE_MODEL_STORAGE_KEY),
+    chatScope: chatScope,
+    activeChatSessionId: chatScope === 'project'
+      ? (selectedProjectId ? activeChatSession.projectSessionIds[selectedProjectId] ?? null : null)
+      : activeChatSession.temporarySessionId ?? temporarySession?.sessionId ?? null,
+    chatSessionView: activeChatSession.chatSessionView,
+    themeMode: readStoredThemeMode(),
+  };
+}
+
+const WechatPanelBody = memo(function WechatPanelBody({
+  wechatStatus,
+  wechatSetup,
+  wechatState,
+  onCreateSetup,
+  onDisconnect,
+}: {
+  wechatStatus: WechatStatus | null;
+  wechatSetup: WechatSetupSession | null;
+  wechatState: LoadState;
+  onCreateSetup: () => void;
+  onDisconnect: () => Promise<unknown>;
+}): JSX.Element {
+  const isConnected = wechatStatus?.state === "connected";
+
+  return (
+    <>
+      <p className={`status-pill ${isConnected ? "success" : "idle"}`}>
+        {isConnected ? `已连接：${wechatStatus!.connection?.displayName}` : "未连接"}
+      </p>
+
+      {isConnected ? (
+        <div className="wechat-card">
+          <p className="muted">
+            微信已连接 · 用户: {wechatStatus!.connection?.displayName}
+            <br />
+            连接时间: {wechatStatus!.connection?.connectedAt ? new Date(wechatStatus!.connection!.connectedAt).toLocaleString() : "-"}
+          </p>
+          <button type="button" className="wechat-small-btn" style={{ marginTop: 8 }} onClick={() => void onDisconnect()}>
+            解绑微信
+          </button>
+        </div>
+      ) : (
+        <div className="wechat-card">
+          <button type="button" onClick={() => void onCreateSetup()}>生成连接码</button>
+          {wechatSetup ? (
+            <div className="wechat-qr-wrap">
+              <img
+                src={`/api/wechat/setup-sessions/${encodeURIComponent(wechatSetup.sessionId)}/qr`}
+                alt="微信扫码连接"
+                width={200}
+                height={200}
+              />
+              <p className="muted" style={{ fontSize: "0.7rem", marginTop: 6 }}>请用微信扫描二维码，等待自动连接</p>
+            </div>
+          ) : null}
+        </div>
+      )}
+      <p className="muted">扫码后自动完成绑定。微信入站消息会自动通过创作助手处理。</p>
+    </>
+  );
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

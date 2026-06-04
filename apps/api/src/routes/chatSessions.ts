@@ -18,6 +18,7 @@ const chatMessageAttachmentSchema = z.object({
   prompt: z.string().optional(),
   model: z.string().min(1).optional(),
   aspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).optional(),
+  thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']).optional(),
   createdAt: z.string().min(1),
 });
 
@@ -44,6 +45,13 @@ const chatMessageSchema = z.object({
 const updateSessionSchema = z.object({
   codexThreadId: z.string().min(1).nullable().optional(),
   title: z.string().trim().min(1).optional(),
+  modelConfig: z.object({
+    chatModel: z.string().trim().min(1).optional(),
+    imageModel: z.string().trim().min(1).optional(),
+    imageAspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).optional(),
+    imageThinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']).optional(),
+    imageCount: z.number().int().min(1).max(4).optional(),
+  }).optional(),
 });
 
 const createSessionSchema = z.object({

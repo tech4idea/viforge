@@ -94,7 +94,7 @@ export type ProductProfile = {
 
 ```bash
 VIWORK_PRODUCT=novel-adaptation pnpm --filter @viwork/api dev
-VITE_VIWORK_PRODUCT=novel-adaptation pnpm --filter @viwork/web dev
+VIWORK_PRODUCT=novel-adaptation pnpm --filter @viwork/web dev
 ```
 
 如果前后端都从 `packages/shared` 读取同一个 profile，合同会更稳。后续也可以让 API 暴露：

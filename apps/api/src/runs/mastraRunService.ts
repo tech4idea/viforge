@@ -1,45 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
-import path from 'node:path';
 
-import { Agent } from '@mastra/core/agent';
-import type { OpenAICompatibleConfig } from '@mastra/core/llm';
-import { TokenLimiterProcessor } from '@mastra/core/processors';
 import { createTool } from '@mastra/core/tools';
-import { LibSQLStore } from '@mastra/libsql';
-import { Memory } from '@mastra/memory';
-import type { StreamEvent } from '@viwork/shared';
+import type { ProductProfile, StreamEvent } from '@viwork/shared';
 import { z } from 'zod';
 
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_CHAT_MODEL, WORKSPACES_ROOT } from '../env';
+import { PRODUCT_PROFILE } from '../env';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
+
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
-type MastraStreamChunk = {
-  type: string;
-  payload?: Record<string, unknown>;
-  object?: unknown;
-};
-
-type MastraStreamOutput = {
-  fullStream: ReadableStream<MastraStreamChunk> | AsyncIterable<MastraStreamChunk>;
-};
-
-type MastraAgentClient = {
-  stream(messages: string, options: Record<string, unknown>): Promise<MastraStreamOutput>;
-};
+import { createAgentRegistry, createWorkspaceTools, type AgentRegistry, type MastraAgentClient, type MastraStreamChunk, type MastraStreamOutput, type MastraToolset } from './mastraAgents';
 
 type MastraRunOptions = {
   createAgent?: (context: {
     instructions: string;
     tools: ReturnType<typeof createWorkspaceTools>;
   }) => MastraAgentClient;
+  createAgentRegistry?: (
+    tools: ReturnType<typeof createWorkspaceTools>,
+    context: { model?: string; baseUrl?: string; apiKey?: string; memoryDbPath?: string },
+  ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
   apiKey?: string;
   memoryDbPath?: string;
+  productProfile?: ProductProfile;
 };
 
 type ToolState = {
@@ -52,9 +39,13 @@ type ToolState = {
   toolSequence: number;
 };
 
-const DEFAULT_MASTRA_MODEL = 'ds/deepseek-v4-pro';
-const DEFAULT_MASTRA_BASE_URL = 'https://api.yukeon.top/v1';
-const DEFAULT_MEMORY_DB = path.join(WORKSPACES_ROOT, '..', 'mastra-memory.db');
+const SPECIALIST_AGENT_LABELS: Record<string, string> = {
+  'brainstorm-agent': '脑暴',
+  'source-analyst-agent': '原著分析',
+  'adaptation-planner-agent': '改编方案',
+  'screenwriter-agent': '编剧',
+  'reviewer-agent': '审稿',
+};
 
 export function createMastraRunService(
   store: WorkspaceStore,
@@ -76,6 +67,7 @@ export function createMastraRunService(
         codexThreadId: input.codexThreadId,
         prompt: input.prompt,
         model: input.model,
+        imageGeneration: input.imageGeneration,
         referencedFiles: input.referencedFiles ?? [],
         referencedSnippets: input.referencedSnippets ?? [],
         source: input.source ?? 'web',
@@ -121,167 +113,327 @@ async function executeMastraRun({
   publish({ type: 'thread.started', runId, emittedAt: emittedAt(), threadId: `mastra:${threadId}` });
 
   try {
-    const prompt = await buildMastraPrompt(store, input);
-    const instructions = await buildMastraInstructions(store);
-    const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt);
-    const agent = options.createAgent
-      ? options.createAgent({ instructions, tools })
-      : await createDefaultMastraAgent({ instructions, options: { ...options, model: input.model ?? options.model }, tools });
+    const productProfile = options.productProfile ?? PRODUCT_PROFILE;
 
-    appendJsonLog('api-runs.jsonl', {
-      scope: 'mastra-run',
-      stage: 'agent.stream.input',
-      runId,
-      projectId: input.projectId,
-      threadId,
-      prompt: textLogValue(prompt),
+    // Build tools
+    const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
+      imageGeneration: input.imageGeneration,
+      wechat: input.wechat,
     });
+    // Create agent registry from skills
+    const registryOptions = {
+      ...options,
+      model: input.model ?? options.model,
+    };
+    const registry = options.createAgentRegistry
+      ? await options.createAgentRegistry(tools, registryOptions)
+      : await createAgentRegistry(store, registryOptions, tools);
 
-    const streamed = await agent.stream(prompt, {
-      runId,
-      maxSteps: 8,
-      memory: {
-        thread: threadId,
-        resource: input.projectId,
-      },
-    });
+    // Build the combined prompt with references
+    const prompt = await buildMastraPrompt(store, input, productProfile);
 
-    await consumeMastraStream(streamed.fullStream, { emittedAt, publish, runId });
+    // Run the multi-agent workflow
+    if (options.createAgent) {
+      // Backward compat: single agent mode
+      const instructions = await buildSystemInstructions(store, productProfile);
+      const agent = options.createAgent({ instructions, tools });
+
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'mastra-run',
+        stage: 'agent.stream.input',
+        runId,
+        projectId: input.projectId,
+        threadId,
+        prompt: textLogValue(prompt),
+      });
+
+      const streamed = await agent.stream(prompt, {
+        runId,
+        maxSteps: 25,
+        memory: { thread: threadId, resource: input.projectId },
+      });
+      await consumeMastraStream(streamed.fullStream, { emittedAt, publish, runId });
+    } else {
+      await executeMultiAgentWorkflow({
+        registry,
+        store,
+        input,
+        productProfile,
+        prompt,
+        publish,
+        emittedAt,
+        runId,
+        threadId,
+        options,
+      });
+    }
+
     publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
   } catch (error) {
+    const modelNotFound = isModelNotFoundError(error);
+    
     appendJsonLog('api-runs.jsonl', {
       scope: 'mastra-run',
       stage: 'execute.error',
       runId,
       projectId: input.projectId,
       error,
+      modelNotFound,
     });
+
+    const errorMessage = modelNotFound
+      ? `模型 ${input.model || '当前'} 不可用，请更换模型或联系管理员。网关返回：模型未找到。`
+      : (error instanceof Error ? error.message : 'Run failed');
+
     publish({
       type: 'run.end',
       runId,
       emittedAt: emittedAt(),
       status: 'error',
-      errorMessage: error instanceof Error ? error.message : 'Mastra run failed',
+      errorMessage,
     });
   }
 }
 
-async function createDefaultMastraAgent({
-  instructions,
-  options,
-  tools,
+async function executeMultiAgentWorkflow({
+  registry,
+  store,
+  input,
+  productProfile,
+  prompt,
+  publish,
+  emittedAt,
+  runId,
+  threadId,
 }: {
-  instructions: string;
+  registry: AgentRegistry;
+  store: WorkspaceStore;
+  input: CreateRunInput;
+  productProfile: ProductProfile;
+  prompt: string;
+  publish: (event: StreamEvent) => void;
+  emittedAt: () => string;
+  runId: string;
+  threadId: string;
   options: MastraRunOptions;
-  tools: ReturnType<typeof createWorkspaceTools>;
-}): Promise<MastraAgentClient> {
-  const memoryDbPath = options.memoryDbPath ?? DEFAULT_MEMORY_DB;
-  await mkdir(path.dirname(memoryDbPath), { recursive: true });
-  const storage = new LibSQLStore({ id: 'viwork-mastra-storage', url: `file:${memoryDbPath}` });
-  const memory = new Memory({
-    storage,
-    vector: false,
-    options: {
-      lastMessages: 12,
-      semanticRecall: false,
-      workingMemory: {
-        enabled: true,
-        scope: 'resource',
-        template: [
-          '# viwork project memory',
-          '- 用户偏好：',
-          '- 项目长期设定：',
-          '- 角色与关系：',
-          '- 待回收伏笔：',
-        ].join('\n'),
-      },
-    },
+}): Promise<void> {
+  const baseTools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
+    imageGeneration: input.imageGeneration,
+    wechat: input.wechat,
+  });
+  const orchestrationTools: MastraToolset = {
+    ...baseTools,
+    delegate_to_specialist_agent: createSpecialistDelegationTool({
+      registry,
+      publish,
+      emittedAt,
+      runId,
+      threadId,
+      input,
+    }),
+  };
+  const systemInstructions = await buildSystemInstructions(store, productProfile);
+  const mainAgent = registry.systemAgent(buildMainAgentInstructions(systemInstructions), orchestrationTools);
+
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'mastra-run',
+    stage: 'main-agent.stream.input',
+    runId,
+    projectId: input.projectId,
+    threadId,
+    prompt: textLogValue(prompt),
   });
 
-  return new Agent({
-    id: 'viwork-system-agent',
-    name: 'viwork system agent',
-    instructions,
-    model: buildMastraModelConfig(options),
-    tools,
-    memory,
-    inputProcessors: [new TokenLimiterProcessor({ limit: 100_000, strategy: 'truncate' })],
-  }) as MastraAgentClient;
+  await runAgentStream(mainAgent, prompt, publish, emittedAt, runId, threadId, input, 40, threadId);
 }
 
-function buildMastraModelConfig(options: MastraRunOptions): OpenAICompatibleConfig {
-  const rawId = options.model
-    || process.env.VIWORK_AIGC_HUB_CHAT_MODEL
-    || AIGC_HUB_CHAT_MODEL
-    || process.env.VIWORK_MASTRA_MODEL
-    || DEFAULT_MASTRA_MODEL;
-  const id = rawId.includes('/') ? rawId : `aigc-hub/${rawId}`;
-  return {
-    id: id as `${string}/${string}`,
-    url: options.baseUrl
-      || process.env.VIWORK_AIGC_HUB_BASE_URL
-      || AIGC_HUB_BASE_URL
-      || process.env.VIWORK_MASTRA_BASE_URL
-      || process.env.OPENAI_BASE_URL
-      || DEFAULT_MASTRA_BASE_URL,
-    apiKey: options.apiKey
-      || process.env.VIWORK_AIGC_HUB_API_KEY
-      || AIGC_HUB_API_KEY
-      || process.env.VIWORK_MASTRA_API_KEY
-      || process.env.OPENAI_API_KEY
-      || process.env.CODEX_API_KEY
-      || '',
-  };
+function createSpecialistDelegationTool({
+  registry,
+  publish,
+  emittedAt,
+  runId,
+  threadId,
+  input,
+}: {
+  registry: AgentRegistry;
+  publish: (event: StreamEvent) => void;
+  emittedAt: () => string;
+  runId: string;
+  threadId: string;
+  input: CreateRunInput;
+}) {
+  return createTool({
+    id: 'delegate_to_specialist_agent',
+    description: [
+      '将明确需要专业创作能力的子任务交给一个 viwork specialist agent。',
+      '普通问候、解释、简单修改、文件读写和一般对话不要使用此工具，由主 agent 直接完成。',
+      '只有在任务明确属于脑暴、原著分析、改编方案、剧本创作或审稿时才委派。',
+    ].join('\n'),
+    inputSchema: z.object({
+      agentId: z.enum([
+        'brainstorm-agent',
+        'source-analyst-agent',
+        'adaptation-planner-agent',
+        'screenwriter-agent',
+        'reviewer-agent',
+      ]),
+      task: z.string().min(1),
+      context: z.string().default(''),
+    }),
+    execute: async ({ agentId, task, context }) => runSpecialistAgent({
+      registry,
+      agentId,
+      task,
+      context: context ?? '',
+      publish,
+      emittedAt,
+      runId,
+      threadId,
+      input,
+    }),
+  });
 }
 
-function createWorkspaceTools(
-  store: WorkspaceStore,
-  projectId: string,
+async function runSpecialistAgent({
+  registry,
+  agentId,
+  task,
+  context,
+  publish,
+  emittedAt,
+  runId,
+  threadId,
+  input,
+}: {
+  registry: AgentRegistry;
+  agentId: string;
+  task: string;
+  context: string;
+  publish: (event: StreamEvent) => void;
+  emittedAt: () => string;
+  runId: string;
+  threadId: string;
+  input: CreateRunInput;
+}): Promise<{ agentId: string; output: string }> {
+  const agent = getSpecialistAgent(registry, agentId);
+  if (!agent) {
+    return { agentId, output: `未找到 specialist agent：${agentId}` };
+  }
+
+  const phase = SPECIALIST_AGENT_LABELS[agentId] ?? agentId;
+  publish({
+    type: 'agent.step.start',
+    runId,
+    emittedAt: emittedAt(),
+    agentId,
+    phase,
+    iteration: 1,
+    maxIterations: 1,
+  } as StreamEvent);
+
+  const specialistPrompt = [
+    '# Specialist 子任务',
+    task,
+    context ? '# 主 agent 提供的上下文' : '',
+    context,
+    '# 输出要求',
+    '只完成该子任务。需要写入正式产物时使用 workspace tools；否则直接返回可供主 agent 综合的结果。',
+  ].filter(Boolean).join('\n\n');
+
+  const output = await runAgentStream(
+    agent,
+    specialistPrompt,
+    publish,
+    emittedAt,
+    runId,
+    threadId,
+    input,
+    25,
+    `${threadId}-${agentId}`,
+  );
+
+  publish({
+    type: 'agent.step.end',
+    runId,
+    emittedAt: emittedAt(),
+    agentId,
+    phase,
+    iteration: 1,
+    maxIterations: 1,
+    status: 'passed',
+  } as StreamEvent);
+
+  return { agentId, output };
+}
+
+async function runAgentStream(
+  agent: MastraAgentClient,
+  prompt: string,
   publish: (event: StreamEvent) => void,
-  runId: string,
   emittedAt: () => string,
-) {
-  return {
-    list_workspace_entries: createTool({
-      id: 'list_workspace_entries',
-      description: 'List files and folders in the current viwork project workspace.',
-      inputSchema: z.object({}),
-      execute: async () => ({ entries: await store.listWorkspaceEntries(projectId) }),
-    }),
-    read_workspace_file: createTool({
-      id: 'read_workspace_file',
-      description: 'Read a UTF-8 text file from the current viwork project workspace.',
-      inputSchema: z.object({ path: z.string().min(1) }),
-      execute: async ({ path: filePath }) => store.readWorkspaceFile(projectId, filePath),
-    }),
-    write_workspace_file: createTool({
-      id: 'write_workspace_file',
-      description: 'Write a UTF-8 text file inside the current viwork project workspace. Use this only for final accepted story or script artifacts.',
-      inputSchema: z.object({ path: z.string().min(1), content: z.string() }),
-      execute: async ({ path: filePath, content }) => {
-        const existed = await workspaceFileExists(store, projectId, filePath);
-        const written = await store.writeWorkspaceFile(projectId, filePath, content);
-        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: written.path, change: existed ? 'modified' : 'created' });
-        return written;
-      },
-    }),
-    read_global_file: createTool({
-      id: 'read_global_file',
-      description: 'Read a UTF-8 text file from the global viwork workspace such as knowledge base, templates, or Agent configuration.',
-      inputSchema: z.object({ path: z.string().min(1) }),
-      execute: async ({ path: filePath }) => store.readGlobalWorkspaceFile(filePath),
-    }),
-  };
+  runId: string,
+  threadId: string,
+  input: CreateRunInput,
+  maxSteps: number,
+  memoryThread = `${threadId}-${agent.id ?? 'agent'}`,
+): Promise<string> {
+  const streamed = await agent.stream(prompt, {
+    runId,
+    maxSteps,
+    memory: { thread: memoryThread, resource: input.projectId },
+  });
+
+  // Use consumeMastraStream for real-time event publishing + accumulate text for context chaining
+  const text = await consumeMastraStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId });
+
+  return text;
 }
 
-async function workspaceFileExists(store: WorkspaceStore, projectId: string, filePath: string): Promise<boolean> {
-  try {
-    await store.readWorkspaceFile(projectId, filePath);
-    return true;
-  } catch {
-    return false;
+function getSpecialistAgent(registry: AgentRegistry, agentId: string): MastraAgentClient | null {
+  switch (agentId) {
+    case 'brainstorm-agent': return registry.brainstorm;
+    case 'source-analyst-agent': return registry.sourceAnalyst;
+    case 'adaptation-planner-agent': return registry.adaptationPlanner;
+    case 'screenwriter-agent': return registry.screenwriter;
+    case 'reviewer-agent': return registry.reviewer;
+    default: return null;
   }
 }
+
+export async function accumulateStreamText(stream: MastraStreamOutput['fullStream']): Promise<string> {
+  const parts: string[] = [];
+  for await (const chunk of toAsyncIterable(stream)) {
+    if (chunk.type === 'text-delta' && chunk.payload && typeof chunk.payload.text === 'string') {
+      parts.push(chunk.payload.text);
+    }
+  }
+  return parts.join('');
+}
+
+async function consumeMastraStreamAndAccumulate(
+  stream: MastraStreamOutput['fullStream'],
+  context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string },
+): Promise<string> {
+  const state: ToolState = {
+    inputByToolCallId: new Map(),
+    outputByToolCallId: new Map(),
+    thinkingSequenceById: new Map(),
+    startedToolCallIds: new Set(),
+    textSequence: 0,
+    thinkingSequence: 0,
+    toolSequence: 0,
+  };
+  const textParts: string[] = [];
+  for await (const chunk of toAsyncIterable(stream)) {
+    handleMastraChunk(chunk, state, context);
+    if (chunk.type === 'text-delta' && chunk.payload && typeof chunk.payload.text === 'string') {
+      textParts.push(chunk.payload.text);
+    }
+  }
+  return textParts.join('');
+}
+
+// --- Stream consuming (same as before, exported for backward compat) ---
 
 async function consumeMastraStream(
   stream: MastraStreamOutput['fullStream'],
@@ -359,7 +511,7 @@ function handleMastraChunk(
       status: chunk.payload?.isError ? 'failed' : 'succeeded',
       outputText: output || null,
       errorMessage: chunk.payload?.isError ? output || `${toolName} failed` : null,
-    });
+    } as StreamEvent);
   }
 }
 
@@ -415,7 +567,7 @@ async function* toAsyncIterable(stream: MastraStreamOutput['fullStream']): Async
   }
 }
 
-async function buildMastraPrompt(store: WorkspaceStore, input: CreateRunInput): Promise<string> {
+async function buildMastraPrompt(store: WorkspaceStore, input: CreateRunInput, productProfile: ProductProfile): Promise<string> {
   const referenceBlocks = await Promise.all((input.referencedFiles ?? []).map(async (file) => {
     try {
       const content = await store.readWorkspaceFile(input.projectId, file.path);
@@ -432,7 +584,7 @@ async function buildMastraPrompt(store: WorkspaceStore, input: CreateRunInput): 
   ].join('\n'));
 
   return [
-    '# 小说改编剧本创作请求',
+    productProfile.mastra.requestTitle ?? '# 创作请求',
     input.prompt,
     referenceBlocks.length > 0 ? '# 已引用项目文件' : '',
     ...referenceBlocks,
@@ -441,23 +593,39 @@ async function buildMastraPrompt(store: WorkspaceStore, input: CreateRunInput): 
   ].filter(Boolean).join('\n\n');
 }
 
-async function buildMastraInstructions(store: WorkspaceStore): Promise<string> {
-  const protocol = await readSystemAgentProtocol(store);
+async function buildSystemInstructions(store: WorkspaceStore, productProfile: ProductProfile): Promise<string> {
+  const protocol = await readSystemAgentProtocol(store, productProfile);
   return [
-    '你是 viwork 小说改编剧本工作台里的 system agent。你只服务小说改编剧本创作，不执行通用编码任务。',
-    '所有文件读写必须通过提供的 viwork workspace tools 完成，不要假设可以直接访问宿主机文件系统。',
-    '脑暴请求只正常交流，不审稿、不写入项目文件；正式原著分析、改编方案和剧本创作通过质量闸门后才写入工作区。',
-    '回答使用中文。',
+    ...productProfile.mastra.systemIntro,
     '## viwork 多 agent 工作协议',
     protocol,
   ].join('\n\n');
 }
 
-async function readSystemAgentProtocol(store: WorkspaceStore): Promise<string> {
+function buildMainAgentInstructions(systemInstructions: string): string {
+  return [
+    systemInstructions,
+    '## 主 agent 调度原则',
+    '你是默认工作的主 agent，目标是提供接近 Codex 编程工具的自然协作体验。',
+    '普通问候、解释问题、读取资料、轻量修改、整理已有内容、保存用户明确指定的小改动，都由你直接完成。',
+    '不要先做固定流程分类，不要因为用户提到剧本、方案或故事就自动启动完整流水线。',
+    '当用户明确要求生成、绘制、出图、生成角色图/场景图/剧照/分镜图/海报时，使用 generate_project_image 工具生成图片并保存到项目工作区。',
+    '调用 generate_project_image 时只填写 prompt、aspectRatio、count；不要尝试填写或猜测模型名，图片模型由系统配置自动注入。',
+    '如果用户只是要人物视觉描述、绘图提示词或图片生成建议，不要调用 generate_project_image，直接输出文本。',
+    '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
+    '可委派的 specialist agent：brainstorm-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent。',
+    '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
+    '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
+    '如果用户只是要求“帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
+    '如果用户明确要求“脑暴方向/做原著分析/制定改编方案/写正式剧本/严格审稿”，再委派给对应 specialist。',
+  ].join('\n\n');
+}
+
+async function readSystemAgentProtocol(store: WorkspaceStore, productProfile: ProductProfile): Promise<string> {
   try {
     return (await store.readGlobalWorkspaceFile('Agent 配置/AGENTS.md')).content;
   } catch {
-    return '# viwork system agent\n\n按 brainstorm-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent 的职责完成小说改编剧本创作。';
+    return productProfile.mastra.fallbackProtocol;
   }
 }
 
@@ -477,6 +645,19 @@ function textLogValue(text: string, limit = 50_000): { text: string; length: num
     length: text.length,
     truncated: text.length > limit,
   };
+}
+
+function isModelNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as Record<string, unknown>;
+  if (err.statusCode === 404) return true;
+  if (typeof err.responseBody === 'string' && err.responseBody.includes('model_not_found')) return true;
+  const data = err.data as Record<string, unknown> | undefined;
+  if (data?.error && typeof data.error === 'object') {
+    const errObj = data.error as Record<string, unknown>;
+    if (errObj.code === 'model_not_found') return true;
+  }
+  return false;
 }
 
 export const __mastraRunServiceTest = {

@@ -1,6 +1,8 @@
+import { Suspense } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { buildMarkdownInstanceKey, detectLanguage, renderEditorViewer } from './viewer-components';
+import { buildMarkdownInstanceKey, renderEditorViewer } from './viewer-components';
+import { detectLanguage } from './editors';
 
 describe('buildMarkdownInstanceKey', () => {
   it('changes when switching files', () => {
@@ -17,7 +19,7 @@ describe('buildMarkdownInstanceKey', () => {
 });
 
 describe('text editor viewer selection', () => {
-  it('uses code editing for toml instead of markdown editing', () => {
+  it('wraps code editor in Suspense for lazy loading', () => {
     const viewer = renderEditorViewer({
       entry: { name: 'config.toml', path: 'agent/config.toml', type: 'file', size: 18 },
       selectedProjectId: 'global',
@@ -29,8 +31,8 @@ describe('text editor viewer selection', () => {
       onChange: () => undefined,
     });
 
-    expect(typeof viewer.type).toBe('function');
-    expect((viewer.type as { name?: string }).name).toBe('CodeEditor');
+    expect(viewer.type).toBe(Suspense);
+    expect(viewer.props.fallback.props.label).toBe('代码编辑器');
   });
 
   it('maps toml to toml syntax highlighting', () => {

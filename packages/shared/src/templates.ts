@@ -83,14 +83,6 @@ export const DEFAULT_GLOBAL_FILES: TemplateFile[] = [
     path: '模板库/剧本文档模板.md',
     content: '# 剧本文档模板\n\n## 本集定位\n\n## 场次列表\n\n## 正文\n\n## 原著对应关系\n',
   },
-  {
-    path: '模板库/分镜脚本模板.md',
-    content: '# 分镜脚本模板\n\n| 镜头 | 景别 | 画面 | 台词/声音 | 时长 |\n| --- | --- | --- | --- | --- |\n',
-  },
-  {
-    path: '模板库/视频提示词模板.md',
-    content: '# 视频提示词模板\n\n## 首帧\n\n## 尾帧\n\n## 运镜\n\n## 负面提示词\n',
-  },
 ];
 
 export const GLOBAL_WORKSPACE_TREE: WorkspaceTreeNode[] = [
@@ -129,7 +121,7 @@ export const GLOBAL_WORKSPACE_TREE: WorkspaceTreeNode[] = [
     name: '模板库',
     path: '模板库',
     type: 'directory',
-    children: ['原著分析模板.md', '改编方案模板.md', '剧本文档模板.md', '分镜脚本模板.md', '视频提示词模板.md'].map((name) => ({
+    children: ['原著分析模板.md', '改编方案模板.md', '剧本文档模板.md'].map((name) => ({
       name,
       path: `模板库/${name}`,
       type: 'file',
@@ -145,19 +137,6 @@ export const DEFAULT_DIRECTORIES = [
   '03 剧本',
   '03 剧本/01 第一集',
   '03 剧本/02 第二集',
-  '04 分镜脚本',
-  '04 分镜脚本/01 第一集',
-  '04 分镜脚本/01 第一集/01 第一分镜',
-  '04 分镜脚本/01 第一集/02 第二分镜',
-  '04 分镜脚本/02 第二集',
-  '05 视频',
-  '05 视频/01 第一集',
-  '05 视频/01 第一集/01 第一分镜',
-  '05 视频/01 第一集/02 第二分镜',
-  '05 视频/02 第二集',
-  '06 产物',
-  '06 产物/01 第一集',
-  '06 产物/02 第二集',
 ];
 
 export const DEFAULT_ADAPTATION_FILES: TemplateFile[] = [
@@ -193,20 +172,6 @@ export const DEFAULT_ADAPTATION_FILES: TemplateFile[] = [
   ...episodeStoryFiles('02 第二集'),
   ...episodeScriptFiles('01 第一集'),
   ...episodeScriptFiles('02 第二集'),
-  {
-    path: '04 分镜脚本/01 第一集/镜头清单.md',
-    content: '# 第一集镜头清单\n\n| 镜头 | 场景 | 内容 | 依赖素材 |\n| --- | --- | --- | --- |\n',
-  },
-  ...shotFiles('01 第一集', '01 第一分镜'),
-  ...shotFiles('01 第一集', '02 第二分镜'),
-  {
-    path: '04 分镜脚本/02 第二集/镜头清单.md',
-    content: '# 第二集镜头清单\n\n| 镜头 | 场景 | 内容 | 依赖素材 |\n| --- | --- | --- | --- |\n',
-  },
-  ...videoFiles('01 第一集', '01 第一分镜'),
-  ...videoFiles('01 第一集', '02 第二分镜'),
-  ...deliverableFiles('01 第一集'),
-  ...deliverableFiles('02 第二集'),
 ];
 
 export const PROMPT_SUGGESTIONS = [

@@ -15,6 +15,12 @@ const createRunSchema = z.object({
   codexThreadId: z.string().transform((threadId) => threadId.trim()).pipe(z.string().min(1)).optional(),
   prompt: z.string().transform((prompt) => prompt.trim()).pipe(z.string().min(1)),
   model: z.string().transform((model) => model.trim()).pipe(z.string().min(1)).optional(),
+  imageGeneration: z.object({
+    model: z.string().transform((model) => model.trim()).pipe(z.string().min(1)).optional(),
+    aspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).optional(),
+    thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']).optional(),
+    count: z.number().int().min(1).max(4).optional(),
+  }).optional(),
   referencedFiles: z.array(
     z.object({
       path: z.string().transform((path) => path.trim()).pipe(z.string().min(1)),

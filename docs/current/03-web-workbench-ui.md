@@ -10,6 +10,8 @@
 
 布局样式在 [apps/web/src/styles.css](../../apps/web/src/styles.css) 的 `.workspace-grid` 附近。
 
+产品文案来自 [apps/web/src/product-profile.ts](../../apps/web/src/product-profile.ts)。该文件读取 `VIWORK_PRODUCT`，从 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts) 解析 active profile，供页面标题、默认项目名、工作区分组、输入框 placeholder 和 agent timeline label 使用。未配置时默认 `novel-adaptation`。Vite 通过 [apps/web/vite.config.ts](../../apps/web/vite.config.ts) 把同名环境变量注入前端构建。
+
 ## 三栏可调宽
 
 `workspace-grid` 使用 CSS Grid，列定义由 `workspaceGridColumns()` 动态生成：
@@ -47,6 +49,8 @@ const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, edito
 - `toggleCollapsedPath(currentPaths, path)`
 
 默认加载后目录折叠，选中或新建目标路径时用 `revealPath` 展开祖先目录。
+
+全局树和工作区分组标题不在前端硬编码，来自 active product profile 的 `globalTree` 和 `workspaceSections`。
 
 ## 刷新后的选择恢复
 

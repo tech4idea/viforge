@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ChatMessage, ChatSession, ChatSessionKind } from '@viwork/shared';
+import type { ChatMessage, ChatSession, ChatSessionKind, ChatSessionModelConfig, StreamEvent } from '@viwork/shared';
 
 const INTERRUPTED_ASSISTANT_MESSAGE = '回复未完成，可能是服务重启或连接中断。可以发送“继续”让创作助手接着聊。';
 
@@ -17,7 +17,7 @@ export type ChatSessionStore = {
   createSession(projectId: string, options?: { kind?: ChatSessionKind; title?: string }): Promise<ChatSession>;
   archiveSession(sessionId: string): Promise<ChatSession | undefined>;
   restoreSession(sessionId: string): Promise<ChatSession | undefined>;
-  updateSession(sessionId: string, input: { codexThreadId?: string | null; title?: string }): Promise<ChatSession | undefined>;
+  updateSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession | undefined>;
   appendMessage(sessionId: string, message: ChatMessage): Promise<ChatSession | undefined>;
   updateMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession | undefined>;
 };
@@ -123,6 +123,7 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
           projectId,
           kind: options.kind ?? 'assistant',
           codexThreadId: null,
+          modelConfig: {},
           title: options.title ?? '新会话',
           createdAt: now,
           updatedAt: now,
@@ -147,6 +148,7 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
       return updateSessionById(sessionId, (session) => ({
         ...session,
         ...(input.codexThreadId !== undefined ? { codexThreadId: input.codexThreadId } : {}),
+        ...(input.modelConfig !== undefined ? { modelConfig: normalizeModelConfig({ ...session.modelConfig, ...input.modelConfig }) } : {}),
         ...(input.title !== undefined ? { title: input.title } : {}),
         updatedAt: new Date().toISOString(),
       }));
@@ -180,13 +182,26 @@ function isTemporaryProjectId(projectId: string): boolean {
   return projectId.startsWith('temp-');
 }
 
+const MAX_STREAM_EVENTS = 100;
+const STREAM_EVENT_TYPES_TO_KEEP = new Set(['text.delta', 'tool_use.start', 'tool_use.end', 'tool_use.delta', 'file.changed', 'image.generated', 'run.end']);
+
+function truncateStreamEvents(events: unknown[]): unknown[] {
+  if (!Array.isArray(events) || events.length <= MAX_STREAM_EVENTS) {
+    return Array.isArray(events) ? events : [];
+  }
+  // Keep first 20 (initial context) + last 80 (recent events) = 100 total
+  const first = events.slice(0, 20);
+  const last = events.slice(-80);
+  return [...first, ...last];
+}
+
 function normalizeChatMessage(message: ChatMessage): ChatMessage {
   return {
     ...message,
     attachments: Array.isArray(message.attachments) ? message.attachments : [],
     referencedFiles: Array.isArray(message.referencedFiles) ? message.referencedFiles : [],
     referencedSnippets: Array.isArray(message.referencedSnippets) ? message.referencedSnippets : [],
-    streamEvents: Array.isArray(message.streamEvents) ? message.streamEvents : [],
+    streamEvents: truncateStreamEvents(message.streamEvents) as StreamEvent[],
   };
 }
 
@@ -226,6 +241,7 @@ function normalizeStoredChatSession(session: ChatSession): ChatSession {
   return {
     ...session,
     kind: getSessionKind(session),
+    modelConfig: normalizeModelConfig(session.modelConfig),
     messages: session.messages.map(normalizeChatMessage),
   };
 }
@@ -234,8 +250,29 @@ function normalizeChatSessionForHistory(session: ChatSession): ChatSession {
   return {
     ...session,
     kind: getSessionKind(session),
+    modelConfig: normalizeModelConfig(session.modelConfig),
     messages: session.messages.map(normalizeHistoryChatMessage).filter((message) => !isStaleEmptyAssistantPlaceholder(message)),
   };
+}
+
+function normalizeModelConfig(config: unknown): ChatSessionModelConfig {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return {};
+  const raw = config as Partial<Record<keyof ChatSessionModelConfig, unknown>>;
+  return {
+    ...(typeof raw.chatModel === 'string' && raw.chatModel.trim() ? { chatModel: raw.chatModel.trim() } : {}),
+    ...(typeof raw.imageModel === 'string' && raw.imageModel.trim() ? { imageModel: raw.imageModel.trim() } : {}),
+    ...(isImageAspectRatio(raw.imageAspectRatio) ? { imageAspectRatio: raw.imageAspectRatio } : {}),
+    ...(isImageThinkingLevel(raw.imageThinkingLevel) ? { imageThinkingLevel: raw.imageThinkingLevel } : {}),
+    ...(typeof raw.imageCount === 'number' && Number.isInteger(raw.imageCount) && raw.imageCount >= 1 && raw.imageCount <= 4 ? { imageCount: raw.imageCount } : {}),
+  };
+}
+
+function isImageAspectRatio(value: unknown): value is ChatSessionModelConfig['imageAspectRatio'] {
+  return value === '1:1' || value === '3:4' || value === '4:3' || value === '9:16' || value === '16:9';
+}
+
+function isImageThinkingLevel(value: unknown): value is ChatSessionModelConfig['imageThinkingLevel'] {
+  return value === 'minimal' || value === 'low' || value === 'medium' || value === 'high';
 }
 
 function getSessionKind(session: Partial<ChatSession>): ChatSessionKind {

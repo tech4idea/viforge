@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StreamEvent } from '@viwork/shared';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
@@ -12,14 +12,26 @@ import { createRunBus, type RunBus } from './runBus';
 let root: string;
 let store: WorkspaceStore;
 let bus: RunBus;
+let originalFetch: typeof fetch;
+let originalBaseUrl: string | undefined;
+let originalApiKey: string | undefined;
+let originalImageModel: string | undefined;
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'viwork-mastra-run-service-'));
   store = createWorkspaceStore(root);
   bus = createRunBus();
+  originalFetch = globalThis.fetch;
+  originalBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL;
+  originalApiKey = process.env.VIWORK_AIGC_HUB_API_KEY;
+  originalImageModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL;
 });
 
 afterEach(async () => {
+  globalThis.fetch = originalFetch;
+  restoreEnv('VIWORK_AIGC_HUB_BASE_URL', originalBaseUrl);
+  restoreEnv('VIWORK_AIGC_HUB_API_KEY', originalApiKey);
+  restoreEnv('VIWORK_AIGC_HUB_IMAGE_MODEL', originalImageModel);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -98,7 +110,177 @@ describe('mastra run service', () => {
     ]);
     expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
   });
+
+  it('lets the main agent answer simple requests without specialist delegation', async () => {
+    const project = await store.createProject({ name: 'Casual Chat' });
+    let mainAgentTools: Record<string, unknown> | null = null;
+    const specialistCalls: string[] = [];
+
+    const { run } = await createMastraRunService(store, bus, {
+      async createAgentRegistry(tools) {
+        return {
+          brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          sourceAnalyst: specialistAgent('source-analyst-agent', specialistCalls),
+          adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
+          screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
+          reviewer: specialistAgent('reviewer-agent', specialistCalls),
+          systemAgent(_instructions, toolsOverride) {
+            mainAgentTools = toolsOverride ?? tools;
+            return {
+              id: 'viwork-system-agent',
+              async stream() {
+                return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '你好，我在。' } }]) };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-simple',
+      prompt: '你好',
+    });
+
+    const events = await collectUntilEnd(bus, run.id);
+
+    expect(mainAgentTools).toHaveProperty('delegate_to_specialist_agent');
+    expect(specialistCalls).toEqual([]);
+    expect(events.map((event) => event.type)).toEqual(['run.start', 'thread.started', 'text.delta', 'run.end']);
+  });
+
+  it('allows the main agent to delegate explicit specialist work on demand', async () => {
+    const project = await store.createProject({ name: 'Specialist Delegation' });
+    let delegateTool: { execute?: (input: { agentId: string; task: string; context?: string }, options: never) => Promise<unknown> } | null = null;
+    const specialistCalls: string[] = [];
+
+    const { run } = await createMastraRunService(store, bus, {
+      async createAgentRegistry(tools) {
+        return {
+          brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          sourceAnalyst: specialistAgent('source-analyst-agent', specialistCalls),
+          adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
+          screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
+          reviewer: specialistAgent('reviewer-agent', specialistCalls),
+          systemAgent(_instructions, toolsOverride) {
+            delegateTool = (toolsOverride as typeof tools & { delegate_to_specialist_agent?: typeof delegateTool })?.delegate_to_specialist_agent ?? null;
+            return {
+              id: 'viwork-system-agent',
+              async stream() {
+                const result = await delegateTool?.execute?.({
+                  agentId: 'reviewer-agent',
+                  task: '严格审稿第一集剧本',
+                  context: '用户明确要求审稿。',
+                }, {} as never);
+                return {
+                  fullStream: asyncGenerator([
+                    {
+                      type: 'tool-call',
+                      payload: {
+                        toolCallId: 'tool_delegate',
+                        toolName: 'delegate_to_specialist_agent',
+                        args: { agentId: 'reviewer-agent' },
+                      },
+                    },
+                    {
+                      type: 'tool-result',
+                      payload: { toolCallId: 'tool_delegate', toolName: 'delegate_to_specialist_agent', result },
+                    },
+                    { type: 'text-delta', payload: { text: '审稿完成。' } },
+                  ]),
+                };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-delegate',
+      prompt: '请严格审一下第一集剧本',
+    });
+
+    const events = await collectUntilEnd(bus, run.id);
+
+    expect(delegateTool).toBeTruthy();
+    expect(specialistCalls).toEqual(['reviewer-agent']);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent.step.start', agentId: 'reviewer-agent' }),
+      expect.objectContaining({ type: 'agent.step.end', agentId: 'reviewer-agent' }),
+      expect.objectContaining({ type: 'tool_use.start', toolName: 'delegate_to_specialist_agent' }),
+    ]));
+    expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
+  });
+
+  it('exposes image generation as an agent workspace tool', async () => {
+    process.env.VIWORK_AIGC_HUB_BASE_URL = 'http://127.0.0.1:8000/v1';
+    process.env.VIWORK_AIGC_HUB_API_KEY = 'hub_test_key';
+    process.env.VIWORK_AIGC_HUB_IMAGE_MODEL = 'gpt-image-1';
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({
+      data: [{ b64_json: Buffer.from('fake-image').toString('base64'), revised_prompt: 'revised prompt' }],
+    })) as unknown as typeof fetch;
+
+    const project = await store.createProject({ name: 'Image Tool Project' });
+    const events: StreamEvent[] = [];
+    const tools = __mastraRunServiceTest.createWorkspaceTools(
+      store,
+      project.id,
+      (event) => events.push(event),
+      'run_image_tool',
+      () => '2026-06-04T00:00:00.000Z',
+    );
+
+    const result = await tools.generate_project_image.execute?.({
+      prompt: '生成孙少平人物形象图',
+      aspectRatio: '3:4',
+      count: 1,
+    }, {} as never) as { images: Array<{ path: string; mimeType: string; model?: string; revisedPrompt?: string }> };
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/v1/images/generations',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ authorization: 'Bearer hub_test_key' }),
+        body: JSON.stringify({
+          model: 'gpt-image-1',
+          prompt: '生成孙少平人物形象图',
+          size: '1024x1536',
+          n: 1,
+          response_format: 'b64_json',
+        }),
+      }),
+    );
+    expect(result.images[0]).toEqual(expect.objectContaining({
+      path: expect.stringMatching(/^生成图片\//),
+      mimeType: 'image/png',
+      model: 'gpt-image-1',
+      revisedPrompt: 'revised prompt',
+    }));
+    expect(events).toEqual([
+      expect.objectContaining({ type: 'file.changed', path: result.images[0]?.path, change: 'created' }),
+      expect.objectContaining({
+        type: 'image.generated',
+        attachment: expect.objectContaining({
+          path: result.images[0]?.path,
+          kind: 'generated-image',
+          model: 'gpt-image-1',
+          aspectRatio: '3:4',
+        }),
+      }),
+    ]);
+    const raw = await store.readWorkspaceFileBytes(project.id, result.images[0]!.path);
+    expect(raw.bytes.toString()).toBe('fake-image');
+  });
 });
+
+function specialistAgent(agentId: string, calls: string[]) {
+  return {
+    id: agentId,
+    async stream() {
+      calls.push(agentId);
+      return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: `${agentId} output` } }]) };
+    },
+  };
+}
 
 async function* asyncGenerator<T>(items: T[]): AsyncGenerator<T> {
   for (const item of items) {
@@ -118,4 +300,20 @@ function collectUntilEnd(bus: RunBus, runId: string): Promise<StreamEvent[]> {
       }
     });
   });
+}
+
+function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    ...init,
+  });
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
 }

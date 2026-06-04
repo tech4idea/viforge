@@ -47,6 +47,7 @@ export type AgentRun = {
   source: RunSource;
   prompt: string;
   model?: string;
+  imageGeneration?: RunImageGenerationOptions;
   referencedFiles: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
   status: RunStatus;
@@ -83,11 +84,20 @@ export type ChatMessageAttachment = {
 
 export type ChatSessionKind = 'assistant' | 'image';
 
+export type ChatSessionModelConfig = {
+  chatModel?: string;
+  imageModel?: string;
+  imageAspectRatio?: GeminiImageAspectRatio;
+  imageThinkingLevel?: GeminiImageThinkingLevel;
+  imageCount?: number;
+};
+
 export type ChatSession = {
   id: string;
   projectId: string;
   kind?: ChatSessionKind;
   codexThreadId?: string | null;
+  modelConfig?: ChatSessionModelConfig;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +125,13 @@ export type ImageGenerationRequest = {
   thinkingLevel?: GeminiImageThinkingLevel;
   count: number;
   referenceImages?: ImageGenerationReferenceImage[];
+};
+
+export type RunImageGenerationOptions = {
+  model?: string;
+  aspectRatio?: GeminiImageAspectRatio;
+  thinkingLevel?: GeminiImageThinkingLevel;
+  count?: number;
 };
 
 export type ImageGenerationResponse = {
@@ -204,6 +221,8 @@ export type StreamEvent =
     errorMessage: string | null;
   }
   | { type: 'file.changed'; runId: string; emittedAt: string; path: string; change: 'created' | 'modified' | 'deleted' }
+  | { type: 'image.generated'; runId: string; emittedAt: string; attachment: ChatMessageAttachment }
+  | { type: 'wechat.file_sent'; runId: string; emittedAt: string; path: string; mimeType: string }
   | { type: 'run.end'; runId: string; emittedAt: string; status: StreamRunStatus; errorMessage: string | null }
   | AgentTraceEvent;
 
@@ -229,6 +248,16 @@ export type WechatStatus = {
     connectedAt: string;
   } | null;
   setupSession: WechatSetupSession | null;
+  ilink: {
+    configured: boolean;
+    baseUrl?: string | null;
+    accountId?: string | null;
+    routeTag?: string | null;
+    allowFrom?: string[];
+    pollerRunning?: boolean;
+    lastPollAt?: string | null;
+    pollError?: string | null;
+  };
 };
 
 export type WechatSetupSession = {
