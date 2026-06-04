@@ -2498,7 +2498,7 @@ function App() {
     >
       <header className="top-bar">
         <div className="brand-line" aria-label="viwork">
-          <span className="logo-mark">v</span>
+          <img className="logo-mark" src="/viwork-logo.svg" alt="" aria-hidden="true" />
           <strong>viwork</strong>
         </div>
         <nav className="toolbar-actions" aria-label="页面工具">
