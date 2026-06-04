@@ -15,6 +15,7 @@ import { flushSync } from 'react-dom';
 
 import {
   apiClient,
+  resolveApiUrl,
   type AigcHubModelMetadata,
   type AgentRun,
   type ChatMessage,
@@ -287,9 +288,9 @@ function App() {
   const isHtmlFile = selectedEntry?.type === 'file' && HTML_FILE_PATTERN.test(selectedEntry.path);
   const rawPreviewUrl = selectedPath
     ? activeWorkspaceScope === 'global'
-      ? `/api/global/raw/${encodeWorkspacePath(selectedPath)}`
+      ? resolveApiUrl(`/api/global/raw/${encodeWorkspacePath(selectedPath)}`)
       : activeProjectWorkspaceId
-        ? `/api/projects/${encodeURIComponent(activeProjectWorkspaceId)}/raw/${encodeWorkspacePath(selectedPath)}`
+        ? resolveApiUrl(`/api/projects/${encodeURIComponent(activeProjectWorkspaceId)}/raw/${encodeWorkspacePath(selectedPath)}`)
         : ''
     : '';
   const hasUnsavedChanges = isTextFile && fileContent !== lastSavedContent;
@@ -3447,7 +3448,10 @@ const ChatMessageItem = memo(function ChatMessageItem({
                   onClick={() => onOpenAttachment(attachment)}
                   title={`${attachment.name} · ${attachment.path}`}
                 >
-                  <img src={`/api/projects/${encodeURIComponent(attachment.projectId)}/raw/${encodeWorkspacePath(attachment.path)}`} alt={attachment.name} />
+                  <img
+                    src={resolveApiUrl(`/api/projects/${encodeURIComponent(attachment.projectId)}/raw/${encodeWorkspacePath(attachment.path)}`)}
+                    alt={attachment.name}
+                  />
                   <span>{attachment.kind === 'reference-image' ? '参考' : '生成'} · {attachment.aspectRatio ?? ''}</span>
                 </button>
               ))}
@@ -4144,7 +4148,7 @@ const WechatPanelBody = memo(function WechatPanelBody({
           {wechatSetup ? (
             <div className="wechat-qr-wrap">
               <img
-                src={`/api/wechat/setup-sessions/${encodeURIComponent(wechatSetup.sessionId)}/qr`}
+                src={resolveApiUrl(`/api/wechat/setup-sessions/${encodeURIComponent(wechatSetup.sessionId)}/qr`)}
                 alt="微信扫码连接"
                 width={200}
                 height={200}

@@ -154,6 +154,10 @@ type ImportMetaWithViteEnv = ImportMeta & {
 
 const defaultBaseUrl = (import.meta as ImportMetaWithViteEnv).env?.VITE_API_BASE_URL ?? '';
 
+export function resolveApiUrl(path: string): string {
+  return `${trimTrailingSlashes(defaultBaseUrl)}${path}`;
+}
+
 export const apiClient = createApiClient();
 
 export function createApiClient(options: ApiClientOptions = {}): ApiClient {
