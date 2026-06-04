@@ -1,0 +1,15 @@
+.git
+.gitignore
+.qoder
+.agents
+.codex
+.claude
+.qwen
+node_modules
+logs
+apps/web/dist
+apps/api/data
+coverage
+*.log
+*.tsbuildinfo
+.DS_Store
