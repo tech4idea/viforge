@@ -43,10 +43,11 @@ import {
   filterVisibleWorkspaceEntries,
   toggleCollapsedPath,
 } from './workspace-tree';
+import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 import './styles.css';
 
-const DEFAULT_PROJECT_NAME = '长夜改编计划';
-const DEFAULT_PROJECT_DESCRIPTION = '围绕一部小说展开的剧本改编项目。';
+const DEFAULT_PROJECT_NAME = ACTIVE_PRODUCT_PROFILE.defaultProjectName;
+const DEFAULT_PROJECT_DESCRIPTION = ACTIVE_PRODUCT_PROFILE.defaultProjectDescription;
 const TEXT_FILE_PATTERN = /\.(md|markdown|txt|toml|json|js|jsx|ts|tsx|css|html|pug|csv|yml|yaml)$/i;
 const IMAGE_FILE_PATTERN = /\.(png|jpe?g|gif|webp|svg)$/i;
 const PDF_FILE_PATTERN = /\.pdf$/i;
@@ -856,7 +857,7 @@ function App() {
   }
 
   async function createProjectFromContext() {
-    const name = window.prompt('新改编项目名称', DEFAULT_PROJECT_NAME)?.trim();
+    const name = window.prompt(`新${WORKSPACE_SECTIONS[1].title.replace(/区域$/, '')}名称`, DEFAULT_PROJECT_NAME)?.trim();
     if (!name) return;
     const description = window.prompt('一句话描述题材', DEFAULT_PROJECT_DESCRIPTION)?.trim() || '';
     setIsCreatingProject(true);
@@ -2660,7 +2661,7 @@ function App() {
                     </span>
                   </button>
                   <div className="project-list">
-                    {projects.length === 0 ? <p className="muted">暂无改编项目。</p> : null}
+                    {projects.length === 0 ? <p className="muted">{ACTIVE_PRODUCT_PROFILE.workspaceSections.project.emptyText}</p> : null}
                     {projects.map((project) => {
                       const isSelectedProject = project.id === selectedProjectId;
                       return (
