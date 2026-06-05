@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import type { AigcHubModelListResponse, AigcHubModelMetadata } from '@viwork/shared';
 
+import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL } from '../env';
 
 type RawModel = Record<string, unknown>;
@@ -46,7 +47,7 @@ export function createAigcHubRoutes(): Hono {
 
 async function requestModelList(url: string, apiKey: string): Promise<{ models: AigcHubModelMetadata[]; error?: string }> {
   const response = await fetch(url, {
-    headers: { authorization: `Bearer ${apiKey}` },
+    headers: buildAigcHubHeaders({ apiKey }),
   });
   const body = await parseJson(response);
   if (!response.ok) {

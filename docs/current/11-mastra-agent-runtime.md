@@ -74,6 +74,8 @@ Mastra run service 实现 `RunService` 接口：
 每次 run 开始后，后端仍调用 `createAgentRegistry()` 创建 specialist registry：
 
 - `brainstorm-agent`：明确的脑暴方向探索。
+- `character-agent`：明确的人物设定、角色关系、行为边界和喜剧缺点设计。
+- `continuity-agent`：明确的多集连续性、既有设定、历史剧情和场景规则检查。
 - `source-analyst-agent`：明确的原著分析。
 - `adaptation-planner-agent`：明确的改编方案、分集规划。
 - `screenwriter-agent`：明确的剧本创作。
@@ -122,7 +124,7 @@ delegate_to_specialist_agent
 
 ```json
 {
-  "agentId": "brainstorm-agent | source-analyst-agent | adaptation-planner-agent | screenwriter-agent | reviewer-agent",
+  "agentId": "brainstorm-agent | character-agent | continuity-agent | source-analyst-agent | adaptation-planner-agent | screenwriter-agent | reviewer-agent",
   "task": "交给 specialist 的具体子任务",
   "context": "主 agent 已读取或判断出的上下文"
 }

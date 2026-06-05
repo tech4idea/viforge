@@ -129,9 +129,6 @@ export type ImageGenerationRequest = {
 
 export type RunImageGenerationOptions = {
   model?: string;
-  aspectRatio?: GeminiImageAspectRatio;
-  thinkingLevel?: GeminiImageThinkingLevel;
-  count?: number;
 };
 
 export type ImageGenerationResponse = {

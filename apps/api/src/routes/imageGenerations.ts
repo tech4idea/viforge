@@ -13,6 +13,7 @@ import type {
 } from '@viwork/shared';
 
 import type { ChatSessionStore } from '../chat/chatSessionStore';
+import { buildAigcHubHeaders, gatewayTraceIdFromResponse, traceIdFromRequest } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL } from '../env';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -48,10 +49,15 @@ type AigcHubImageResponse = {
   error?: string | { message?: string };
 };
 
+type GeneratedImageResult = ImageGenerationResponse & {
+  gatewayTraceId: string;
+};
+
 export function createImageGenerationRoutes(chatStore: ChatSessionStore, workspaceStore: WorkspaceStore): Hono {
   const routes = new Hono();
 
   routes.post('/image-generations', async (context) => {
+    const traceId = traceIdFromRequest(context.req.raw);
     const parsed = imageGenerationSchema.safeParse(await parseJson(context.req.raw));
     if (!parsed.success) {
       return context.json({ error: 'Invalid image generation request' }, 400);
@@ -72,9 +78,11 @@ export function createImageGenerationRoutes(chatStore: ChatSessionStore, workspa
         model: selectedModel,
         gatewayBaseUrl,
         gatewayApiKey,
+        traceId,
         chatStore,
         workspaceStore,
       });
+      context.header('traceid', response.gatewayTraceId);
       return context.json(response, 201);
     } catch (error) {
       console.error('[image-generation] request failed', {
@@ -94,6 +102,7 @@ export function createImageGenerationRoutes(chatStore: ChatSessionStore, workspa
 async function generateImages(input: {
   gatewayBaseUrl: string;
   gatewayApiKey: string;
+  traceId: string;
   chatStore: ChatSessionStore;
   workspaceStore: WorkspaceStore;
   sessionId?: string;
@@ -103,7 +112,7 @@ async function generateImages(input: {
   thinkingLevel?: GeminiImageThinkingLevel;
   count: number;
   referenceImages: Array<{ name: string; mimeType: string; contentBase64: string }>;
-}): Promise<ImageGenerationResponse> {
+}): Promise<GeneratedImageResult> {
   const now = new Date().toISOString();
   const session = input.sessionId
     ? await input.chatStore.getSession(input.sessionId)
@@ -128,6 +137,7 @@ async function generateImages(input: {
 
   const generatedAttachments: ChatMessageAttachment[] = [];
   const textParts: string[] = [];
+  let gatewayTraceId = input.traceId;
 
   try {
     const response = await requestAigcHubImages(input.gatewayBaseUrl, input.gatewayApiKey, {
@@ -135,7 +145,9 @@ async function generateImages(input: {
       prompt: buildImagePrompt(input.prompt, input.referenceImages.length),
       aspectRatio: input.aspectRatio,
       count: input.count,
+      traceId: input.traceId,
     });
+    gatewayTraceId = response.gatewayTraceId;
 
     for (const image of response.data ?? []) {
       if (typeof image.revised_prompt === 'string' && image.revised_prompt.trim()) {
@@ -180,6 +192,7 @@ async function generateImages(input: {
 
   appendJsonLog('api-image-generations.jsonl', {
     event: 'image-generation.success',
+    traceId: gatewayTraceId,
     sessionId: session.id,
     projectId: session.projectId,
     model: input.model ?? null,
@@ -190,7 +203,7 @@ async function generateImages(input: {
     referenceImageCount: referenceAttachments.length,
   });
 
-  return { session: updatedSession, userMessage, assistantMessage };
+  return { session: updatedSession, userMessage, assistantMessage, gatewayTraceId };
 }
 
 async function createImageSession(chatStore: ChatSessionStore, workspaceStore: WorkspaceStore) {
@@ -201,14 +214,11 @@ async function createImageSession(chatStore: ChatSessionStore, workspaceStore: W
 async function requestAigcHubImages(
   gatewayBaseUrl: string,
   gatewayApiKey: string,
-  input: { model?: string; prompt: string; aspectRatio: GeminiImageAspectRatio; count: number },
-): Promise<AigcHubImageResponse> {
+  input: { model?: string; prompt: string; aspectRatio: GeminiImageAspectRatio; count: number; traceId: string },
+): Promise<AigcHubImageResponse & { gatewayTraceId: string }> {
   const response = await fetch(`${trimTrailingSlashes(gatewayBaseUrl)}/images/generations`, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${gatewayApiKey}`,
-      'content-type': 'application/json',
-    },
+    headers: buildAigcHubHeaders({ apiKey: gatewayApiKey, contentType: 'application/json', traceId: input.traceId }),
     body: JSON.stringify({
       ...(input.model ? { model: input.model } : {}),
       prompt: input.prompt,
@@ -222,7 +232,7 @@ async function requestAigcHubImages(
   if (!response.ok) {
     throw new Error(errorMessageFromAigcHubBody(body) ?? `AIGC Hub 图片生成请求失败：${response.status}`);
   }
-  return body;
+  return { ...body, gatewayTraceId: gatewayTraceIdFromResponse(response, input.traceId) };
 }
 
 async function parseAigcHubJson(response: Response): Promise<AigcHubImageResponse> {

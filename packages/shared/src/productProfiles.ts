@@ -68,6 +68,8 @@ const sitcomGlobalDirectories = [
   'Agent 配置',
   'Agent 配置/skills',
   'Agent 配置/skills/brainstorm-agent',
+  'Agent 配置/skills/character-agent',
+  'Agent 配置/skills/continuity-agent',
   'Agent 配置/skills/story-agent',
   'Agent 配置/skills/screenwriter-agent',
   'Agent 配置/skills/reviewer-agent',
@@ -104,7 +106,7 @@ const sitcomProjectDirectories = [
 const sitcomGlobalFiles: TemplateFile[] = [
   {
     path: 'Agent 配置/AGENTS.md',
-    content: '# viwork system agent\n\n你是 viwork 情景剧创作工作台的 system agent。围绕角色、故事、剧本、分镜和视频生成推进情景剧创作。脑暴只走 brainstorm-agent；正式故事创作走 story-agent 并由 reviewer-agent 审稿；剧本创作走 screenwriter-agent 并由 reviewer-agent 审稿。\n',
+    content: '# viwork system agent\n\n你是 viwork 情景剧创作工作台的 system agent。你的职责不是亲自完成所有创作，而是统筹故事创作链路：读取项目上下文、判断用户意图、委派 specialist agent、维护严格审稿闭环，并在故事通过后写入正式项目文件。\n',
   },
   {
     path: 'Agent 配置/config.toml',
@@ -112,6 +114,8 @@ const sitcomGlobalFiles: TemplateFile[] = [
   },
   ...agentSkillFiles({
     'brainstorm-agent': '# brainstorm-agent\n\n你是情景剧脑暴 agent，只负责和人类正常交流、探索设定、人物、场景、冲突和笑点方向，不进入审稿或写入正式项目文件。\n',
+    'character-agent': '# character-agent\n\n你是情景剧人物设定 agent。负责人物欲望、喜剧缺点、行为边界、角色关系和可复用冲突，不写完整故事。\n',
+    'continuity-agent': '# continuity-agent\n\n你是情景剧连续性 agent。负责检查已有设定、历史剧情、角色关系变化和场景规则，给 story-agent 提供不可违背约束。\n',
     'story-agent': '# story-agent\n\n你是情景剧故事创作 agent。根据题材、人物和场景，产出单集大纲、A/B 故事、冲突升级和结尾反转。\n',
     'screenwriter-agent': '# screenwriter-agent\n\n你是情景剧编剧 agent。把通过审稿的故事大纲写成可拍摄、可表演、对白有节奏的剧本。\n',
     'reviewer-agent': '# reviewer-agent\n\n你是情景剧质量审稿 agent。严格检查故事冲突、人物一致性、对白节奏、可拍性和产物路径，结论只能是通过或打回。\n',
@@ -144,7 +148,7 @@ const sitcomGlobalTree: WorkspaceTreeNode[] = [
         name: 'skills',
         path: 'Agent 配置/skills',
         type: 'directory',
-        children: ['brainstorm-agent', 'story-agent', 'screenwriter-agent', 'reviewer-agent'].map(skillNode),
+        children: ['brainstorm-agent', 'character-agent', 'continuity-agent', 'story-agent', 'screenwriter-agent', 'reviewer-agent'].map(skillNode),
       },
     ],
   },

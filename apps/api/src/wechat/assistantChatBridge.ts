@@ -51,9 +51,6 @@ export function createAssistantChatBridge(
       const modelConfig = session?.modelConfig ?? {};
       const runImageGeneration = {
         model: runInput.imageGeneration?.model ?? modelConfig.imageModel,
-        aspectRatio: runInput.imageGeneration?.aspectRatio ?? modelConfig.imageAspectRatio,
-        thinkingLevel: runInput.imageGeneration?.thinkingLevel ?? modelConfig.imageThinkingLevel,
-        count: runInput.imageGeneration?.count ?? modelConfig.imageCount,
       };
 
       // 2. Append user message

@@ -67,6 +67,19 @@ describe('shared contracts', () => {
     }
 
     expect(resolveProductProfile('sitcom')).toMatchObject({ id: 'sitcom', documentTitle: 'viwork 情景剧创作工作台' });
+    expect(resolveProductProfile('sitcom').defaultAgentSkillNames).toEqual(expect.arrayContaining([
+      'character-agent',
+      'continuity-agent',
+      'story-agent',
+    ]));
+    expect(resolveProductProfile('sitcom').globalDirectories).toEqual(expect.arrayContaining([
+      'Agent 配置/skills/character-agent',
+      'Agent 配置/skills/continuity-agent',
+    ]));
+    expect(resolveProductProfile('sitcom').globalTree[0]?.children?.[2]?.children).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'character-agent', type: 'directory' }),
+      expect.objectContaining({ name: 'continuity-agent', type: 'directory' }),
+    ]));
     expect(resolveProductProfile('unknown')).toMatchObject({ id: 'novel-adaptation' });
   });
 

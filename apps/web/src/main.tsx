@@ -1427,10 +1427,7 @@ function App() {
         prompt: messageText,
         model: sessionModelConfig.chatModel,
         imageGeneration: {
-          model: session.modelConfig?.imageModel ?? sessionModelConfig.imageModel,
-          aspectRatio: session.modelConfig?.imageAspectRatio ?? sessionModelConfig.imageAspectRatio,
-          thinkingLevel: session.modelConfig?.imageThinkingLevel ?? sessionModelConfig.imageThinkingLevel,
-          count: session.modelConfig?.imageCount ?? sessionModelConfig.imageCount,
+          model: sessionModelConfig.imageModel,
         },
         referencedFiles: attachedReferences,
         referencedSnippets: attachedSnippets,
@@ -4032,15 +4029,15 @@ function modelsForCapability(models: AigcHubModelMetadata[], capability: 'chat' 
 }
 
 function modelSupportsCapability(model: AigcHubModelMetadata, capability: 'chat' | 'image'): boolean {
-  if (model.capabilities.length === 0) {
-    return false;
-  }
+  const id = model.id.toLowerCase();
+  const caps = model.capabilities.join(' ').toLowerCase();
 
-  const capabilityText = model.capabilities.join(' ').toLowerCase();
   if (capability === 'chat') {
-    return /chat|text|response|responses|completion|completions|tool/.test(capabilityText);
+    if (caps) return /chat|text|response|responses|completion|completions|tool/.test(caps);
+    return !/image|dall[-_]?e|flux|sdxl|stable[-_]?diffusion|midjourney|embedding/.test(id);
   }
-  return /image|vision|generation|generations/.test(capabilityText);
+  if (caps) return /image[-_]?generation|text[-_]?to[-_]?image/.test(caps);
+  return /image|dall[-_]?e|flux|sdxl|stable[-_]?diffusion|midjourney/.test(id) && !/embedding/.test(id);
 }
 
 function preferredModelId(models: AigcHubModelMetadata[], capability: 'chat' | 'image'): string {

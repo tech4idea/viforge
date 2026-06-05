@@ -77,7 +77,11 @@ describe('image generation routes', () => {
       'http://127.0.0.1:8000/v1/images/generations',
       expect.objectContaining({
         method: 'POST',
-        headers: expect.objectContaining({ authorization: 'Bearer hub_test_key' }),
+        headers: expect.objectContaining({
+          authorization: 'Bearer hub_test_key',
+          appid: 'viwork-novel-adaptation',
+          traceid: expect.any(String),
+        }),
         body: JSON.stringify({
           model: 'gpt-image-1',
           prompt: '生成一张办公室场景图',
@@ -87,6 +91,7 @@ describe('image generation routes', () => {
         }),
       }),
     );
+    expect(response.headers.get('traceid')).toBeTruthy();
 
     const body = await response.json() as { session: { messages: Array<{ attachments?: Array<{ path: string; projectId: string }> }> } };
     const generatedAttachment = body.session.messages.at(-1)?.attachments?.[0];
@@ -95,6 +100,31 @@ describe('image generation routes', () => {
     const rawResponse = await app.request(`/api/projects/${project.id}/raw/${generatedAttachment?.path}`);
     expect(rawResponse.status).toBe(200);
     expect(await rawResponse.text()).toBe('fake-png');
+  });
+
+  it('forwards an incoming trace id to AIGC Hub image requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      data: [{ b64_json: Buffer.from('trace-image').toString('base64') }],
+    }, { headers: { traceid: 'gateway-trace-456' } }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const response = await app.request('/api/image-generations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', traceid: 'client-trace-123' },
+      body: JSON.stringify({ prompt: '生成场景图', aspectRatio: '1:1', count: 1 }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/v1/images/generations',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          appid: 'viwork-novel-adaptation',
+          traceid: 'client-trace-123',
+        }),
+      }),
+    );
+    expect(response.headers.get('traceid')).toBe('gateway-trace-456');
   });
 
   it('requires AIGC Hub configuration', async () => {
