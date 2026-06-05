@@ -20,12 +20,13 @@ type MastraRunOptions = {
   }) => MastraAgentClient;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; memoryDbPath?: string },
+    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; qdrantUrl?: string },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
   apiKey?: string;
-  memoryDbPath?: string;
+  connectionString?: string;
+  qdrantUrl?: string;
   productProfile?: ProductProfile;
 };
 
@@ -125,9 +126,11 @@ async function executeMastraRun({
       ...options,
       model: input.model ?? options.model,
     };
-    const registry = options.createAgentRegistry
-      ? await options.createAgentRegistry(tools, registryOptions)
-      : await createAgentRegistry(store, registryOptions, tools);
+    const registry = options.createAgent
+      ? null
+      : options.createAgentRegistry
+        ? await options.createAgentRegistry(tools, registryOptions)
+        : await createAgentRegistry(store, registryOptions, tools);
 
     // Build the combined prompt with references
     const prompt = await buildMastraPrompt(store, input, productProfile);
@@ -314,10 +317,10 @@ async function runSpecialistAgent({
   runId: string;
   threadId: string;
   input: CreateRunInput;
-}): Promise<{ agentId: string; output: string }> {
+}): Promise<{ agentId: string; output: string; summary: string }> {
   const agent = getSpecialistAgent(registry, agentId);
   if (!agent) {
-    return { agentId, output: `未找到 specialist agent：${agentId}` };
+    return { agentId, output: `未找到 specialist agent：${agentId}`, summary: '' };
   }
 
   const phase = SPECIALIST_AGENT_LABELS[agentId] ?? agentId;
@@ -363,7 +366,13 @@ async function runSpecialistAgent({
     status: 'passed',
   } as StreamEvent);
 
-  return { agentId, output };
+  const summary = buildSpecialistSummary(agentId, phase, task, output);
+  return { agentId, output, summary };
+}
+
+function buildSpecialistSummary(agentId: string, phase: string, task: string, output: string): string {
+  const truncatedOutput = output.length > 500 ? `${output.slice(0, 500)}...` : output;
+  return `[${phase}(${agentId})] 任务：${task.slice(0, 100)}\n结果摘要：${truncatedOutput}`;
 }
 
 async function runAgentStream(
@@ -616,6 +625,7 @@ function buildMainAgentInstructions(systemInstructions: string): string {
     '可委派的 specialist agent：brainstorm-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
+    '每次 specialist 返回的结果中包含 summary 字段，请将关键信息记录到项目记忆中（专家协作摘要部分），方便后续对话引用。',
     '如果用户只是要求“帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
     '如果用户明确要求“脑暴方向/做原著分析/制定改编方案/写正式剧本/严格审稿”，再委派给对应 specialist。',
   ].join('\n\n');

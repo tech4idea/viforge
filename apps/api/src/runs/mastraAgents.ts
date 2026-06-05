@@ -1,16 +1,16 @@
 import { Agent } from '@mastra/core/agent';
 import { TokenLimiterProcessor } from '@mastra/core/processors';
 import { createTool } from '@mastra/core/tools';
-import { LibSQLStore } from '@mastra/libsql';
+import { PostgresStore } from '@mastra/pg';
+import { QdrantVector } from '@mastra/qdrant';
 import { Memory } from '@mastra/memory';
+import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
-import path from 'node:path';
-import { mkdir } from 'node:fs/promises';
 
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, WORKSPACES_ROOT } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, QDRANT_URL } from '../env';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
 
@@ -36,6 +36,7 @@ type AgentDef = {
   id: string;
   name: string;
   skillFile: string;
+  workingMemoryTemplate: string;
 };
 
 export type AgentRegistry = {
@@ -47,14 +48,67 @@ export type AgentRegistry = {
   systemAgent: (instructions: string, toolsOverride?: MastraToolset) => MastraAgentClient;
 };
 
-const DEFAULT_MEMORY_DB = path.join(WORKSPACES_ROOT, '..', 'mastra-memory.db');
-
 const AGENT_DEFS: AgentDef[] = [
-  { id: 'brainstorm-agent', name: '脑暴助手', skillFile: 'Agent 配置/skills/brainstorm-agent/SKILL.md' },
-  { id: 'source-analyst-agent', name: '原著分析', skillFile: 'Agent 配置/skills/source-analyst-agent/SKILL.md' },
-  { id: 'adaptation-planner-agent', name: '改编方案', skillFile: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md' },
-  { id: 'screenwriter-agent', name: '编剧', skillFile: 'Agent 配置/skills/screenwriter-agent/SKILL.md' },
-  { id: 'reviewer-agent', name: '审稿', skillFile: 'Agent 配置/skills/reviewer-agent/SKILL.md' },
+  {
+    id: 'brainstorm-agent',
+    name: '脑暴助手',
+    skillFile: 'Agent 配置/skills/brainstorm-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 脑暴记忆',
+      '- 已探索方向：',
+      '- 已否决方案及原因：',
+      '- 灵感关键词：',
+      '- 用户偏好倾向：',
+    ].join('\n'),
+  },
+  {
+    id: 'source-analyst-agent',
+    name: '原著分析',
+    skillFile: 'Agent 配置/skills/source-analyst-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 原著分析记忆',
+      '- 核心主题与母题：',
+      '- 关键人物关系：',
+      '- 重要场景资产：',
+      '- 改编边界与风险：',
+    ].join('\n'),
+  },
+  {
+    id: 'adaptation-planner-agent',
+    name: '改编方案',
+    skillFile: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 改编方案记忆',
+      '- 全季结构规划：',
+      '- 单集节拍设计：',
+      '- 原著到剧本映射：',
+      '- 已确定的改编决策：',
+    ].join('\n'),
+  },
+  {
+    id: 'screenwriter-agent',
+    name: '编剧',
+    skillFile: 'Agent 配置/skills/screenwriter-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 编剧记忆',
+      '- 对白风格约束：',
+      '- 场景转换规则：',
+      '- 角色声音特征：',
+      '- 已完成的场次：',
+    ].join('\n'),
+  },
+  {
+    id: 'reviewer-agent',
+    name: '审稿',
+    skillFile: 'Agent 配置/skills/reviewer-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 审稿记忆',
+      '- 高频问题模式：',
+      '- 质量标准要点：',
+      '- 已通过项：',
+      '- 待修复项：',
+    ].join('\n'),
+  },
 ];
 
 export function createWorkspaceTools(
@@ -454,14 +508,23 @@ export async function createAgentRegistry(
     model?: string;
     baseUrl?: string;
     apiKey?: string;
-    memoryDbPath?: string;
+    connectionString?: string;
+    qdrantUrl?: string;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
-  const memoryDbPath = options.memoryDbPath ?? DEFAULT_MEMORY_DB;
-  await mkdir(path.dirname(memoryDbPath), { recursive: true });
+  const connectionString = options.connectionString ?? DATABASE_URL;
+  const qdrantUrl = options.qdrantUrl ?? QDRANT_URL;
+
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required for Mastra agent memory storage.');
+  }
 
   const modelConfig = buildModelConfig(options);
+
+  const vector = qdrantUrl ? new QdrantVector({ id: 'viwork-qdrant', url: qdrantUrl }) : undefined;
+  const embedder = vector ? buildEmbedder(options) : undefined;
+  const semanticRecallEnabled = Boolean(vector && embedder);
 
   const loadSkillInstructions = async (skillFile: string): Promise<string> => {
     try {
@@ -476,14 +539,15 @@ export async function createAgentRegistry(
     const instructions = await loadSkillInstructions(def.skillFile);
     if (!instructions) return null;
 
-    const storage = new LibSQLStore({ id: `viwork-${def.id}`, url: `file:${memoryDbPath}` });
+    const storage = new PostgresStore({ connectionString });
     const memory = new Memory({
       storage,
-      vector: false,
+      ...(vector ? { vector } : {}),
+      ...(embedder ? { embedder } : {}),
       options: {
         lastMessages: 8,
-        semanticRecall: false,
-        workingMemory: { enabled: true, scope: 'resource', template: '' },
+        semanticRecall: semanticRecallEnabled,
+        workingMemory: { enabled: true, scope: 'resource', template: def.workingMemoryTemplate },
       },
     });
 
@@ -494,7 +558,7 @@ export async function createAgentRegistry(
       model: modelConfig,
       tools,
       memory,
-      inputProcessors: [new TokenLimiterProcessor({ limit: 100_000, strategy: 'truncate' })],
+      inputProcessors: [new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
     }) as unknown as MastraAgentClient;
   };
 
@@ -503,13 +567,14 @@ export async function createAgentRegistry(
   );
 
   const createSystemAgent = (instructions: string, toolsOverride?: MastraToolset): MastraAgentClient => {
-    const storage = new LibSQLStore({ id: 'viwork-system-agent', url: `file:${memoryDbPath}` });
+    const storage = new PostgresStore({ connectionString });
     const memory = new Memory({
       storage,
-      vector: false,
+      ...(vector ? { vector } : {}),
+      ...(embedder ? { embedder } : {}),
       options: {
         lastMessages: 20,
-        semanticRecall: false,
+        semanticRecall: semanticRecallEnabled,
         workingMemory: {
           enabled: true,
           scope: 'resource',
@@ -519,6 +584,7 @@ export async function createAgentRegistry(
             '- 项目长期设定：',
             '- 角色与关系：',
             '- 待回收伏笔：',
+            '- 专家协作摘要：',
           ].join('\n'),
         },
       },
@@ -531,11 +597,29 @@ export async function createAgentRegistry(
       model: modelConfig,
       tools: toolsOverride ?? tools,
       memory,
-      inputProcessors: [new TokenLimiterProcessor({ limit: 100_000, strategy: 'truncate' })],
+      inputProcessors: [new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
     }) as unknown as MastraAgentClient;
   };
 
   return { brainstorm, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
+}
+
+function buildEmbedder(options: { baseUrl?: string; apiKey?: string }) {
+  const baseUrl = options.baseUrl
+    || process.env.VIWORK_AIGC_HUB_BASE_URL
+    || process.env.AIGC_HUB_BASE_URL
+    || 'https://api.yukeon.top/v1';
+  const apiKey = options.apiKey
+    || process.env.VIWORK_AIGC_HUB_API_KEY
+    || process.env.AIGC_HUB_API_KEY
+    || '';
+
+  const openai = createOpenAI({
+    baseURL: trimTrailingSlashes(baseUrl),
+    apiKey,
+  });
+
+  return openai.embedding(EMBEDDING_MODEL);
 }
 
 function stripYamlFrontmatter(content: string): string {
