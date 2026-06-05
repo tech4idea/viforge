@@ -1,4 +1,29 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-viwork}
+      POSTGRES_USER: ${POSTGRES_USER:-viwork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-viwork}
+    ports:
+      - "${VIWORK_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-viwork}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    restart: unless-stopped
+    ports:
+      - "${VIWORK_QDRANT_PORT:-16333}:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
   api:
     build:
       context: .
@@ -12,12 +37,21 @@ services:
       VIWORK_PRODUCT: ${VIWORK_PRODUCT:-novel-adaptation}
       WORKSPACES_ROOT: /data/workspaces
       LOGS_ROOT: /data/logs
+      DATABASE_URL: postgresql://${POSTGRES_USER:-viwork}:${POSTGRES_PASSWORD:-viwork}@postgres:5432/${POSTGRES_DB:-viwork}
+      QDRANT_URL: http://qdrant:6333
       VIWORK_AIGC_HUB_BASE_URL: ${VIWORK_AIGC_HUB_BASE_URL:-}
       VIWORK_AIGC_HUB_API_KEY: ${VIWORK_AIGC_HUB_API_KEY:-}
+      VIWORK_AIGC_HUB_APP_ID: ${VIWORK_AIGC_HUB_APP_ID:-}
       VIWORK_AIGC_HUB_IMAGE_MODEL: ${VIWORK_AIGC_HUB_IMAGE_MODEL:-}
       VIWORK_AIGC_HUB_CHAT_MODEL: ${VIWORK_AIGC_HUB_CHAT_MODEL:-}
+      VIWORK_AIGC_HUB_EMBEDDING_MODEL: ${VIWORK_AIGC_HUB_EMBEDDING_MODEL:-}
     volumes:
       - ./var/api-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
 
   web:
     build:
@@ -32,3 +66,7 @@ services:
       - "${VIWORK_WEB_PORT:-18080}:80"
     depends_on:
       - api
+
+volumes:
+  postgres-data:
+  qdrant-data:

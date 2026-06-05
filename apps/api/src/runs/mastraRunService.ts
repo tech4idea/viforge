@@ -20,12 +20,13 @@ type MastraRunOptions = {
   }) => MastraAgentClient;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; memoryDbPath?: string },
+    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; qdrantUrl?: string; traceId?: string },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
   apiKey?: string;
-  memoryDbPath?: string;
+  connectionString?: string;
+  qdrantUrl?: string;
   productProfile?: ProductProfile;
 };
 
@@ -41,6 +42,8 @@ type ToolState = {
 
 const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'brainstorm-agent': '脑暴',
+  'character-agent': '人物设定',
+  'continuity-agent': '连续性检查',
   'source-analyst-agent': '原著分析',
   'adaptation-planner-agent': '改编方案',
   'screenwriter-agent': '编剧',
@@ -60,8 +63,10 @@ export function createMastraRunService(
       }
 
       const timestamp = new Date().toISOString();
+      const runId = `run_${randomUUID()}`;
+      const traceId = input.traceId ?? runId;
       const run = {
-        id: `run_${randomUUID()}`,
+        id: runId,
         projectId: input.projectId,
         sessionId: input.sessionId,
         codexThreadId: input.codexThreadId,
@@ -76,7 +81,7 @@ export function createMastraRunService(
         updatedAt: timestamp,
       };
 
-      void executeMastraRun({ bus, input, options, runId: run.id, store });
+      void executeMastraRun({ bus, input: { ...input, traceId }, options, runId: run.id, store });
 
       return { run };
     },
@@ -118,16 +123,20 @@ async function executeMastraRun({
     // Build tools
     const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
       imageGeneration: input.imageGeneration,
+      traceId: input.traceId,
       wechat: input.wechat,
     });
     // Create agent registry from skills
     const registryOptions = {
       ...options,
       model: input.model ?? options.model,
+      traceId: input.traceId,
     };
-    const registry = options.createAgentRegistry
-      ? await options.createAgentRegistry(tools, registryOptions)
-      : await createAgentRegistry(store, registryOptions, tools);
+    const registry = options.createAgent
+      ? null
+      : options.createAgentRegistry
+        ? await options.createAgentRegistry(tools, registryOptions)
+        : await createAgentRegistry(store, registryOptions, tools);
 
     // Build the combined prompt with references
     const prompt = await buildMastraPrompt(store, input, productProfile);
@@ -155,7 +164,7 @@ async function executeMastraRun({
       await consumeMastraStream(streamed.fullStream, { emittedAt, publish, runId });
     } else {
       await executeMultiAgentWorkflow({
-        registry,
+        registry: registry!,
         store,
         input,
         productProfile,
@@ -219,6 +228,7 @@ async function executeMultiAgentWorkflow({
 }): Promise<void> {
   const baseTools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
     imageGeneration: input.imageGeneration,
+    traceId: input.traceId,
     wechat: input.wechat,
   });
   const orchestrationTools: MastraToolset = {
@@ -267,11 +277,13 @@ function createSpecialistDelegationTool({
     description: [
       '将明确需要专业创作能力的子任务交给一个 viwork specialist agent。',
       '普通问候、解释、简单修改、文件读写和一般对话不要使用此工具，由主 agent 直接完成。',
-      '只有在任务明确属于脑暴、原著分析、改编方案、剧本创作或审稿时才委派。',
+      '只有在任务明确属于脑暴、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作或审稿时才委派。',
     ].join('\n'),
     inputSchema: z.object({
       agentId: z.enum([
         'brainstorm-agent',
+        'character-agent',
+        'continuity-agent',
         'source-analyst-agent',
         'adaptation-planner-agent',
         'screenwriter-agent',
@@ -314,10 +326,10 @@ async function runSpecialistAgent({
   runId: string;
   threadId: string;
   input: CreateRunInput;
-}): Promise<{ agentId: string; output: string }> {
+}): Promise<{ agentId: string; output: string; summary: string }> {
   const agent = getSpecialistAgent(registry, agentId);
   if (!agent) {
-    return { agentId, output: `未找到 specialist agent：${agentId}` };
+    return { agentId, output: `未找到 specialist agent：${agentId}`, summary: '' };
   }
 
   const phase = SPECIALIST_AGENT_LABELS[agentId] ?? agentId;
@@ -363,7 +375,13 @@ async function runSpecialistAgent({
     status: 'passed',
   } as StreamEvent);
 
-  return { agentId, output };
+  const summary = buildSpecialistSummary(agentId, phase, task, output);
+  return { agentId, output, summary };
+}
+
+function buildSpecialistSummary(agentId: string, phase: string, task: string, output: string): string {
+  const truncatedOutput = output.length > 500 ? `${output.slice(0, 500)}...` : output;
+  return `[${phase}(${agentId})] 任务：${task.slice(0, 100)}\n结果摘要：${truncatedOutput}`;
 }
 
 async function runAgentStream(
@@ -392,6 +410,8 @@ async function runAgentStream(
 function getSpecialistAgent(registry: AgentRegistry, agentId: string): MastraAgentClient | null {
   switch (agentId) {
     case 'brainstorm-agent': return registry.brainstorm;
+    case 'character-agent': return registry.character;
+    case 'continuity-agent': return registry.continuity;
     case 'source-analyst-agent': return registry.sourceAnalyst;
     case 'adaptation-planner-agent': return registry.adaptationPlanner;
     case 'screenwriter-agent': return registry.screenwriter;
@@ -613,11 +633,13 @@ function buildMainAgentInstructions(systemInstructions: string): string {
     '调用 generate_project_image 时只填写 prompt、aspectRatio、count；不要尝试填写或猜测模型名，图片模型由系统配置自动注入。',
     '如果用户只是要人物视觉描述、绘图提示词或图片生成建议，不要调用 generate_project_image，直接输出文本。',
     '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
-    '可委派的 specialist agent：brainstorm-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent。',
+    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
+    '每次 specialist 返回的结果中包含 summary 字段，请将关键信息记录到项目记忆中（专家协作摘要部分），方便后续对话引用。',
     '如果用户只是要求“帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
-    '如果用户明确要求“脑暴方向/做原著分析/制定改编方案/写正式剧本/严格审稿”，再委派给对应 specialist。',
+    '在情景剧故事创作中，如果人物动机、角色关系或角色行为边界不清，先委派 character-agent；如果涉及多集历史、固定设定或上一集状态，先委派 continuity-agent。',
+    '如果用户明确要求“脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿”，再委派给对应 specialist。',
   ].join('\n\n');
 }
 

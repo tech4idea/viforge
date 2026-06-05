@@ -120,6 +120,8 @@ describe('mastra run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          character: specialistAgent('character-agent', specialistCalls),
+          continuity: specialistAgent('continuity-agent', specialistCalls),
           sourceAnalyst: specialistAgent('source-analyst-agent', specialistCalls),
           adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
           screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
@@ -157,6 +159,8 @@ describe('mastra run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          character: specialistAgent('character-agent', specialistCalls),
+          continuity: specialistAgent('continuity-agent', specialistCalls),
           sourceAnalyst: specialistAgent('source-analyst-agent', specialistCalls),
           adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
           screenwriter: specialistAgent('screenwriter-agent', specialistCalls),

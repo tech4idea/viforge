@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { RunEvent, StreamEvent } from '@viwork/shared';
 
 import { appendJsonLog } from '../logger';
+import { traceIdFromRequest } from '../aigcHubHeaders';
 import type { RunService } from '../runs/runService';
 import type { RunBus } from '../runs/runBus';
 
@@ -17,9 +18,6 @@ const createRunSchema = z.object({
   model: z.string().transform((model) => model.trim()).pipe(z.string().min(1)).optional(),
   imageGeneration: z.object({
     model: z.string().transform((model) => model.trim()).pipe(z.string().min(1)).optional(),
-    aspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).optional(),
-    thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']).optional(),
-    count: z.number().int().min(1).max(4).optional(),
   }).optional(),
   referencedFiles: z.array(
     z.object({
@@ -44,6 +42,7 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
 
   routes.post('/runs', async (context) => {
     const requestId = `runs_req_${randomUUID()}`;
+    const traceId = traceIdFromRequest(context.req.raw);
     const body = await parseJson(context.req.raw);
     appendJsonLog('api-runs.jsonl', {
       scope: 'runs.route',
@@ -66,7 +65,7 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
     }
 
     try {
-      const result = await service.createRun({ ...parsed.data, source: 'web' });
+      const result = await service.createRun({ ...parsed.data, source: 'web', traceId });
       appendJsonLog('api-runs.jsonl', {
         scope: 'runs.route',
         stage: 'response.created',
@@ -80,6 +79,7 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
       if (bus && result.events) {
         publishLegacyEvents(bus, result.events);
       }
+      context.header('traceid', traceId);
       return context.json(result, 201);
     } catch (error) {
       appendJsonLog('api-runs.jsonl', {

@@ -17,6 +17,7 @@ export type CreateRunInput = {
   referencedFiles?: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
   source?: RunSource;
+  traceId?: string;
   wechat?: WechatSendContext;
 };
 

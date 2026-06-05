@@ -5,3 +5,5 @@ allowBuilds:
   '@google/genai': true
   esbuild: true
   protobufjs: true
+minimumReleaseAgeExclude:
+  - '@mastra/core@1.41.0'

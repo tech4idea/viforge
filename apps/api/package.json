@@ -11,11 +11,13 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.0",
     "@google/genai": "^1.33.0",
     "@hono/node-server": "^1.13.7",
-    "@mastra/core": "^1.37.1",
-    "@mastra/libsql": "^1.11.1",
+    "@mastra/core": "^1.41.0",
     "@mastra/memory": "^1.20.0",
+    "@mastra/pg": "^1.12.0",
+    "@mastra/qdrant": "^1.0.0",
     "@openai/codex-sdk": "^0.130.0",
     "@viwork/shared": "workspace:*",
     "hono": "^4.6.15",

@@ -1,16 +1,17 @@
 import { Agent } from '@mastra/core/agent';
 import { TokenLimiterProcessor } from '@mastra/core/processors';
 import { createTool } from '@mastra/core/tools';
-import { LibSQLStore } from '@mastra/libsql';
+import { PostgresStore } from '@mastra/pg';
+import { QdrantVector } from '@mastra/qdrant';
 import { Memory } from '@mastra/memory';
+import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
-import path from 'node:path';
-import { mkdir } from 'node:fs/promises';
 
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, WORKSPACES_ROOT } from '../env';
+import { buildAigcHubHeaders } from '../aigcHubHeaders';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, QDRANT_URL } from '../env';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
 
@@ -36,10 +37,13 @@ type AgentDef = {
   id: string;
   name: string;
   skillFile: string;
+  workingMemoryTemplate: string;
 };
 
 export type AgentRegistry = {
   brainstorm: MastraAgentClient | null;
+  character: MastraAgentClient | null;
+  continuity: MastraAgentClient | null;
   sourceAnalyst: MastraAgentClient | null;
   adaptationPlanner: MastraAgentClient | null;
   screenwriter: MastraAgentClient | null;
@@ -47,14 +51,92 @@ export type AgentRegistry = {
   systemAgent: (instructions: string, toolsOverride?: MastraToolset) => MastraAgentClient;
 };
 
-const DEFAULT_MEMORY_DB = path.join(WORKSPACES_ROOT, '..', 'mastra-memory.db');
-
 const AGENT_DEFS: AgentDef[] = [
-  { id: 'brainstorm-agent', name: '脑暴助手', skillFile: 'Agent 配置/skills/brainstorm-agent/SKILL.md' },
-  { id: 'source-analyst-agent', name: '原著分析', skillFile: 'Agent 配置/skills/source-analyst-agent/SKILL.md' },
-  { id: 'adaptation-planner-agent', name: '改编方案', skillFile: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md' },
-  { id: 'screenwriter-agent', name: '编剧', skillFile: 'Agent 配置/skills/screenwriter-agent/SKILL.md' },
-  { id: 'reviewer-agent', name: '审稿', skillFile: 'Agent 配置/skills/reviewer-agent/SKILL.md' },
+  {
+    id: 'brainstorm-agent',
+    name: '脑暴助手',
+    skillFile: 'Agent 配置/skills/brainstorm-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 脑暴记忆',
+      '- 已探索方向：',
+      '- 已否决方案及原因：',
+      '- 灵感关键词：',
+      '- 用户偏好倾向：',
+    ].join('\n'),
+  },
+  {
+    id: 'character-agent',
+    name: '人物设定',
+    skillFile: 'Agent 配置/skills/character-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 人物设定记忆',
+      '- 角色表层目标：',
+      '- 角色隐藏需求：',
+      '- 喜剧缺点与行为边界：',
+      '- 角色关系压力：',
+    ].join('\n'),
+  },
+  {
+    id: 'continuity-agent',
+    name: '连续性检查',
+    skillFile: 'Agent 配置/skills/continuity-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 连续性记忆',
+      '- 已确认项目事实：',
+      '- 已发生剧情事件：',
+      '- 角色关系变化：',
+      '- 不可违背设定：',
+      '- 可回收包袱：',
+    ].join('\n'),
+  },
+  {
+    id: 'source-analyst-agent',
+    name: '原著分析',
+    skillFile: 'Agent 配置/skills/source-analyst-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 原著分析记忆',
+      '- 核心主题与母题：',
+      '- 关键人物关系：',
+      '- 重要场景资产：',
+      '- 改编边界与风险：',
+    ].join('\n'),
+  },
+  {
+    id: 'adaptation-planner-agent',
+    name: '改编方案',
+    skillFile: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 改编方案记忆',
+      '- 全季结构规划：',
+      '- 单集节拍设计：',
+      '- 原著到剧本映射：',
+      '- 已确定的改编决策：',
+    ].join('\n'),
+  },
+  {
+    id: 'screenwriter-agent',
+    name: '编剧',
+    skillFile: 'Agent 配置/skills/screenwriter-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 编剧记忆',
+      '- 对白风格约束：',
+      '- 场景转换规则：',
+      '- 角色声音特征：',
+      '- 已完成的场次：',
+    ].join('\n'),
+  },
+  {
+    id: 'reviewer-agent',
+    name: '审稿',
+    skillFile: 'Agent 配置/skills/reviewer-agent/SKILL.md',
+    workingMemoryTemplate: [
+      '# 审稿记忆',
+      '- 高频问题模式：',
+      '- 质量标准要点：',
+      '- 已通过项：',
+      '- 待修复项：',
+    ].join('\n'),
+  },
 ];
 
 export function createWorkspaceTools(
@@ -63,7 +145,7 @@ export function createWorkspaceTools(
   publish: (event: StreamEvent) => void,
   runId: string,
   emittedAt: () => string,
-  options: { imageGeneration?: RunImageGenerationOptions; wechat?: WechatSendContext } = {},
+  options: { imageGeneration?: RunImageGenerationOptions; traceId?: string; wechat?: WechatSendContext } = {},
 ) {
   const tools: Record<string, ReturnType<typeof createTool>> = {
     list_workspace_entries: createTool({
@@ -89,6 +171,16 @@ export function createWorkspaceTools(
         return written;
       },
     }),
+    delete_workspace_file: createTool({
+      id: 'delete_workspace_file',
+      description: '删除当前项目工作区中的文件或目录。用于清理不再需要的工作成果。',
+      inputSchema: z.object({ path: z.string().min(1) }),
+      execute: async ({ path: filePath }) => {
+        const result = await store.deleteWorkspaceEntry(projectId, filePath);
+        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: filePath, change: 'deleted' });
+        return result;
+      },
+    }),
     read_global_file: createTool({
       id: 'read_global_file',
       description: '读取全局工作区中的 UTF-8 文本文件，如知识库、模板或 Agent 配置。',
@@ -109,8 +201,8 @@ export function createWorkspaceTools(
         count: z.number().int().min(1).max(4).default(1),
       }),
       execute: async ({ prompt, aspectRatio, count }) => {
-        const resolvedAspectRatio = aspectRatio ?? options.imageGeneration?.aspectRatio ?? '1:1';
-        const resolvedCount = count ?? options.imageGeneration?.count ?? 1;
+        const resolvedAspectRatio = aspectRatio ?? '1:1';
+        const resolvedCount = count ?? 1;
         const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
         const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
@@ -124,6 +216,7 @@ export function createWorkspaceTools(
           prompt,
           aspectRatio: resolvedAspectRatio,
           count: resolvedCount,
+          traceId: options.traceId,
         });
         const generated: Array<{ path: string; mimeType: string; model?: string; revisedPrompt?: string }> = [];
         const attachments: ChatMessageAttachment[] = [];
@@ -148,7 +241,6 @@ export function createWorkspaceTools(
             prompt,
             model: selectedModel || undefined,
             aspectRatio: resolvedAspectRatio,
-            thinkingLevel: options.imageGeneration?.thinkingLevel,
             createdAt: now,
           };
           attachments.push(attachment);
@@ -214,14 +306,11 @@ type AigcHubImageResponse = {
 async function requestAigcHubImages(
   gatewayBaseUrl: string,
   gatewayApiKey: string,
-  input: { model?: string; prompt: string; aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; count: number },
+  input: { model?: string; prompt: string; aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9'; count: number; traceId?: string },
 ): Promise<AigcHubImageResponse> {
   const response = await fetch(`${trimTrailingSlashes(gatewayBaseUrl)}/images/generations`, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${gatewayApiKey}`,
-      'content-type': 'application/json',
-    },
+    headers: buildAigcHubHeaders({ apiKey: gatewayApiKey, contentType: 'application/json', traceId: input.traceId }),
     body: JSON.stringify({
       ...(input.model ? { model: input.model } : {}),
       prompt: input.prompt,
@@ -239,8 +328,15 @@ async function requestAigcHubImages(
 }
 
 async function resolveImageModel(gatewayBaseUrl: string, gatewayApiKey: string, configuredModel?: string): Promise<string> {
-  const model = configuredModel ?? process.env.VIWORK_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
-  if (model) return model;
+  const envModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
+
+  if (configuredModel && configuredModel !== envModel) {
+    const models = await requestAigcHubModels(gatewayBaseUrl, gatewayApiKey);
+    const match = models.find((m) => m.id === configuredModel && modelSupportsImageGeneration(m));
+    if (match) return match.id;
+  }
+
+  if (envModel) return envModel;
 
   const models = await requestAigcHubModels(gatewayBaseUrl, gatewayApiKey);
   const imageModel = models.find(modelSupportsImageGeneration);
@@ -257,7 +353,7 @@ async function requestAigcHubModels(gatewayBaseUrl: string, gatewayApiKey: strin
 }
 
 async function requestModelList(url: string, apiKey: string): Promise<AigcHubModelMetadata[]> {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${apiKey}` } });
+  const response = await fetch(url, { headers: buildAigcHubHeaders({ apiKey }) });
   const body = await parseUnknownJson(response);
   if (!response.ok) return [];
   return normalizeModels(body);
@@ -348,8 +444,12 @@ function addCapabilityValue(capabilities: Set<string>, value: unknown): void {
 }
 
 function modelSupportsImageGeneration(model: AigcHubModelMetadata): boolean {
-  const capabilityText = `${model.id} ${model.label} ${model.capabilities.join(' ')}`.toLowerCase();
-  return /image|vision|generation|generations|图像|图片/.test(capabilityText);
+  const id = model.id.toLowerCase();
+  if (/image|dall[-_]?e|flux|sdxl|stable[-_]?diffusion|midjourney/.test(id)) {
+    return !/embedding/.test(id);
+  }
+  const caps = model.capabilities.join(' ').toLowerCase();
+  return /image[-_]?generation|text[-_]?to[-_]?image|图片生成/.test(caps);
 }
 
 function stringField(raw: RawModel, keys: string[]): string | null {
@@ -454,14 +554,24 @@ export async function createAgentRegistry(
     model?: string;
     baseUrl?: string;
     apiKey?: string;
-    memoryDbPath?: string;
+    connectionString?: string;
+    qdrantUrl?: string;
+    traceId?: string;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
-  const memoryDbPath = options.memoryDbPath ?? DEFAULT_MEMORY_DB;
-  await mkdir(path.dirname(memoryDbPath), { recursive: true });
+  const connectionString = options.connectionString ?? DATABASE_URL;
+  const qdrantUrl = options.qdrantUrl ?? QDRANT_URL;
+
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required for Mastra agent memory storage.');
+  }
 
   const modelConfig = buildModelConfig(options);
+
+  const vector = qdrantUrl ? new QdrantVector({ id: 'viwork-qdrant', url: qdrantUrl }) : undefined;
+  const embedder = vector ? buildEmbedder(options) : undefined;
+  const semanticRecallEnabled = Boolean(vector && embedder);
 
   const loadSkillInstructions = async (skillFile: string): Promise<string> => {
     try {
@@ -476,14 +586,15 @@ export async function createAgentRegistry(
     const instructions = await loadSkillInstructions(def.skillFile);
     if (!instructions) return null;
 
-    const storage = new LibSQLStore({ id: `viwork-${def.id}`, url: `file:${memoryDbPath}` });
+    const storage = new PostgresStore({ id: `viwork-${def.id}`, connectionString });
     const memory = new Memory({
       storage,
-      vector: false,
+      ...(vector ? { vector } : {}),
+      ...(embedder ? { embedder } : {}),
       options: {
         lastMessages: 8,
-        semanticRecall: false,
-        workingMemory: { enabled: true, scope: 'resource', template: '' },
+        semanticRecall: semanticRecallEnabled,
+        workingMemory: { enabled: true, scope: 'resource', template: def.workingMemoryTemplate },
       },
     });
 
@@ -494,22 +605,23 @@ export async function createAgentRegistry(
       model: modelConfig,
       tools,
       memory,
-      inputProcessors: [new TokenLimiterProcessor({ limit: 100_000, strategy: 'truncate' })],
+      inputProcessors: [new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
     }) as unknown as MastraAgentClient;
   };
 
-  const [brainstorm, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
+  const [brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
     AGENT_DEFS.map(createAgentWithSkill),
   );
 
   const createSystemAgent = (instructions: string, toolsOverride?: MastraToolset): MastraAgentClient => {
-    const storage = new LibSQLStore({ id: 'viwork-system-agent', url: `file:${memoryDbPath}` });
+    const storage = new PostgresStore({ id: 'viwork-system-agent', connectionString });
     const memory = new Memory({
       storage,
-      vector: false,
+      ...(vector ? { vector } : {}),
+      ...(embedder ? { embedder } : {}),
       options: {
         lastMessages: 20,
-        semanticRecall: false,
+        semanticRecall: semanticRecallEnabled,
         workingMemory: {
           enabled: true,
           scope: 'resource',
@@ -519,6 +631,7 @@ export async function createAgentRegistry(
             '- 项目长期设定：',
             '- 角色与关系：',
             '- 待回收伏笔：',
+            '- 专家协作摘要：',
           ].join('\n'),
         },
       },
@@ -531,11 +644,30 @@ export async function createAgentRegistry(
       model: modelConfig,
       tools: toolsOverride ?? tools,
       memory,
-      inputProcessors: [new TokenLimiterProcessor({ limit: 100_000, strategy: 'truncate' })],
+      inputProcessors: [new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
     }) as unknown as MastraAgentClient;
   };
 
-  return { brainstorm, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
+  return { brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
+}
+
+function buildEmbedder(options: { baseUrl?: string; apiKey?: string; traceId?: string }) {
+  const baseUrl = options.baseUrl
+    || process.env.VIWORK_AIGC_HUB_BASE_URL
+    || process.env.AIGC_HUB_BASE_URL
+    || 'https://api.yukeon.top/v1';
+  const apiKey = options.apiKey
+    || process.env.VIWORK_AIGC_HUB_API_KEY
+    || process.env.AIGC_HUB_API_KEY
+    || '';
+
+  const openai = createOpenAI({
+    baseURL: trimTrailingSlashes(baseUrl),
+    apiKey,
+    headers: buildAigcHubHeaders({ traceId: options.traceId }),
+  });
+
+  return openai.embedding(EMBEDDING_MODEL);
 }
 
 function stripYamlFrontmatter(content: string): string {
@@ -553,6 +685,7 @@ export function buildModelConfig(options: {
   model?: string;
   baseUrl?: string;
   apiKey?: string;
+  traceId?: string;
 }): OpenAICompatibleConfig {
   const rawId = options.model
     || process.env.VIWORK_AIGC_HUB_CHAT_MODEL
@@ -578,5 +711,10 @@ export function buildModelConfig(options: {
     || process.env.CODEX_API_KEY
     || '';
 
-  return { id: id as `${string}/${string}`, url: baseUrl, apiKey };
+  return {
+    id: id as `${string}/${string}`,
+    url: baseUrl,
+    apiKey,
+    headers: buildAigcHubHeaders({ traceId: options.traceId }),
+  };
 }
