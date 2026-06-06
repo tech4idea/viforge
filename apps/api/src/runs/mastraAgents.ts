@@ -271,6 +271,103 @@ export function createWorkspaceTools(
         return { images: generated, attachments };
       },
     }),
+    edit_project_image: createTool({
+      id: 'edit_project_image',
+      description: [
+        '修改工作区中已有的图片。读取指定图片作为参考，结合文字描述生成修改后的新图片。',
+        '当用户要求修改、调整、优化某张已有图片时使用（如"把这张图的角色换个表情"、"调整场景光线"）。',
+        '不要猜测或填写模型名；工具会自动使用配置的图片模型。',
+      ].join('\n'),
+      inputSchema: z.object({
+        imagePath: z.string().min(1).describe('工作区中待修改图片的路径，可通过 list_workspace_entries 查看'),
+        prompt: z.string().min(1).describe('图片修改描述，说明需要如何修改原图'),
+        aspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('1:1'),
+        count: z.number().int().min(1).max(4).default(1),
+      }),
+      execute: async ({ imagePath, prompt, aspectRatio, count }) => {
+        const resolvedAspectRatio = aspectRatio ?? '1:1';
+        const resolvedCount = count ?? 1;
+        const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
+
+        if (!gatewayBaseUrl || !gatewayApiKey) {
+          throw new Error('未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY，无法通过 AIGC Hub 编辑图片。');
+        }
+
+        const source = await store.readWorkspaceFileBytes(projectId, imagePath);
+        if (!source.mimeType.startsWith('image/')) {
+          throw new Error(`文件 ${imagePath} 不是图片（类型: ${source.mimeType}），无法编辑。`);
+        }
+
+        let response: AigcHubImageResponse;
+        try {
+          response = await requestAigcHubImageEdits(gatewayBaseUrl, gatewayApiKey, {
+            model: selectedModel || undefined,
+            image: source.bytes,
+            imageMimeType: source.mimeType,
+            imageName: source.path.split('/').pop() ?? 'source.png',
+            prompt,
+            aspectRatio: resolvedAspectRatio,
+            count: resolvedCount,
+            traceId: options.traceId,
+          });
+        } catch (error) {
+          if (isEditsEndpointUnsupported(error)) {
+            response = await requestAigcHubImages(gatewayBaseUrl, gatewayApiKey, {
+              model: selectedModel || undefined,
+              prompt: `${prompt}\n\n（基于已有图片修改，原图路径: ${imagePath}）`,
+              aspectRatio: resolvedAspectRatio,
+              count: resolvedCount,
+              traceId: options.traceId,
+            });
+          } else {
+            throw error;
+          }
+        }
+
+        const generated: Array<{ path: string; mimeType: string; model?: string; revisedPrompt?: string }> = [];
+        const attachments: ChatMessageAttachment[] = [];
+        const now = new Date().toISOString();
+
+        for (const [index, image] of (response.data ?? []).entries()) {
+          const imageData = await imageDataFromAigcHubImage(image);
+          if (!imageData) continue;
+
+          const extension = extensionFromMimeType(imageData.mimeType) ?? 'png';
+          const editedPath = `生成图片/${timestampForFileName(now)}-edit-${String(index + 1).padStart(2, '0')}.${extension}`;
+          const existed = await workspaceFileExists(store, projectId, editedPath);
+          const entry = await store.createWorkspaceAsset(projectId, editedPath, Buffer.from(imageData.contentBase64, 'base64'), imageData.mimeType);
+          publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: entry.path, change: existed ? 'modified' : 'created' });
+          const attachment: ChatMessageAttachment = {
+            id: `attachment-${randomId()}`,
+            kind: 'generated-image',
+            name: entry.name,
+            path: entry.path,
+            projectId,
+            mimeType: imageData.mimeType,
+            prompt,
+            model: selectedModel || undefined,
+            aspectRatio: resolvedAspectRatio,
+            createdAt: now,
+          };
+          attachments.push(attachment);
+          publish({ type: 'image.generated', runId, emittedAt: emittedAt(), attachment });
+          generated.push({
+            path: entry.path,
+            mimeType: imageData.mimeType,
+            model: selectedModel || undefined,
+            revisedPrompt: typeof image.revised_prompt === 'string' ? image.revised_prompt : undefined,
+          });
+        }
+
+        if (generated.length === 0) {
+          throw new Error('AIGC Hub 未返回图片结果');
+        }
+
+        return { images: generated, sourceImagePath: imagePath, attachments };
+      },
+    }),
   };
 
   if (options.wechat) {
@@ -336,6 +433,55 @@ async function requestAigcHubImages(
     throw new Error(errorMessageFromAigcHubBody(body) ?? `AIGC Hub 图片生成请求失败：${response.status}`);
   }
   return body;
+}
+
+async function requestAigcHubImageEdits(
+  gatewayBaseUrl: string,
+  gatewayApiKey: string,
+  input: {
+    model?: string;
+    image: Buffer;
+    imageMimeType: string;
+    imageName: string;
+    prompt: string;
+    aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+    count: number;
+    traceId?: string;
+  },
+): Promise<AigcHubImageResponse> {
+  const form = new FormData();
+  form.append('image', new Blob([new Uint8Array(input.image)], { type: input.imageMimeType }), input.imageName);
+  form.append('prompt', input.prompt);
+  form.append('size', imageSizeFromAspectRatio(input.aspectRatio));
+  form.append('n', String(input.count));
+  form.append('response_format', 'b64_json');
+  if (input.model) form.append('model', input.model);
+
+  const headers = buildAigcHubHeaders({ apiKey: gatewayApiKey, traceId: input.traceId });
+  const response = await fetch(`${trimTrailingSlashes(gatewayBaseUrl)}/images/edits`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+
+  if (response.status === 404 || response.status === 405) {
+    throw Object.assign(new Error(`AIGC Hub images/edits endpoint unavailable: ${response.status}`), { status: response.status });
+  }
+
+  const body = await parseAigcHubJson(response);
+  if (!response.ok) {
+    throw new Error(errorMessageFromAigcHubBody(body) ?? `AIGC Hub 图片编辑请求失败：${response.status}`);
+  }
+  return body;
+}
+
+function isEditsEndpointUnsupported(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'status' in error) {
+    const status = (error as { status: number }).status;
+    return status === 404 || status === 405;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /images\/edits.*(?:not found|unavailable|404|405)/i.test(message);
 }
 
 async function resolveImageModel(gatewayBaseUrl: string, gatewayApiKey: string, configuredModel?: string): Promise<string> {
