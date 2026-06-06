@@ -156,9 +156,20 @@ export function createWorkspaceTools(
     }),
     read_workspace_file: createTool({
       id: 'read_workspace_file',
-      description: '读取当前项目工作区中的 UTF-8 文本文件',
+      description: '读取当前项目工作区中的 UTF-8 文本文件。图片、PDF 等二进制文件只返回元数据摘要，不返回内容。',
       inputSchema: z.object({ path: z.string().min(1) }),
-      execute: async ({ path: filePath }) => store.readWorkspaceFile(projectId, filePath),
+      execute: async ({ path: filePath }) => {
+        const asset = await store.readWorkspaceFileBytes(projectId, filePath);
+        if (!isTextMimeType(asset.mimeType)) {
+          return {
+            path: asset.path,
+            mimeType: asset.mimeType,
+            size: asset.bytes.length,
+            content: `[二进制文件，无法以文本读取。类型: ${asset.mimeType}，大小: ${formatFileSize(asset.bytes.length)}]`,
+          };
+        }
+        return { path: asset.path, content: asset.bytes.toString('utf8') };
+      },
     }),
     write_workspace_file: createTool({
       id: 'write_workspace_file',
@@ -529,6 +540,16 @@ function extensionFromMimeType(mimeType: string): string | null {
   if (/jpe?g/i.test(mimeType)) return 'jpg';
   if (/webp/i.test(mimeType)) return 'webp';
   return null;
+}
+
+function isTextMimeType(mimeType: string): boolean {
+  return /^text\//.test(mimeType) || /json|yaml|xml|svg|markdown/.test(mimeType);
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function timestampForFileName(value: string): string {
