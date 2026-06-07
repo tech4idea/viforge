@@ -34,7 +34,7 @@ CMD ["pnpm", "--filter", "@viwork/api", "start"]
 FROM source AS web-build
 
 ARG VIWORK_PRODUCT=novel-adaptation
-ARG VITE_API_BASE_URL=http://localhost:3001
+ARG VITE_API_BASE_URL=
 ENV VIWORK_PRODUCT=$VIWORK_PRODUCT
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
@@ -42,6 +42,7 @@ RUN pnpm --filter @viwork/web build
 
 FROM nginx:1.27-alpine AS web-runtime
 
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=web-build /app/apps/web/dist /usr/share/nginx/html
 
 EXPOSE 80
