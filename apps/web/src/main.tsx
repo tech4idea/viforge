@@ -152,6 +152,7 @@ type DragEntryDraft = {
 
 function App() {
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
+  const folderUploadRef = useRef<HTMLInputElement | null>(null);
   const imageReferenceInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const chatThreadRef = useRef<HTMLElement | null>(null);
@@ -873,6 +874,22 @@ function App() {
     }
   }
 
+  async function renameProjectFromContext(context: SidebarContextMenu | null) {
+    const projectId = context?.projectId;
+    if (!projectId) return;
+    const current = projects.find((project) => project.id === projectId);
+    if (!current) return;
+    const nextName = window.prompt('项目名称', current.name)?.trim();
+    if (!nextName || nextName === current.name) return;
+    setQuickActionError(null);
+    try {
+      const updated = await apiClient.updateProject(projectId, { name: nextName });
+      setProjects((currentProjects) => currentProjects.map((project) => (project.id === updated.id ? updated : project)));
+    } catch (error) {
+      setQuickActionError(errorToMessage(error));
+    }
+  }
+
   async function loadEntries(projectId: string, options: { selectFirstTextFile?: boolean; keepSelectedPath?: string | null; revealPath?: string | null } = {}) {
     setEntriesState('loading');
     setEntriesError(null);
@@ -1201,7 +1218,8 @@ function App() {
         setSelectedTemporaryProjectId(target.projectId);
       }
     });
-    fileUploadRef.current?.click();
+    const ref = mode === 'folder' ? folderUploadRef.current : fileUploadRef.current;
+    ref?.click();
   }
 
   async function uploadAssets(files: File[]) {
@@ -2053,7 +2071,9 @@ function App() {
     });
   }
 
-  async function runSidebarAction(action: 'new-project' | 'new-folder' | 'new-file' | 'upload' | 'rename' | 'move' | 'delete') {
+  async function runSidebarAction(
+    action: 'new-project' | 'new-folder' | 'new-file' | 'upload' | 'upload-folder' | 'rename' | 'rename-project' | 'move' | 'delete',
+  ) {
     const context = sidebarContextMenu;
     closeSidebarContextMenu();
 
@@ -2085,8 +2105,18 @@ function App() {
       return;
     }
 
+    if (action === 'upload-folder') {
+      startUpload(context, 'folder');
+      return;
+    }
+
     if (action === 'rename') {
       startRenameEntry(context);
+      return;
+    }
+
+    if (action === 'rename-project') {
+      await renameProjectFromContext(context);
       return;
     }
 
@@ -2561,6 +2591,9 @@ function App() {
                     ↑
                   {uploadState === 'uploading' ? <span className="muted">上传中...</span> : null}
                   </button>
+                  <button type="button" className="sidebar-tool-button" onClick={() => startUpload(null, 'folder')} aria-label="上传文件夹" title="上传文件夹">
+                    ▤
+                  </button>
                 </div>
               </div>
               <input
@@ -2568,6 +2601,21 @@ function App() {
                 type="file"
                 className="visually-hidden"
                 multiple
+                onChange={(event) => {
+                  const fileArray = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
+                  event.currentTarget.value = '';
+                  if (fileArray.length === 0) return;
+                  void uploadAssets(fileArray);
+                }}
+              />
+              <input
+                ref={folderUploadRef}
+                type="file"
+                className="visually-hidden"
+                multiple
+                // @ts-expect-error -- webkitdirectory is a non-standard but widely supported attribute for folder pickers.
+                webkitdirectory=""
+                directory=""
                 onChange={(event) => {
                   const fileArray = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
                   event.currentTarget.value = '';
@@ -3290,6 +3338,13 @@ function App() {
               <button type="button" onClick={() => void runSidebarAction('new-folder')}>新建目录</button>
               <button type="button" onClick={() => void runSidebarAction('new-file')}>新建文档</button>
               <button type="button" onClick={() => void runSidebarAction('upload')}>上传素材</button>
+              <button type="button" onClick={() => void runSidebarAction('upload-folder')}>上传文件夹</button>
+            </>
+          ) : null}
+          {sidebarContextMenu.workspaceScope === 'project' && sidebarContextMenu.projectId && !sidebarContextMenu.entryPath ? (
+            <>
+              <div className="context-menu-separator" />
+              <button type="button" onClick={() => void runSidebarAction('rename-project')}>重命名项目</button>
             </>
           ) : null}
           {sidebarContextMenu.entryPath ? (
