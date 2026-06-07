@@ -23,12 +23,18 @@ export type CreateProjectInput = {
   description?: string;
 };
 
+export type UpdateProjectInput = {
+  name?: string;
+  description?: string;
+};
+
 export type WorkspaceStore = {
   createProject(input: CreateProjectInput): Promise<Project>;
   createTemporaryProject(): Promise<Project>;
   deleteProject(projectId: string): Promise<{ deleted: true }>;
   listProjects(): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
+  updateProject(id: string, input: UpdateProjectInput): Promise<Project>;
   getProjectRoot(projectId: string): string;
   getGlobalRoot(): string;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
@@ -486,6 +492,21 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
       }
       await rm(projectRoot(projectId), { recursive: true, force: false });
       return { deleted: true };
+    },
+
+    async updateProject(projectId, input) {
+      const project = await readProject(projectId);
+      if (!project || project.temporary) {
+        throw new Error('Project not found');
+      }
+      const next: Project = {
+        ...project,
+        name: typeof input.name === 'string' ? input.name : project.name,
+        description: typeof input.description === 'string' ? input.description : project.description,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeFile(metadataPath(projectId), JSON.stringify(next, null, 2), 'utf8');
+      return next;
     },
 
     async listProjects() {

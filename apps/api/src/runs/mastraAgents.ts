@@ -192,6 +192,31 @@ export function createWorkspaceTools(
         return result;
       },
     }),
+    move_workspace_entry: createTool({
+      id: 'move_workspace_entry',
+      description: [
+        '移动或重命名当前项目工作区中的文件或目录。',
+        'source 与 target 都是相对项目工作区根目录的路径，如 "03 剧本/01 第一集/定稿剧本.md"。',
+        'target 已存在时会拒绝，避免覆盖；如需改名，请换一个不冲突的 target 路径。',
+        '典型用途：整理目录结构、把生成图片归档到 "分镜/第1集/" 等子目录、给文档改名。',
+      ].join('\n'),
+      inputSchema: z.object({
+        source: z.string().min(1).describe('工作区中当前存在的路径（文件或目录）'),
+        target: z.string().min(1).describe('希望移动/重命名到的新路径；目录不存在会自动创建，但目标路径不能已存在'),
+      }),
+      execute: async ({ source, target }) => {
+        if (source === target) {
+          throw new Error(`source 与 target 不能相同: ${source}`);
+        }
+        if (await workspaceFileExists(store, projectId, target)) {
+          throw new Error(`target 已存在，拒绝覆盖: ${target}`);
+        }
+        const moved = await store.moveWorkspaceEntry(projectId, source, target);
+        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: source, change: 'deleted' });
+        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: moved.path, change: 'created' });
+        return moved;
+      },
+    }),
     read_global_file: createTool({
       id: 'read_global_file',
       description: '读取全局工作区中的 UTF-8 文本文件，如知识库、模板或 Agent 配置。',
@@ -201,17 +226,26 @@ export function createWorkspaceTools(
     generate_project_image: createTool({
       id: 'generate_project_image',
       description: [
-        '通过 AIGC Hub 生成图片，并保存到当前项目工作区的“生成图片/”目录。',
+        '通过 AIGC Hub 生成图片，并保存到当前项目工作区的”生成图片/”目录。',
         '当用户明确要求生成、绘制、出图、生成角色图/场景图/剧照/分镜图/海报时使用。',
         '普通视觉描述或提示词整理不需要调用此工具。',
+        '缺省以时间戳命名；可通过 outputDir / fileName 自定义保存目录和文件主名（扩展名自动追加）。',
         '不要猜测或填写模型名；工具会自动使用前端/微信会话配置的图片模型，未配置时使用 VIWORK_AIGC_HUB_IMAGE_MODEL。',
       ].join('\n'),
       inputSchema: z.object({
         prompt: z.string().min(1),
         aspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('1:1'),
         count: z.number().int().min(1).max(4).default(1),
+        outputDir: z
+          .string()
+          .optional()
+          .describe('可选。图片保存的相对目录（相对项目工作区根目录），如 "生成图片/角色"。缺省时为 "生成图片/"。'),
+        fileName: z
+          .string()
+          .optional()
+          .describe('可选。图片文件主名（不含扩展名，工具会根据实际 MIME 自动追加），如 "主角-立绘"。缺省时使用时间戳。'),
       }),
-      execute: async ({ prompt, aspectRatio, count }) => {
+      execute: async ({ prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
         const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
@@ -238,7 +272,14 @@ export function createWorkspaceTools(
           if (!imageData) continue;
 
           const extension = extensionFromMimeType(imageData.mimeType) ?? 'png';
-          const imagePath = `生成图片/${timestampForFileName(now)}-${String(index + 1).padStart(2, '0')}.${extension}`;
+          const imagePath = buildOutputImagePath({
+            outputDir,
+            fileName,
+            extension,
+            now,
+            index,
+            total: (response.data ?? []).length,
+          });
           const existed = await workspaceFileExists(store, projectId, imagePath);
           const entry = await store.createWorkspaceAsset(projectId, imagePath, Buffer.from(imageData.contentBase64, 'base64'), imageData.mimeType);
           publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: entry.path, change: existed ? 'modified' : 'created' });
@@ -269,6 +310,120 @@ export function createWorkspaceTools(
         }
 
         return { images: generated, attachments };
+      },
+    }),
+    edit_project_image: createTool({
+      id: 'edit_project_image',
+      description: [
+        '修改工作区中已有的图片。读取指定图片作为参考，结合文字描述生成修改后的新图片。',
+        '当用户要求修改、调整、优化某张已有图片时使用（如"把这张图的角色换个表情"、"调整场景光线"）。',
+        '缺省保存到 "生成图片/" 目录并以时间戳 + "-edit" 命名；可通过 outputDir / fileName 自定义保存位置和文件主名。',
+        '不要猜测或填写模型名；工具会自动使用配置的图片模型。',
+      ].join('\n'),
+      inputSchema: z.object({
+        imagePath: z.string().min(1).describe('工作区中待修改图片的路径，可通过 list_workspace_entries 查看'),
+        prompt: z.string().min(1).describe('图片修改描述，说明需要如何修改原图'),
+        aspectRatio: z.enum(['1:1', '3:4', '4:3', '9:16', '16:9']).default('1:1'),
+        count: z.number().int().min(1).max(4).default(1),
+        outputDir: z
+          .string()
+          .optional()
+          .describe('可选。图片保存的相对目录（相对项目工作区根目录）。缺省时为 "生成图片/"。'),
+        fileName: z
+          .string()
+          .optional()
+          .describe('可选。图片文件主名（不含扩展名）。缺省时使用时间戳 + "-edit" 后缀。'),
+      }),
+      execute: async ({ imagePath, prompt, aspectRatio, count, outputDir, fileName }) => {
+        const resolvedAspectRatio = aspectRatio ?? '1:1';
+        const resolvedCount = count ?? 1;
+        const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
+
+        if (!gatewayBaseUrl || !gatewayApiKey) {
+          throw new Error('未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY，无法通过 AIGC Hub 编辑图片。');
+        }
+
+        const source = await store.readWorkspaceFileBytes(projectId, imagePath);
+        if (!source.mimeType.startsWith('image/')) {
+          throw new Error(`文件 ${imagePath} 不是图片（类型: ${source.mimeType}），无法编辑。`);
+        }
+
+        let response: AigcHubImageResponse;
+        try {
+          response = await requestAigcHubImageEdits(gatewayBaseUrl, gatewayApiKey, {
+            model: selectedModel || undefined,
+            image: source.bytes,
+            imageMimeType: source.mimeType,
+            imageName: source.path.split('/').pop() ?? 'source.png',
+            prompt,
+            aspectRatio: resolvedAspectRatio,
+            count: resolvedCount,
+            traceId: options.traceId,
+          });
+        } catch (error) {
+          if (isEditsEndpointUnsupported(error)) {
+            response = await requestAigcHubImages(gatewayBaseUrl, gatewayApiKey, {
+              model: selectedModel || undefined,
+              prompt: `${prompt}\n\n（基于已有图片修改，原图路径: ${imagePath}）`,
+              aspectRatio: resolvedAspectRatio,
+              count: resolvedCount,
+              traceId: options.traceId,
+            });
+          } else {
+            throw error;
+          }
+        }
+
+        const generated: Array<{ path: string; mimeType: string; model?: string; revisedPrompt?: string }> = [];
+        const attachments: ChatMessageAttachment[] = [];
+        const now = new Date().toISOString();
+
+        for (const [index, image] of (response.data ?? []).entries()) {
+          const imageData = await imageDataFromAigcHubImage(image);
+          if (!imageData) continue;
+
+          const extension = extensionFromMimeType(imageData.mimeType) ?? 'png';
+          const editedPath = buildOutputImagePath({
+            outputDir,
+            fileName,
+            extension,
+            now,
+            index,
+            total: (response.data ?? []).length,
+            defaultFileNameSuffix: 'edit',
+          });
+          const existed = await workspaceFileExists(store, projectId, editedPath);
+          const entry = await store.createWorkspaceAsset(projectId, editedPath, Buffer.from(imageData.contentBase64, 'base64'), imageData.mimeType);
+          publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: entry.path, change: existed ? 'modified' : 'created' });
+          const attachment: ChatMessageAttachment = {
+            id: `attachment-${randomId()}`,
+            kind: 'generated-image',
+            name: entry.name,
+            path: entry.path,
+            projectId,
+            mimeType: imageData.mimeType,
+            prompt,
+            model: selectedModel || undefined,
+            aspectRatio: resolvedAspectRatio,
+            createdAt: now,
+          };
+          attachments.push(attachment);
+          publish({ type: 'image.generated', runId, emittedAt: emittedAt(), attachment });
+          generated.push({
+            path: entry.path,
+            mimeType: imageData.mimeType,
+            model: selectedModel || undefined,
+            revisedPrompt: typeof image.revised_prompt === 'string' ? image.revised_prompt : undefined,
+          });
+        }
+
+        if (generated.length === 0) {
+          throw new Error('AIGC Hub 未返回图片结果');
+        }
+
+        return { images: generated, sourceImagePath: imagePath, attachments };
       },
     }),
   };
@@ -336,6 +491,55 @@ async function requestAigcHubImages(
     throw new Error(errorMessageFromAigcHubBody(body) ?? `AIGC Hub 图片生成请求失败：${response.status}`);
   }
   return body;
+}
+
+async function requestAigcHubImageEdits(
+  gatewayBaseUrl: string,
+  gatewayApiKey: string,
+  input: {
+    model?: string;
+    image: Buffer;
+    imageMimeType: string;
+    imageName: string;
+    prompt: string;
+    aspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+    count: number;
+    traceId?: string;
+  },
+): Promise<AigcHubImageResponse> {
+  const form = new FormData();
+  form.append('image', new Blob([new Uint8Array(input.image)], { type: input.imageMimeType }), input.imageName);
+  form.append('prompt', input.prompt);
+  form.append('size', imageSizeFromAspectRatio(input.aspectRatio));
+  form.append('n', String(input.count));
+  form.append('response_format', 'b64_json');
+  if (input.model) form.append('model', input.model);
+
+  const headers = buildAigcHubHeaders({ apiKey: gatewayApiKey, traceId: input.traceId });
+  const response = await fetch(`${trimTrailingSlashes(gatewayBaseUrl)}/images/edits`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+
+  if (response.status === 404 || response.status === 405) {
+    throw Object.assign(new Error(`AIGC Hub images/edits endpoint unavailable: ${response.status}`), { status: response.status });
+  }
+
+  const body = await parseAigcHubJson(response);
+  if (!response.ok) {
+    throw new Error(errorMessageFromAigcHubBody(body) ?? `AIGC Hub 图片编辑请求失败：${response.status}`);
+  }
+  return body;
+}
+
+function isEditsEndpointUnsupported(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'status' in error) {
+    const status = (error as { status: number }).status;
+    return status === 404 || status === 405;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /images\/edits.*(?:not found|unavailable|404|405)/i.test(message);
 }
 
 async function resolveImageModel(gatewayBaseUrl: string, gatewayApiKey: string, configuredModel?: string): Promise<string> {
@@ -554,6 +758,42 @@ function formatFileSize(bytes: number): string {
 
 function timestampForFileName(value: string): string {
   return value.replace(/[:.]/g, '-');
+}
+
+function buildOutputImagePath(params: {
+  outputDir?: string;
+  fileName?: string;
+  extension: string;
+  now: string;
+  index: number;
+  total: number;
+  defaultFileNameSuffix?: string;
+}): string {
+  const dirRaw = (params.outputDir ?? '').trim();
+  if (dirRaw.includes('..')) {
+    throw new Error(`outputDir 不能包含 "..": ${dirRaw}`);
+  }
+  const dir = dirRaw
+    ? dirRaw.split('/').filter(Boolean).join('/')
+    : '生成图片';
+
+  const baseNameRaw = (params.fileName ?? '').trim();
+  if (baseNameRaw.includes('/') || baseNameRaw.includes('\\') || baseNameRaw.includes('..')) {
+    throw new Error(`fileName 不能包含路径或 "..": ${baseNameRaw}`);
+  }
+  const baseName = baseNameRaw.replace(/\.(png|jpe?g|webp|gif)$/i, '');
+
+  const extension = params.extension || 'png';
+  const ts = timestampForFileName(params.now);
+  const indexSuffix = params.total > 1 ? `-${String(params.index + 1).padStart(2, '0')}` : '';
+
+  const stem = baseName
+    ? `${baseName}${indexSuffix}`
+    : params.defaultFileNameSuffix
+      ? `${ts}-${params.defaultFileNameSuffix}${indexSuffix}`
+      : `${ts}${indexSuffix}`;
+
+  return `${dir}/${stem}.${extension}`;
 }
 
 function randomId(): string {

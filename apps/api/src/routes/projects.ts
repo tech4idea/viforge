@@ -10,6 +10,17 @@ const createProjectSchema = z.object({
   description: z.string().optional(),
 });
 
+const updateProjectSchema = z
+  .object({
+    name: z
+      .string()
+      .transform((value) => value.trim())
+      .pipe(z.string().min(1))
+      .optional(),
+    description: z.string().optional(),
+  })
+  .strict();
+
 const writeFileSchema = z.object({
   content: z.string(),
 });
@@ -194,6 +205,26 @@ export function createProjectsRoutes(store: WorkspaceStore): Hono {
   routes.delete('/projects/:projectId', async (context) => {
     try {
       return context.json(await store.deleteProject(context.req.param('projectId')));
+    } catch (error) {
+      return handleKnownError(context, error, 'Project not found');
+    }
+  });
+
+  routes.patch('/projects/:projectId', async (context) => {
+    const body = await parseJson(context.req.raw);
+    const parsed = updateProjectSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return context.json({ error: 'Invalid project update' }, 400);
+    }
+
+    if (parsed.data.name === undefined && parsed.data.description === undefined) {
+      return context.json({ error: 'No fields to update' }, 400);
+    }
+
+    try {
+      const project = await store.updateProject(context.req.param('projectId'), parsed.data);
+      return context.json(project);
     } catch (error) {
       return handleKnownError(context, error, 'Project not found');
     }
