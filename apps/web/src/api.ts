@@ -67,6 +67,7 @@ export type ApiClient = {
   createProject(input: CreateProjectInput): Promise<Project>;
   deleteProject(projectId: string): Promise<{ deleted: true }>;
   getProject(projectId: string): Promise<Project>;
+  updateProject(projectId: string, input: UpdateProjectInput): Promise<Project>;
   listWorkspaceEntries(projectId: string): Promise<WorkspaceEntry[]>;
   readWorkspaceFile(projectId: string, path: string): Promise<WorkspaceFile>;
   writeWorkspaceFile(projectId: string, path: string, content: string): Promise<WorkspaceFile>;
@@ -100,6 +101,11 @@ export type ApiClient = {
 
 export type CreateProjectInput = {
   name: string;
+  description?: string;
+};
+
+export type UpdateProjectInput = {
+  name?: string;
   description?: string;
 };
 
@@ -209,6 +215,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'DELETE',
       }),
     getProject: (projectId) => request<Project>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}`),
+    updateProject: (projectId, input) =>
+      request<Project>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
     listWorkspaceEntries: (projectId) =>
       request<WorkspaceEntry[]>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/files`),
     readWorkspaceFile: (projectId, path) =>
