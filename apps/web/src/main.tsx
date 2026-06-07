@@ -890,6 +890,35 @@ function App() {
     }
   }
 
+  async function deleteProjectFromContext(context: SidebarContextMenu | null) {
+    const projectId = context?.projectId;
+    if (!projectId) return;
+    const current = projects.find((project) => project.id === projectId);
+    if (!current) return;
+    const firstConfirm = window.confirm(
+      `确定要删除项目「${current.name}」吗？\n\n项目目录及其中的所有文件、聊天记录都将被永久删除，且无法恢复。`,
+    );
+    if (!firstConfirm) return;
+    const typed = window.prompt(`二次确认：请输入项目名「${current.name}」以完成删除`);
+    if (typed === null) return;
+    if (typed.trim() !== current.name) {
+      setQuickActionError('项目名不匹配，已取消删除。');
+      return;
+    }
+    setQuickActionError(null);
+    try {
+      await apiClient.deleteProject(projectId);
+      setProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
+      if (selectedProjectId === projectId) {
+        setSelectedProjectId(null);
+        setEntries([]);
+        setSelectedProjectPath(null);
+      }
+    } catch (error) {
+      setQuickActionError(errorToMessage(error));
+    }
+  }
+
   async function loadEntries(projectId: string, options: { selectFirstTextFile?: boolean; keepSelectedPath?: string | null; revealPath?: string | null } = {}) {
     setEntriesState('loading');
     setEntriesError(null);
@@ -2072,7 +2101,17 @@ function App() {
   }
 
   async function runSidebarAction(
-    action: 'new-project' | 'new-folder' | 'new-file' | 'upload' | 'upload-folder' | 'rename' | 'rename-project' | 'move' | 'delete',
+    action:
+      | 'new-project'
+      | 'new-folder'
+      | 'new-file'
+      | 'upload'
+      | 'upload-folder'
+      | 'rename'
+      | 'rename-project'
+      | 'delete-project'
+      | 'move'
+      | 'delete',
   ) {
     const context = sidebarContextMenu;
     closeSidebarContextMenu();
@@ -2117,6 +2156,11 @@ function App() {
 
     if (action === 'rename-project') {
       await renameProjectFromContext(context);
+      return;
+    }
+
+    if (action === 'delete-project') {
+      await deleteProjectFromContext(context);
       return;
     }
 
@@ -3345,6 +3389,9 @@ function App() {
             <>
               <div className="context-menu-separator" />
               <button type="button" onClick={() => void runSidebarAction('rename-project')}>重命名项目</button>
+              <button type="button" className="danger-item" onClick={() => void runSidebarAction('delete-project')}>
+                删除项目
+              </button>
             </>
           ) : null}
           {sidebarContextMenu.entryPath ? (
