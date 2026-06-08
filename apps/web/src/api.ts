@@ -101,7 +101,7 @@ export type ApiClient = {
   createWechatSetupSession(): Promise<WechatSetupSession>;
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
   disconnectWechat(): Promise<{ disconnected: boolean }>;
-  sendWechatNotify(status: 'success' | 'error'): Promise<{ sent: boolean }>;
+  sendWechatNotify(status: 'success' | 'error'): Promise<{ sent: boolean; reason?: string }>;
 };
 
 
