@@ -754,8 +754,6 @@ body.is-resizing-panels .panel-resizer::after {
   min-height: 0;
   overflow: auto;
   padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
 }
 
 .editor-empty {
@@ -1018,9 +1016,7 @@ body.is-resizing-panels .panel-resizer::after {
 .image-viewer {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  height: 0;
+  height: calc(100vh - 100px);
   border: 1px solid var(--border-color);
   border-radius: 14px;
   background: var(--surface-solid);
