@@ -172,21 +172,32 @@ async function classifyAndRoute(
     };
   }
 
-  if (intent === 'switch_session' && target) {
-    const match = projects.find((p) => p.name.toLowerCase().includes(target.toLowerCase()));
-    if (!match) return { type: 'continue' };
+  if (intent === 'switch_session') {
+    if (target) {
+      const match = projects.find((p) => p.name.toLowerCase().includes(target.toLowerCase()));
+      if (match) {
+        const action: PendingSessionAction = {
+          type: 'switch_session',
+          projectName: match.name,
+          projectId: match.id,
+          originalPrompt: text,
+        };
+        await wechatStore.setPendingSessionAction(externalUserId, action);
+        return {
+          type: 'pending_confirmation',
+          replyText: `你想切换到项目「${match.name}」吗？回复「确认」切换，或「取消」留在当前会话。`,
+        };
+      }
+    }
 
-    const action: PendingSessionAction = {
-      type: 'switch_session',
-      projectName: match.name,
-      projectId: match.id,
-      originalPrompt: text,
-    };
-    await wechatStore.setPendingSessionAction(externalUserId, action);
-    return {
-      type: 'pending_confirmation',
-      replyText: `你想切换到项目「${match.name}」吗？回复「确认」切换，或「取消」留在当前会话。`,
-    };
+    const projectList = projects.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+    const lines = [
+      '请选择要切换的项目：',
+      projectList || '（暂无项目）',
+      '',
+      '回复项目名称或序号切换，回复「新建」创建新会话。',
+    ];
+    return { type: 'pending_confirmation', replyText: lines.join('\n') };
   }
 
   return { type: 'continue' };
