@@ -28,6 +28,15 @@ export function ChevronDown(props: IconProps) {
   return <svg {...base(props)}><path d="m6 9 6 6 6-6" /></svg>;
 }
 
+export function ArrowDown(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 5v14" />
+      <path d="m19 12-7 7-7-7" />
+    </svg>
+  );
+}
+
 export function RefreshCw(props: IconProps) {
   return (
     <svg {...base(props)}>

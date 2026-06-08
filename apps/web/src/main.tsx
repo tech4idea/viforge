@@ -47,6 +47,7 @@ import {
 import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import {
+  ArrowDown,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -237,6 +238,7 @@ function App() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const chatThreadRef = useRef<HTMLElement | null>(null);
   const autoScrollRef = useRef(true);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const workspaceGridRef = useRef<HTMLElement | null>(null);
   const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pendingChatMessageUpdatesRef = useRef<Map<string, PendingChatMessageUpdate>>(new Map());
@@ -836,8 +838,10 @@ function App() {
     function handleScroll() {
       if (!ticking) {
         window.requestAnimationFrame(() => {
-          const atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 32;
+          const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+          const atBottom = distanceFromBottom < 32;
           autoScrollRef.current = atBottom;
+          setShowScrollBottom(distanceFromBottom > 80);
           ticking = false;
         });
         ticking = true;
@@ -2072,34 +2076,37 @@ function App() {
   function quoteSelectedTextToComposer() {
     if (!selectedTextContextMenu) return;
 
-    if (selectedTextContextMenu.source === 'file') {
-      const sourcePath = selectedTextContextMenu.sourcePath;
-      const label = basename(sourcePath);
-      const quote = selectedTextContextMenu.text
-        .split('\n')
-        .map((line) => `> ${line}`)
-        .join('\n');
-      const insertion = [`引用 @${label}：`, quote].join('\n');
-      const separator = prompt.trim() ? '\n\n' : '';
-      setPrompt((current) => `${current}${separator}${insertion}`);
+    const ctx = selectedTextContextMenu;
+    const snippet: ReferencedChatSnippet = ctx.source === 'file'
+      ? {
+          id: `snippet-file-${ctx.sourcePath}-${Math.abs(hashCode(`${ctx.sourcePath}:${ctx.text}`)).toString(36)}`,
+          messageId: ctx.sourcePath,
+          role: 'user',
+          label: basename(ctx.sourcePath),
+          text: ctx.text,
+          createdAt: new Date().toISOString(),
+        }
+      : {
+          id: createSnippetReferenceId(ctx),
+          messageId: ctx.messageId,
+          role: ctx.role,
+          label: ctx.label,
+          text: ctx.text,
+          createdAt: ctx.createdAt,
+        };
+
+    setReferencedSnippets((current) =>
+      current.some((item) => item.id === snippet.id) ? current : [...current, snippet],
+    );
+
+    if (ctx.source === 'file') {
       setReferencedFiles((current) =>
-        current.some((item) => item.path === sourcePath)
+        current.some((item) => item.path === ctx.sourcePath)
           ? current
-          : [...current, { path: sourcePath, label }],
-      );
-    } else {
-      const snippet: ReferencedChatSnippet = {
-        id: createSnippetReferenceId(selectedTextContextMenu),
-        messageId: selectedTextContextMenu.messageId,
-        role: selectedTextContextMenu.role,
-        label: selectedTextContextMenu.label,
-        text: selectedTextContextMenu.text,
-        createdAt: selectedTextContextMenu.createdAt,
-      };
-      setReferencedSnippets((current) =>
-        current.some((item) => item.id === snippet.id) ? current : [...current, snippet],
+          : [...current, { path: ctx.sourcePath, label: basename(ctx.sourcePath) }],
       );
     }
+
     closeSelectedTextContextMenu();
     closeReferenceMenu();
     window.requestAnimationFrame(() => {
@@ -3206,16 +3213,24 @@ function App() {
 
       {editorPanelOpen ? (
       <section className="editor-panel">
-        <div className="editor-top-bar">
-          <div className="editor-breadcrumb">
-            <span className="editor-breadcrumb__item">{selectedPath ?? '选择文件'}</span>
-          </div>
-          <div className="editor-actions">
+        <div className="editor-header">
+          <div className="editor-mini-bar">
+            <span className="mini-bar__title" title={selectedPath ?? ''}>
+              {selectedPath ? basename(selectedPath) : '选择文件'}
+            </span>
             {hasUnsavedChanges ? <span className="dirty-marker">未保存</span> : null}
-            <button type="button" disabled={!hasUnsavedChanges || saveState === 'saving'} onClick={() => void saveFile()}>
-              <Save size={14} />
-              {saveState === 'saving' ? '保存中...' : '保存'}
-            </button>
+          </div>
+          <div className="editor-top-bar">
+            <div className="editor-breadcrumb">
+              <span className="editor-breadcrumb__item">{selectedPath ?? '选择文件'}</span>
+            </div>
+            <div className="editor-actions">
+              {hasUnsavedChanges ? <span className="dirty-marker">未保存</span> : null}
+              <button type="button" disabled={!hasUnsavedChanges || saveState === 'saving'} onClick={() => void saveFile()}>
+                <Save size={14} />
+                {saveState === 'saving' ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3293,43 +3308,52 @@ function App() {
 
       {chatPanelOpen ? (
         <aside className={`chat-panel ${chatReadingMode ? 'chat-panel--reading' : ''}`}>
-          <div className="chat-panel__heading">
-            <div className="session-title-stack">
-              <div className="session-title-line">
-                <h2>创作助手</h2>
-                <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
-                  {runStatusLabel(runState, currentRun)}
-                </span>
-              </div>
-              <span className="session-scope-line" title={activeChatScopeName}>
-                {activeChatScopeName} · {displayedChatSessions.length} 个会话
+          <div className="chat-panel__header">
+            <div className="chat-panel__mini-bar">
+              <span className="mini-bar__title" title={activeChatSession?.title ?? '创作助手'}>
+                {activeChatSession?.title ?? '创作助手'}
+              </span>
+              <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
+                {runStatusLabel(runState, currentRun)}
               </span>
             </div>
-            <div className="session-heading-actions">
-              <button
-                type="button"
-                className={`toolbar-button text-mode-button ${chatReadingMode ? 'active' : ''}`}
-                onClick={() => setChatReadingMode((current) => !current)}
-                aria-label={chatReadingMode ? '切换为紧凑字号' : '切换为阅读字号'}
-                title={chatReadingMode ? '紧凑字号' : '阅读字号'}
-              >
-                <Type size={18} />
-              </button>
-              <button type="button" className="toolbar-button" onClick={createNewChatSession} aria-label="新建会话" title="新建会话">
-                <Plus size={18} />
-              </button>
-              <select
-                className="notify-mode-select"
-                value={runNotifyMode}
-                onChange={(event) => setRunNotifyMode(event.target.value as RunNotifyMode)}
-                title="运行完成通知方式"
-                aria-label="运行完成通知方式"
-              >
-                <option value="off">通知：关</option>
-                <option value="sound">通知：声音</option>
-                <option value="wechat">通知：微信</option>
-                <option value="both">通知：声音+微信</option>
-              </select>
+            <div className="chat-panel__heading">
+              <div className="session-title-stack">
+                <div className="session-title-line">
+                  <h2>创作助手</h2>
+                  <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
+                    {runStatusLabel(runState, currentRun)}
+                  </span>
+                </div>
+                <span className="session-scope-line" title={activeChatScopeName}>
+                  {activeChatScopeName} · {displayedChatSessions.length} 个会话
+                </span>
+              </div>
+              <div className="session-heading-actions">
+                <button
+                  type="button"
+                  className={`toolbar-button text-mode-button ${chatReadingMode ? 'active' : ''}`}
+                  onClick={() => setChatReadingMode((current) => !current)}
+                  aria-label={chatReadingMode ? '切换为紧凑字号' : '切换为阅读字号'}
+                  title={chatReadingMode ? '紧凑字号' : '阅读字号'}
+                >
+                  <Type size={18} />
+                </button>
+                <button type="button" className="toolbar-button" onClick={createNewChatSession} aria-label="新建会话" title="新建会话">
+                  <Plus size={18} />
+                </button>
+                <select
+                  className="notify-mode-select"
+                  value={runNotifyMode}
+                  onChange={(event) => setRunNotifyMode(event.target.value as RunNotifyMode)}
+                  title="运行完成通知方式"
+                  aria-label="运行完成通知方式"
+                >
+                  <option value="off">通知：关</option>
+                  <option value="sound">通知：声音</option>
+                  <option value="wechat">通知：微信</option>
+                  <option value="both">通知：声音+微信</option>
+                </select>
               </div>
             </div>
 
@@ -3390,6 +3414,7 @@ function App() {
                 ) : null}
               </div>
             </div>
+          </div>
 
             <section className="chat-thread" ref={chatThreadRef}>
               {activeChatSession?.messages.length ? (
@@ -3411,6 +3436,21 @@ function App() {
                   </p>
                 </div>
               )}
+              <button
+                type="button"
+                className={`chat-scroll-bottom ${showScrollBottom ? 'visible' : ''}`}
+                onClick={() => {
+                  const thread = chatThreadRef.current;
+                  if (thread) {
+                    thread.scrollTo({ top: thread.scrollHeight, behavior: 'smooth' });
+                    autoScrollRef.current = true;
+                  }
+                }}
+                aria-label="滚动到底部"
+                title="滚动到底部"
+              >
+                <ArrowDown size={16} />
+              </button>
             </section>
 
             <section className="composer">
@@ -3424,9 +3464,10 @@ function App() {
                       </button>
                     </span>
                   ))}
-                  {referencedSnippets.map((snippet) => (
+                  {referencedSnippets.map((snippet, snippetIndex) => (
                     <span key={snippet.id} className="ctx-chip ctx-chip--snippet" title={snippet.text}>
-                      <span className="ctx-chip__label">{'"'}{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}{'"'}</span>
+                      <span className="ctx-chip__number">{snippetIndex + 1}</span>
+                      <span className="ctx-chip__label">{snippet.label}{'"'}{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}{'"'}</span>
                       <button type="button" className="ctx-chip__remove" onClick={() => removeReferencedSnippet(snippet.id)} aria-label={`移除 ${snippet.label}`}>
                         <X size={12} />
                       </button>
@@ -3531,23 +3572,16 @@ function App() {
                   onClick={(event) => updateReferenceMenu(prompt, event.currentTarget.selectionStart ?? prompt.length)}
                   onKeyDown={handleComposerKeyDown}
                 />
-                <div className="composer__toolbar">
-                  <div className="composer__left">
-                    <span className="muted">{chatScope === 'project' && selectedProject ? selectedProject.name : temporaryProjectId ? '临时工作目录' : '未选择项目'} · {imageAspectRatio} · {imageReferenceDrafts.length} 张参考图</span>
-                  </div>
-                  <div className="composer__right">
-                    <button
-                      type="button"
-                      className="composer__send"
-                      disabled={activeChatSessionArchived || !prompt.trim() || runState === 'running'}
-                      onClick={() => void submitPrompt()}
-                      aria-label="发送"
-                      title="发送"
-                    >
-                      <Send size={16} />
-                    </button>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  className="composer__send"
+                  disabled={activeChatSessionArchived || !prompt.trim() || runState === 'running'}
+                  onClick={() => void submitPrompt()}
+                  aria-label="发送"
+                  title="发送"
+                >
+                  <Send size={16} />
+                </button>
               </div>
             </section>
         </aside>
@@ -3792,6 +3826,41 @@ function imageThinkingLevelLabel(level: ImageThinkingLevelOption): string {
   }
 }
 
+const SNIPPET_PREVIEW_LENGTH = 48;
+
+function CollapsibleSnippet({ snippet, index }: { snippet: ReferencedChatSnippet; index: number }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const preview = snippet.text.length > SNIPPET_PREVIEW_LENGTH
+    ? `${snippet.text.slice(0, SNIPPET_PREVIEW_LENGTH)}...`
+    : snippet.text;
+  const isFileSource = snippet.messageId.startsWith('/') || snippet.messageId.includes('.');
+  const displayLabel = isFileSource ? snippet.label || '文件' : snippet.label || '引用';
+
+  return (
+    <div className={`chat-ref-snippet ${open ? 'open' : ''}`}>
+      <div
+        className="chat-ref-snippet__head"
+        onClick={() => setOpen((prev) => !prev)}
+        role="button"
+        aria-expanded={open}
+        title={open ? '收起' : '展开查看完整内容'}
+      >
+        <span className="chat-ref-snippet__number">{index}</span>
+        <span className="chat-ref-snippet__icon">
+          {isFileSource ? <File size={12} /> : <ChevronRight size={12} />}
+        </span>
+        <span className="chat-ref-snippet__label">{displayLabel}</span>
+        <span className="chat-ref-snippet__preview">
+          {preview}
+        </span>
+      </div>
+      {open ? (
+        <div className="chat-ref-snippet__body">{snippet.text}</div>
+      ) : null}
+    </div>
+  );
+}
+
 const ChatMessageItem = memo(function ChatMessageItem({
   message,
   onTextSelection,
@@ -3828,10 +3897,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 @{reference.label}
               </span>
             ))}
-            {message.referencedSnippets?.map((snippet) => (
-              <span key={`${message.id}-${snippet.id}`} className="ctx-chip ctx-chip--snippet" title={snippet.text}>
-                "{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}"
-              </span>
+            {message.referencedSnippets?.map((snippet, snippetIndex) => (
+              <CollapsibleSnippet key={`${message.id}-${snippet.id}`} snippet={snippet} index={snippetIndex + 1} />
             ))}
           </div>
         ) : null}
@@ -3920,13 +3987,16 @@ function sessionMatchesView(session: ChatSession, view: ChatSessionView): boolea
   return view === 'archived' ? Boolean(session.archivedAt) : !session.archivedAt;
 }
 
-function createSnippetReferenceId(input: Extract<SelectedTextContextMenu, { source: 'chat' }>): string {
+function hashCode(value: string): number {
   let hash = 0;
-  const source = `${input.messageId}:${input.text}`;
-  for (let index = 0; index < source.length; index += 1) {
-    hash = Math.imul(31, hash) + source.charCodeAt(index);
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(31, hash) + value.charCodeAt(index);
   }
-  return `snippet-${input.messageId}-${Math.abs(hash).toString(36)}`;
+  return hash;
+}
+
+function createSnippetReferenceId(input: Extract<SelectedTextContextMenu, { source: 'chat' }>): string {
+  return `snippet-${input.messageId}-${Math.abs(hashCode(`${input.messageId}:${input.text}`)).toString(36)}`;
 }
 
 function getSelectedTextFromEvent(event: React.MouseEvent): string {
