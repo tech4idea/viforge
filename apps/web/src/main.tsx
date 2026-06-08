@@ -1897,9 +1897,7 @@ function App() {
   function notifyRunComplete(status: 'success' | 'error'): void {
     const mode = runNotifyModeRef.current;
     if (mode === 'sound' || mode === 'both') {
-      if (document.hidden) {
-        playNotificationSound();
-      }
+      playNotificationSound();
     }
     if (mode === 'wechat' || mode === 'both') {
       void apiClient.sendWechatNotify(status).catch(() => { /* silent */ });
