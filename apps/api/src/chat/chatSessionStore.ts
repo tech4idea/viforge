@@ -198,6 +198,7 @@ function isTemporaryProjectId(projectId: string): boolean {
 }
 
 const MAX_STREAM_EVENTS = 100;
+const TOOL_OUTPUT_EVENT_SIZE_LIMIT = 2000;
 const STREAM_EVENT_TYPES_TO_KEEP = new Set(['text.delta', 'tool_use.start', 'tool_use.end', 'tool_use.delta', 'file.changed', 'image.generated', 'run.end']);
 
 function truncateStreamEvents(events: unknown[]): unknown[] {
@@ -210,13 +211,32 @@ function truncateStreamEvents(events: unknown[]): unknown[] {
   return [...first, ...last];
 }
 
+function sanitizeStreamEventData(event: unknown): unknown {
+  if (!event || typeof event !== 'object') return event;
+  const e = event as Record<string, unknown>;
+
+  if (e.type === 'tool_use.delta' && e.stream === 'output' && typeof e.delta === 'string' && e.delta.length > TOOL_OUTPUT_EVENT_SIZE_LIMIT) {
+    return { ...e, delta: '[工具输出数据已省略]' };
+  }
+
+  if (e.type === 'tool_use.end' && typeof e.outputText === 'string' && e.outputText.length > TOOL_OUTPUT_EVENT_SIZE_LIMIT) {
+    return { ...e, outputText: '[工具输出数据已省略]' };
+  }
+
+  return event;
+}
+
+function sanitizeStreamEvents(events: unknown[]): unknown[] {
+  return events.map(sanitizeStreamEventData);
+}
+
 function normalizeChatMessage(message: ChatMessage): ChatMessage {
   return {
     ...message,
     attachments: Array.isArray(message.attachments) ? message.attachments : [],
     referencedFiles: Array.isArray(message.referencedFiles) ? message.referencedFiles : [],
     referencedSnippets: Array.isArray(message.referencedSnippets) ? message.referencedSnippets : [],
-    streamEvents: truncateStreamEvents(message.streamEvents) as StreamEvent[],
+    streamEvents: sanitizeStreamEvents(truncateStreamEvents(message.streamEvents)) as StreamEvent[],
   };
 }
 

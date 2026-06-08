@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { TokenLimiterProcessor } from '@mastra/core/processors';
+import { TokenLimiterProcessor, type Processor } from '@mastra/core/processors';
 import { createTool } from '@mastra/core/tools';
 import { PostgresStore } from '@mastra/pg';
 import { QdrantVector } from '@mastra/qdrant';
@@ -310,7 +310,7 @@ export function createWorkspaceTools(
           throw new Error('AIGC Hub 未返回图片结果');
         }
 
-        return { images: generated, attachments };
+        return { images: generated };
       },
     }),
     edit_project_image: createTool({
@@ -424,7 +424,7 @@ export function createWorkspaceTools(
           throw new Error('AIGC Hub 未返回图片结果');
         }
 
-        return { images: generated, sourceImagePath: imagePath, attachments };
+        return { images: generated, sourceImagePath: imagePath };
       },
     }),
   };
@@ -810,6 +810,91 @@ async function workspaceFileExists(store: WorkspaceStore, projectId: string, fil
   }
 }
 
+const TOOL_OUTPUT_SIZE_LIMIT = 2000;
+const BASE64_PATTERN = /^[A-Za-z0-9+/=]{200,}$/;
+
+function stripLargeStringsFromJson(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length > TOOL_OUTPUT_SIZE_LIMIT || BASE64_PATTERN.test(value)) return '[data removed]';
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(stripLargeStringsFromJson);
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (Array.isArray(obj.attachments)) {
+      const { attachments: _, ...rest } = obj;
+      return Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, stripLargeStringsFromJson(v)]));
+    }
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, stripLargeStringsFromJson(v)]));
+  }
+  return value;
+}
+
+function sanitizeToolOutputValue(output: unknown): { changed: boolean; output: unknown } {
+  if (!output || typeof output !== 'object') return { changed: false, output };
+  const o = output as Record<string, unknown>;
+  const type = o.type as string | undefined;
+  const value = o.value;
+
+  if (type === 'text' && typeof value === 'string' && value.length > TOOL_OUTPUT_SIZE_LIMIT) {
+    return { changed: true, output: { type: 'text', value: '[工具结果已省略]' } };
+  }
+
+  if (type === 'json') {
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    if (serialized.length > TOOL_OUTPUT_SIZE_LIMIT) {
+      const cleaned = stripLargeStringsFromJson(value);
+      const cleanedStr = JSON.stringify(cleaned);
+      if (cleanedStr.length > TOOL_OUTPUT_SIZE_LIMIT) {
+        return { changed: true, output: { type: 'json', value: { _summary: '工具结果过大已省略', keys: Object.keys(value as Record<string, unknown>) } } };
+      }
+      return { changed: true, output: { type: 'json', value: cleaned } };
+    }
+  }
+
+  if (type === 'content' && Array.isArray(value)) {
+    let changed = false;
+    const sanitized = (value as Array<Record<string, unknown>>).map((part) => {
+      if (part.type === 'media' && typeof part.data === 'string') {
+        changed = true;
+        return { ...part, data: '[binary data removed]' };
+      }
+      return part;
+    });
+    if (changed) return { changed: true, output: { type: 'content', value: sanitized } };
+  }
+
+  return { changed: false, output };
+}
+
+class BinaryDataSanitizer implements Processor<'binary-data-sanitizer'> {
+  readonly id = 'binary-data-sanitizer' as const;
+  readonly name = 'Binary Data Sanitizer';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  processLLMRequest(args: any): any {
+    const prompt = args.prompt as Array<{ role: string; content: unknown }>;
+    if (!Array.isArray(prompt)) return undefined;
+    let modified = false;
+
+    for (const message of prompt) {
+      if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
+      const content = message.content as Array<{ type: string; output?: unknown }>;
+      for (const part of content) {
+        if (part.type !== 'tool-result' || !part.output) continue;
+        const result = sanitizeToolOutputValue(part.output);
+        if (result.changed) {
+          part.output = result.output;
+          modified = true;
+        }
+      }
+    }
+
+    if (!modified) return undefined;
+    return { prompt };
+  }
+}
+
 export async function createAgentRegistry(
   store: WorkspaceStore,
   options: {
@@ -867,7 +952,7 @@ export async function createAgentRegistry(
       model: modelConfig,
       tools,
       memory,
-      inputProcessors: [new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
+      inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
     }) as unknown as MastraAgentClient;
   };
 
@@ -906,7 +991,7 @@ export async function createAgentRegistry(
       model: modelConfig,
       tools: toolsOverride ?? tools,
       memory,
-      inputProcessors: [new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
+      inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
     }) as unknown as MastraAgentClient;
   };
 
