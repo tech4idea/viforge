@@ -1894,14 +1894,20 @@ function App() {
   const runNotifyModeRef = useRef(runNotifyMode);
   runNotifyModeRef.current = runNotifyMode;
 
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+
   function notifyRunComplete(status: 'success' | 'error'): void {
     const mode = runNotifyModeRef.current;
+    if (mode === 'off') return;
+    const label = status === 'error' ? '运行失败' : '运行完成';
     if (mode === 'sound' || mode === 'both') {
       playNotificationSound();
     }
     if (mode === 'wechat' || mode === 'both') {
       void apiClient.sendWechatNotify(status).catch(() => { /* silent */ });
     }
+    showToastRef.current(`${label}（通知：${mode}）`, status === 'error' ? 'error' : 'success');
   }
 
   function flushStreamBatch() {
