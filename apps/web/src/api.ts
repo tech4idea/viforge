@@ -101,6 +101,7 @@ export type ApiClient = {
   createWechatSetupSession(): Promise<WechatSetupSession>;
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
   disconnectWechat(): Promise<{ disconnected: boolean }>;
+  sendWechatNotify(status: 'success' | 'error'): Promise<{ sent: boolean }>;
 };
 
 
@@ -380,6 +381,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     disconnectWechat: () =>
       request<{ disconnected: boolean }>(fetcher, baseUrl, '/api/wechat/connection', {
         method: 'DELETE',
+      }),
+    sendWechatNotify: (status) =>
+      request<{ sent: boolean }>(fetcher, baseUrl, '/api/wechat/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
       }),
 
   };

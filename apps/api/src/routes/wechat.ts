@@ -228,6 +228,29 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
     return context.json({ disconnected: true });
   });
 
+  // -- Notify: send a run completion notification to connected WeChat user --
+  routes.post('/wechat/notify', async (context) => {
+    const body = await parseJson(context.req.raw) as { status?: string } | undefined;
+    const status = body?.status === 'error' ? 'error' : 'success';
+
+    const wechatStatus = await wechatStore.getStatus();
+    if (wechatStatus.state !== 'connected' || !wechatStatus.connection) {
+      return context.json({ sent: false, reason: 'not_connected' });
+    }
+
+    const { externalUserId } = wechatStatus.connection;
+    const contextToken = await wechatStore.getIlinkContextToken(externalUserId) ?? '';
+    const message = status === 'error' ? '❌ 创作任务执行失败' : '✅ 创作任务已完成';
+
+    try {
+      await ilinkClient.sendText({ to: externalUserId, text: message, contextToken });
+      return context.json({ sent: true });
+    } catch (error) {
+      console.error('[wechat] notify send failed', { externalUserId, error });
+      return context.json({ sent: false, reason: 'send_failed' });
+    }
+  });
+
 
   return routes;
 }

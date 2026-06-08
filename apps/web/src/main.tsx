@@ -94,6 +94,51 @@ const THEME_MODE_STORAGE_KEY = 'viwork.themeMode.v1';
 const TEMPORARY_CHAT_SCOPE_ID = '__temporary__';
 const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
 const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
+const RUN_NOTIFY_STORAGE_KEY = 'viwork.runNotify.v1';
+
+type RunNotifyMode = 'off' | 'sound' | 'wechat' | 'both';
+
+function readStoredRunNotifyMode(): RunNotifyMode {
+  try {
+    const raw = localStorage.getItem(RUN_NOTIFY_STORAGE_KEY);
+    if (raw === 'sound' || raw === 'wechat' || raw === 'both' || raw === 'off') return raw;
+  } catch { /* noop */ }
+  return 'off';
+}
+
+function writeStoredRunNotifyMode(mode: RunNotifyMode): void {
+  try { localStorage.setItem(RUN_NOTIFY_STORAGE_KEY, mode); } catch { /* noop */ }
+}
+
+function playNotificationSound(): void {
+  try {
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.value = 587;
+    gain1.gain.setValueAtTime(0.3, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc1.connect(gain1).connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.3);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.value = 880;
+    gain2.gain.setValueAtTime(0, now + 0.15);
+    gain2.gain.linearRampToValueAtTime(0.3, now + 0.2);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    osc2.connect(gain2).connect(ctx.destination);
+    osc2.start(now + 0.15);
+    osc2.stop(now + 0.6);
+
+    setTimeout(() => void ctx.close(), 1000);
+  } catch { /* audio not available */ }
+}
 
 type LoadState = 'idle' | 'loading' | 'error';
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -235,6 +280,7 @@ function App() {
   const [referenceQuery, setReferenceQuery] = useState<{ start: number; end: number; query: string } | null>(null);
   const [activeReferenceIndex, setActiveReferenceIndex] = useState(0);
   const [chatReadingMode, setChatReadingMode] = useState(initState.chatReadingMode);
+  const [runNotifyMode, setRunNotifyMode] = useState<RunNotifyMode>(readStoredRunNotifyMode());
   const [chatMode, setChatMode] = useState<ChatMode>('assistant');
   const [aigcHubModels, setAigcHubModels] = useState<AigcHubModelMetadata[]>([]);
   const [aigcHubModelError, setAigcHubModelError] = useState<string | null>(null);
@@ -504,6 +550,10 @@ function App() {
   useEffect(() => {
     writeStoredChatReadingMode(chatReadingMode);
   }, [chatReadingMode]);
+
+  useEffect(() => {
+    writeStoredRunNotifyMode(runNotifyMode);
+  }, [runNotifyMode]);
 
   useEffect(() => {
     writeStoredThemeMode(themeMode);
@@ -1622,6 +1672,7 @@ function App() {
         const endEvent = response.events.find((event): event is Extract<RunEvent, { type: 'run.end' }> => event.type === 'run.end');
         const messageStatus = endEvent?.status === 'error' || response.run.status === 'error' ? 'error' : 'success';
         setRunState(messageStatus);
+        notifyRunComplete(messageStatus);
         appendMessageToSession(
           session.id,
           createChatMessage('assistant', assistantMessageFromEvents(response.events), {
@@ -1823,7 +1874,9 @@ function App() {
         streamFlushTimerRef.current = null;
       }
       flushStreamBatch();
-      setRunState(event.status === 'success' ? 'success' : 'error');
+      const streamEndStatus = event.status === 'success' ? 'success' as const : 'error' as const;
+      setRunState(streamEndStatus);
+      notifyRunComplete(streamEndStatus);
       if (event.errorMessage) {
         setRunError(userFacingRunError(event.errorMessage));
       }
@@ -1835,6 +1888,21 @@ function App() {
       } else if (selectedProjectId === runProjectId) {
         void refreshWorkspaceAfterRun(runProjectId);
       }
+    }
+  }
+
+  const runNotifyModeRef = useRef(runNotifyMode);
+  runNotifyModeRef.current = runNotifyMode;
+
+  function notifyRunComplete(status: 'success' | 'error'): void {
+    const mode = runNotifyModeRef.current;
+    if (mode === 'sound' || mode === 'both') {
+      if (document.hidden) {
+        playNotificationSound();
+      }
+    }
+    if (mode === 'wechat' || mode === 'both') {
+      void apiClient.sendWechatNotify(status).catch(() => { /* silent */ });
     }
   }
 
@@ -3232,6 +3300,18 @@ function App() {
               <button type="button" className="toolbar-button" onClick={createNewChatSession} aria-label="新建会话" title="新建会话">
                 <Plus size={18} />
               </button>
+              <select
+                className="notify-mode-select"
+                value={runNotifyMode}
+                onChange={(event) => setRunNotifyMode(event.target.value as RunNotifyMode)}
+                title="运行完成通知方式"
+                aria-label="运行完成通知方式"
+              >
+                <option value="off">通知：关</option>
+                <option value="sound">通知：声音</option>
+                <option value="wechat">通知：微信</option>
+                <option value="both">通知：声音+微信</option>
+              </select>
               </div>
             </div>
 
