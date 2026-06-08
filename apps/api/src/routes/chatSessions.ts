@@ -5,6 +5,7 @@ import type { ChatMessage } from '@viwork/shared';
 
 import type { ChatSessionStore } from '../chat/chatSessionStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
+import type { WechatStore } from '../wechat/wechatStore';
 
 const chatSessionKindSchema = z.enum(['assistant', 'image']);
 
@@ -59,7 +60,11 @@ const createSessionSchema = z.object({
   title: z.string().trim().min(1).optional(),
 }).default({});
 
-export function createChatSessionRoutes(store: ChatSessionStore, workspaceStore?: WorkspaceStore): Hono {
+export function createChatSessionRoutes(
+  store: ChatSessionStore,
+  workspaceStore?: WorkspaceStore,
+  wechatStore?: WechatStore,
+): Hono {
   const routes = new Hono();
 
   routes.get('/projects/:projectId/chat-sessions', async (context) => {
@@ -127,6 +132,18 @@ export function createChatSessionRoutes(store: ChatSessionStore, workspaceStore?
       return context.json({ error: 'Chat session not found' }, 404);
     }
     return context.json(session);
+  });
+
+  routes.delete('/chat-sessions/:sessionId', async (context) => {
+    const sessionId = context.req.param('sessionId');
+    const result = await store.deleteSession(sessionId);
+    if (!result.existed) {
+      return context.json({ error: 'Chat session not found' }, 404);
+    }
+    if (wechatStore) {
+      await wechatStore.clearActiveChatSessionBindings(sessionId);
+    }
+    return context.json({ deleted: true });
   });
 
   routes.post('/chat-sessions/:sessionId/messages', async (context) => {

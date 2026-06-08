@@ -172,21 +172,91 @@ async function classifyAndRoute(
     };
   }
 
-  if (intent === 'switch_session' && target) {
-    const match = projects.find((p) => p.name.toLowerCase().includes(target.toLowerCase()));
-    if (!match) return { type: 'continue' };
+  if (intent === 'switch_session') {
+    const allSessions = await Promise.all(
+      projects.map(async (p) => {
+        const sessions = await chatSessionStore.listProjectSessions(p.id, { includeArchived: false });
+        return { project: p, sessions: sessions.slice(0, 5) };
+      }),
+    );
 
-    const action: PendingSessionAction = {
-      type: 'switch_session',
-      projectName: match.name,
-      projectId: match.id,
-      originalPrompt: text,
-    };
-    await wechatStore.setPendingSessionAction(externalUserId, action);
-    return {
-      type: 'pending_confirmation',
-      replyText: `你想切换到项目「${match.name}」吗？回复「确认」切换，或「取消」留在当前会话。`,
-    };
+    if (target) {
+      const matchProject = projects.find((p) => p.name.toLowerCase().includes(target.toLowerCase()));
+      if (matchProject) {
+        const entry = allSessions.find((e) => e.project.id === matchProject.id);
+        const sessions = entry?.sessions ?? [];
+        if (sessions.length > 0) {
+          const sessionLines = sessions.map((s, i) => {
+            const title = s.title ?? '未命名会话';
+            const msgCount = s.messages.length ?? 0;
+            return `  ${i + 1}. ${title}（${msgCount} 条）`;
+          }).join('\n');
+          const lines = [
+            `项目「${matchProject.name}」的最近会话：`,
+            sessionLines,
+            '',
+            '回复序号切换到对应会话，或回复「新建」创建新会话。',
+          ];
+          const action: PendingSessionAction = {
+            type: 'switch_session',
+            projectName: matchProject.name,
+            projectId: matchProject.id,
+            originalPrompt: text,
+          };
+          await wechatStore.setPendingSessionAction(externalUserId, action);
+          return { type: 'pending_confirmation', replyText: lines.join('\n') };
+        }
+
+        const action: PendingSessionAction = {
+          type: 'switch_session',
+          projectName: matchProject.name,
+          projectId: matchProject.id,
+          originalPrompt: text,
+        };
+        await wechatStore.setPendingSessionAction(externalUserId, action);
+        return {
+          type: 'pending_confirmation',
+          replyText: `项目「${matchProject.name}」暂无会话。回复「确认」切换到此项目，或「新建」创建新会话。`,
+        };
+      }
+
+      const matchedSession = allSessions.flatMap((e) =>
+        e.sessions.map((s) => ({ ...s, projectName: e.project.name, projectId: e.project.id })),
+      ).find((s) => (s.title ?? '').toLowerCase().includes(target.toLowerCase()));
+
+      if (matchedSession) {
+        const action: PendingSessionAction = {
+          type: 'switch_session',
+          projectName: matchedSession.projectName,
+          projectId: matchedSession.projectId,
+          originalPrompt: text,
+        };
+        await wechatStore.setPendingSessionAction(externalUserId, action);
+        return {
+          type: 'pending_confirmation',
+          replyText: `你想切换到「${matchedSession.projectName}」下的会话「${matchedSession.title ?? '未命名'}」吗？回复「确认」切换，或「取消」留在当前会话。`,
+        };
+      }
+    }
+
+    const lines: string[] = ['可选项目和会话：', ''];
+    let idx = 1;
+    for (const entry of allSessions) {
+      lines.push(`【${entry.project.name}】`);
+      if (entry.sessions.length === 0) {
+        lines.push('  （暂无会话）');
+      } else {
+        for (const s of entry.sessions) {
+          const title = s.title ?? '未命名会话';
+          const msgCount = s.messages.length ?? 0;
+          lines.push(`  ${idx}. ${title}（${msgCount} 条）`);
+          idx++;
+        }
+      }
+      lines.push('');
+    }
+    lines.push('回复项目名称或会话序号切换，回复「新建」创建新会话。');
+    return { type: 'pending_confirmation', replyText: lines.join('\n') };
   }
 
   return { type: 'continue' };

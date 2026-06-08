@@ -17,6 +17,7 @@ export type ChatSessionStore = {
   createSession(projectId: string, options?: { kind?: ChatSessionKind; title?: string }): Promise<ChatSession>;
   archiveSession(sessionId: string): Promise<ChatSession | undefined>;
   restoreSession(sessionId: string): Promise<ChatSession | undefined>;
+  deleteSession(sessionId: string): Promise<{ deleted: true; existed: boolean }>;
   updateSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession | undefined>;
   appendMessage(sessionId: string, message: ChatMessage): Promise<ChatSession | undefined>;
   updateMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession | undefined>;
@@ -144,6 +145,20 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
       return updateSessionById(sessionId, (session) => ({ ...session, archivedAt: null, updatedAt: new Date().toISOString() }));
     },
 
+    async deleteSession(sessionId) {
+      return withStateLock(async () => {
+        const state = await readState();
+        const existed = state.sessions.some((session) => session.id === sessionId);
+        if (!existed) {
+          return { deleted: true, existed: false };
+        }
+        const sessions = state.sessions.filter((session) => session.id !== sessionId);
+        await writeState({ sessions });
+        // TODO: consider cascading to Codex bridge to cancel active runs tied to the session's codexThreadId.
+        return { deleted: true, existed: true };
+      });
+    },
+
     async updateSession(sessionId, input) {
       return updateSessionById(sessionId, (session) => ({
         ...session,
@@ -183,6 +198,7 @@ function isTemporaryProjectId(projectId: string): boolean {
 }
 
 const MAX_STREAM_EVENTS = 100;
+const TOOL_OUTPUT_EVENT_SIZE_LIMIT = 2000;
 const STREAM_EVENT_TYPES_TO_KEEP = new Set(['text.delta', 'tool_use.start', 'tool_use.end', 'tool_use.delta', 'file.changed', 'image.generated', 'run.end']);
 
 function truncateStreamEvents(events: unknown[]): unknown[] {
@@ -195,13 +211,32 @@ function truncateStreamEvents(events: unknown[]): unknown[] {
   return [...first, ...last];
 }
 
+function sanitizeStreamEventData(event: unknown): unknown {
+  if (!event || typeof event !== 'object') return event;
+  const e = event as Record<string, unknown>;
+
+  if (e.type === 'tool_use.delta' && e.stream === 'output' && typeof e.delta === 'string' && e.delta.length > TOOL_OUTPUT_EVENT_SIZE_LIMIT) {
+    return { ...e, delta: '[工具输出数据已省略]' };
+  }
+
+  if (e.type === 'tool_use.end' && typeof e.outputText === 'string' && e.outputText.length > TOOL_OUTPUT_EVENT_SIZE_LIMIT) {
+    return { ...e, outputText: '[工具输出数据已省略]' };
+  }
+
+  return event;
+}
+
+function sanitizeStreamEvents(events: unknown[]): unknown[] {
+  return events.map(sanitizeStreamEventData);
+}
+
 function normalizeChatMessage(message: ChatMessage): ChatMessage {
   return {
     ...message,
     attachments: Array.isArray(message.attachments) ? message.attachments : [],
     referencedFiles: Array.isArray(message.referencedFiles) ? message.referencedFiles : [],
     referencedSnippets: Array.isArray(message.referencedSnippets) ? message.referencedSnippets : [],
-    streamEvents: truncateStreamEvents(message.streamEvents) as StreamEvent[],
+    streamEvents: sanitizeStreamEvents(truncateStreamEvents(message.streamEvents)) as StreamEvent[],
   };
 }
 

@@ -189,7 +189,7 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
     if (result.type === 'error') {
       return context.json({ accepted: true, reply: result.message || null, notePath: null }, 202);
     }
-    if (result.type === 'route_switch') {
+    if (result.type === 'route_switch' || result.type === 'session_switch' || result.type === 'session_list') {
       return context.json({ accepted: true, reply: result.replyText, notePath: null }, 202);
     }
     if (result.type === 'create_run') {
@@ -226,6 +226,29 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
     await poller?.stop();
     await wechatStore.disconnect();
     return context.json({ disconnected: true });
+  });
+
+  // -- Notify: send a run completion notification to connected WeChat user --
+  routes.post('/wechat/notify', async (context) => {
+    const body = await parseJson(context.req.raw) as { status?: string } | undefined;
+    const status = body?.status === 'error' ? 'error' : 'success';
+
+    const wechatStatus = await wechatStore.getStatus();
+    if (wechatStatus.state !== 'connected' || !wechatStatus.connection) {
+      return context.json({ sent: false, reason: 'not_connected' });
+    }
+
+    const { externalUserId } = wechatStatus.connection;
+    const contextToken = await wechatStore.getIlinkContextToken(externalUserId) ?? '';
+    const message = status === 'error' ? '❌ 创作任务执行失败' : '✅ 创作任务已完成';
+
+    try {
+      await ilinkClient.sendText({ to: externalUserId, text: message, contextToken });
+      return context.json({ sent: true });
+    } catch (error) {
+      console.error('[wechat] notify send failed', { externalUserId, error });
+      return context.json({ sent: false, reason: 'send_failed' });
+    }
   });
 
 

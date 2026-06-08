@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { PRODUCT_PROFILE } from '../env';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
+import type { BehaviorRule } from '../storage/behaviorRulesStore';
+import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
 
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
@@ -243,7 +245,9 @@ async function executeMultiAgentWorkflow({
     }),
   };
   const systemInstructions = await buildSystemInstructions(store, productProfile);
-  const mainAgent = registry.systemAgent(buildMainAgentInstructions(systemInstructions), orchestrationTools);
+  const behaviorRulesStore = createBehaviorRulesStore(store);
+  const behaviorRules = await behaviorRulesStore.getRules();
+  const mainAgent = registry.systemAgent(buildMainAgentInstructions(systemInstructions, behaviorRules), orchestrationTools);
 
   appendJsonLog('api-runs.jsonl', {
     scope: 'mastra-run',
@@ -352,17 +356,59 @@ async function runSpecialistAgent({
     '只完成该子任务。需要写入正式产物时使用 workspace tools；否则直接返回可供主 agent 综合的结果。',
   ].filter(Boolean).join('\n\n');
 
-  const output = await runAgentStream(
-    agent,
-    specialistPrompt,
-    publish,
-    emittedAt,
-    runId,
-    threadId,
-    input,
-    25,
-    `${threadId}-${agentId}`,
-  );
+  let output: string;
+  try {
+    const memoryThread = `${threadId}-${agentId}`;
+    appendJsonLog('api-runs.jsonl', {
+      scope: 'mastra-run',
+      stage: 'specialist.generate.input',
+      runId,
+      agentId,
+      prompt: textLogValue(specialistPrompt),
+    });
+
+    const generatePromise = agent.generate(specialistPrompt, {
+      runId,
+      maxSteps: 10,
+      memory: { thread: memoryThread, resource: input.projectId },
+    });
+
+    const timeoutMs = 180_000;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`specialist agent 超时（${timeoutMs / 1000}s），已终止等待`)), timeoutMs);
+    });
+
+    const result = await Promise.race([generatePromise, timeoutPromise]);
+    output = result.text;
+
+    appendJsonLog('api-runs.jsonl', {
+      scope: 'mastra-run',
+      stage: 'specialist.generate.output',
+      runId,
+      agentId,
+      output: textLogValue(output),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendJsonLog('api-runs.jsonl', {
+      scope: 'mastra-run',
+      stage: 'specialist.generate.error',
+      runId,
+      agentId,
+      error: message,
+    });
+    publish({
+      type: 'agent.step.end',
+      runId,
+      emittedAt: emittedAt(),
+      agentId,
+      phase,
+      iteration: 1,
+      maxIterations: 1,
+      status: 'failed',
+    } as StreamEvent);
+    return { agentId, output: `[${phase}] 执行异常：${message}`, summary: `[${phase}] 失败：${message}` };
+  }
 
   publish({
     type: 'agent.step.end',
@@ -622,8 +668,8 @@ async function buildSystemInstructions(store: WorkspaceStore, productProfile: Pr
   ].join('\n\n');
 }
 
-function buildMainAgentInstructions(systemInstructions: string): string {
-  return [
+function buildMainAgentInstructions(systemInstructions: string, behaviorRules: BehaviorRule[]): string {
+  const base = [
     systemInstructions,
     '## 主 agent 调度原则',
     '你是默认工作的主 agent，目标是提供接近 Codex 编程工具的自然协作体验。',
@@ -637,10 +683,18 @@ function buildMainAgentInstructions(systemInstructions: string): string {
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
     '每次 specialist 返回的结果中包含 summary 字段，请将关键信息记录到项目记忆中（专家协作摘要部分），方便后续对话引用。',
-    '如果用户只是要求“帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
+    '如果用户只是要求”帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
     '在情景剧故事创作中，如果人物动机、角色关系或角色行为边界不清，先委派 character-agent；如果涉及多集历史、固定设定或上一集状态，先委派 continuity-agent。',
-    '如果用户明确要求“脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿”，再委派给对应 specialist。',
-  ].join('\n\n');
+    '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿”，再委派给对应 specialist。',
+  ];
+
+  for (const rule of behaviorRules) {
+    if (rule.enabled && rule.content.trim()) {
+      base.push(`## ${rule.label}\n\n${rule.content}`);
+    }
+  }
+
+  return base.join('\n\n');
 }
 
 async function readSystemAgentProtocol(store: WorkspaceStore, productProfile: ProductProfile): Promise<string> {

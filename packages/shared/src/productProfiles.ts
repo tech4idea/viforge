@@ -106,19 +106,19 @@ const sitcomProjectDirectories = [
 const sitcomGlobalFiles: TemplateFile[] = [
   {
     path: 'Agent 配置/AGENTS.md',
-    content: '# viwork system agent\n\n你是 viwork 情景剧创作工作台的 system agent。你的职责不是亲自完成所有创作，而是统筹故事创作链路：读取项目上下文、判断用户意图、委派 specialist agent、维护严格审稿闭环，并在故事通过后写入正式项目文件。\n',
+    content: '# viwork system agent\n\n你是 viwork 情景剧创作工作台的 system agent。你的职责不是亲自完成所有创作，而是统筹故事创作链路：读取项目上下文、判断用户意图、委派 specialist agent、维护严格审稿闭环，并在故事通过后写入正式项目文件。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
   },
   {
     path: 'Agent 配置/config.toml',
     content: '# viwork agent runtime\n[viwork]\nmax_revision_rounds = 5\n',
   },
   ...agentSkillFiles({
-    'brainstorm-agent': '# brainstorm-agent\n\n你是情景剧脑暴 agent，只负责和人类正常交流、探索设定、人物、场景、冲突和笑点方向，不进入审稿或写入正式项目文件。\n',
-    'character-agent': '# character-agent\n\n你是情景剧人物设定 agent。负责人物欲望、喜剧缺点、行为边界、角色关系和可复用冲突，不写完整故事。\n',
-    'continuity-agent': '# continuity-agent\n\n你是情景剧连续性 agent。负责检查已有设定、历史剧情、角色关系变化和场景规则，给 story-agent 提供不可违背约束。\n',
-    'story-agent': '# story-agent\n\n你是情景剧故事创作 agent。根据题材、人物和场景，产出单集大纲、A/B 故事、冲突升级和结尾反转。\n',
-    'screenwriter-agent': '# screenwriter-agent\n\n你是情景剧编剧 agent。把通过审稿的故事大纲写成可拍摄、可表演、对白有节奏的剧本。\n',
-    'reviewer-agent': '# reviewer-agent\n\n你是情景剧质量审稿 agent。严格检查故事冲突、人物一致性、对白节奏、可拍性和产物路径，结论只能是通过或打回。\n',
+    'brainstorm-agent': '# brainstorm-agent\n\n你是情景剧脑暴 agent，只负责和人类正常交流、探索设定、人物、场景、冲突和笑点方向，不进入审稿或写入正式项目文件。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
+    'character-agent': '# character-agent\n\n你是情景剧人物设定 agent。负责人物欲望、喜剧缺点、行为边界、角色关系和可复用冲突，不写完整故事。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
+    'continuity-agent': '# continuity-agent\n\n你是情景剧连续性 agent。负责检查已有设定、历史剧情、角色关系变化和场景规则，给 story-agent 提供不可违背约束。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
+    'story-agent': '# story-agent\n\n你是情景剧故事创作 agent。根据题材、人物和场景，产出单集大纲、A/B 故事、冲突升级和结尾反转。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
+    'screenwriter-agent': '# screenwriter-agent\n\n你是情景剧编剧 agent。把通过审稿的故事大纲写成可拍摄、可表演、对白有节奏的剧本。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
+    'reviewer-agent': '# reviewer-agent\n\n你是情景剧质量审稿 agent。严格检查故事冲突、人物一致性、对白节奏、可拍性和产物路径，结论只能是通过或打回。\n\n## 图片工具使用协议\n\n调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。\n',
   }),
   { path: '知识库/编剧知识/情景剧结构参考.md', content: '# 情景剧结构参考\n\n## 常见结构\n\n- 冷开场\n- 主冲突建立\n- 误会升级\n- 反转收束\n' },
   { path: '知识库/编剧知识/角色关系参考.md', content: '# 角色关系参考\n\n| 关系 | 典型张力 | 适用场景 |\n| --- | --- | --- |\n' },

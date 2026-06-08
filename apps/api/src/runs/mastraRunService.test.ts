@@ -72,6 +72,9 @@ describe('mastra run service', () => {
               ]),
             };
           },
+          async generate() {
+            return { text: '已完成改编方案初稿。' };
+          },
         };
       },
     }).createRun({
@@ -133,6 +136,9 @@ describe('mastra run service', () => {
               async stream() {
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '你好，我在。' } }]) };
               },
+              async generate() {
+                return { text: '你好，我在。' };
+              },
             };
           },
         };
@@ -192,6 +198,9 @@ describe('mastra run service', () => {
                     { type: 'text-delta', payload: { text: '审稿完成。' } },
                   ]),
                 };
+              },
+              async generate() {
+                return { text: '审稿完成。' };
               },
             };
           },
@@ -282,6 +291,10 @@ function specialistAgent(agentId: string, calls: string[]) {
     async stream() {
       calls.push(agentId);
       return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: `${agentId} output` } }]) };
+    },
+    async generate() {
+      calls.push(agentId);
+      return { text: `${agentId} output` };
     },
   };
 }

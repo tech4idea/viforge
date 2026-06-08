@@ -237,6 +237,14 @@ export type TheaterSkill = {
   location?: string;
 };
 
+export type BehaviorRule = {
+  id: string;
+  label: string;
+  content: string;
+  enabled: boolean;
+  builtIn: boolean;
+};
+
 export type WechatStatus = {
   state: 'not_connected' | 'pending' | 'connected';
   connection: {
