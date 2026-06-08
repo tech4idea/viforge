@@ -261,6 +261,7 @@ input::selection, textarea::selection { background: var(--selection-bg); }
   height: 100vh;
   display: grid;
   grid-template-columns: 52px 1fr;
+  grid-template-rows: 1fr;
   overflow: hidden;
 }
 
@@ -334,6 +335,7 @@ input::selection, textarea::selection { background: var(--selection-bg); }
 .content-area {
   display: grid;
   grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
   position: relative;
   min-height: 0;
   overflow: hidden;
