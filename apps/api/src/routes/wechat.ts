@@ -189,7 +189,7 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
     if (result.type === 'error') {
       return context.json({ accepted: true, reply: result.message || null, notePath: null }, 202);
     }
-    if (result.type === 'route_switch') {
+    if (result.type === 'route_switch' || result.type === 'session_switch' || result.type === 'session_list') {
       return context.json({ accepted: true, reply: result.replyText, notePath: null }, 202);
     }
     if (result.type === 'create_run') {

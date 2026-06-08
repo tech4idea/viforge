@@ -3,6 +3,7 @@ import type {
   AigcHubModelMetadata,
   AgentRun,
   AgentTraceEvent,
+  BehaviorRule,
   ChatMessage,
   ChatMessageAttachment,
   ChatSession,
@@ -31,6 +32,7 @@ export type {
   AigcHubModelMetadata,
   AgentRun,
   AgentTraceEvent,
+  BehaviorRule,
   ChatMessage,
   ChatMessageAttachment,
   ChatSession,
@@ -83,6 +85,7 @@ export type ApiClient = {
   updateChatSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession>;
   archiveChatSession(sessionId: string): Promise<ChatSession>;
   restoreChatSession(sessionId: string): Promise<ChatSession>;
+  deleteChatSession(sessionId: string): Promise<{ deleted: true }>;
   appendChatMessage(sessionId: string, message: ChatMessage): Promise<ChatSession>;
   updateChatMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession>;
   listAigcHubModels(): Promise<AigcHubModelListResponse>;
@@ -92,6 +95,8 @@ export type ApiClient = {
   listSkills(): Promise<TheaterSkill[]>;
   createSkill(input: CreateSkillInput): Promise<TheaterSkill>;
   updateSkill(slug: string, input: { enabled: boolean }): Promise<TheaterSkill>;
+  getBehaviorRules(): Promise<BehaviorRule[]>;
+  saveBehaviorRules(rules: BehaviorRule[]): Promise<BehaviorRule[]>;
   getWechatStatus(): Promise<WechatStatus>;
   createWechatSetupSession(): Promise<WechatSetupSession>;
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
@@ -294,6 +299,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<ChatSession>(fetcher, baseUrl, `/api/chat-sessions/${encodePathSegment(sessionId)}/restore`, {
         method: 'POST',
       }),
+    deleteChatSession: (sessionId) =>
+      request<{ deleted: true }>(fetcher, baseUrl, `/api/chat-sessions/${encodePathSegment(sessionId)}`, {
+        method: 'DELETE',
+      }),
     appendChatMessage: (sessionId, message) =>
       request<ChatSession>(fetcher, baseUrl, `/api/chat-sessions/${encodePathSegment(sessionId)}/messages`, {
         method: 'POST',
@@ -351,6 +360,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'PATCH',
         body: JSON.stringify(input),
       }),
+    getBehaviorRules: () =>
+      request<{ rules: BehaviorRule[] }>(fetcher, baseUrl, '/api/behavior-rules').then((res) => res.rules),
+    saveBehaviorRules: (rules) =>
+      request<{ rules: BehaviorRule[] }>(fetcher, baseUrl, '/api/behavior-rules', {
+        method: 'PUT',
+        body: JSON.stringify({ rules }),
+      }).then((res) => res.rules),
     getWechatStatus: () => request<WechatStatus>(fetcher, baseUrl, '/api/wechat/status'),
     createWechatSetupSession: () =>
       request<WechatSetupSession>(fetcher, baseUrl, '/api/wechat/setup-sessions', {

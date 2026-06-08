@@ -18,6 +18,7 @@ import {
   resolveApiUrl,
   type AigcHubModelMetadata,
   type AgentRun,
+  type BehaviorRule,
   type ChatMessage,
   type ChatMessageAttachment,
   type ChatSession,
@@ -44,6 +45,30 @@ import {
   toggleCollapsedPath,
 } from './workspace-tree';
 import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
+import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Diamond,
+  Edit3,
+  File,
+  FileText,
+  Folder,
+  FolderOpen,
+  FolderUp,
+  Globe,
+  MoreHorizontal,
+  Pin,
+  Plus,
+  RefreshCw,
+  Save,
+  Send,
+  Trash2,
+  Type,
+  Upload,
+  X,
+} from './components/icons';
 import './styles.css';
 
 const DEFAULT_PROJECT_NAME = ACTIVE_PRODUCT_PROFILE.defaultProjectName;
@@ -116,6 +141,7 @@ type ChatSessionContextMenu = {
   x: number;
   y: number;
   sessionId: string;
+  title?: string;
 };
 
 type SelectedTextContextMenu = {
@@ -225,14 +251,32 @@ function App() {
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(initState.activeChatSessionId);
   const [chatSessionView, setChatSessionView] = useState<ChatSessionView>(initState.chatSessionView);
   const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, editor: false, chat: false });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatPanelOpen, setChatPanelOpen] = useState(true);
+  const [editorPanelOpen, setEditorPanelOpen] = useState(true);
   const [panelWidths, setPanelWidths] = useState({ workspace: 238, chat: 340 });
   const [themeMode, setThemeMode] = useState<ThemeMode>(initState.themeMode);
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'error' }>>([]);
+  const toastIdRef = useRef(0);
+
+  const showToast = useCallback((message: string, type: 'info' | 'success' | 'error' = 'info') => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   const [temporaryWorkspaceCollapsed, setTemporaryWorkspaceCollapsed] = useState(true);
   const [collapsedGlobalPaths, setCollapsedGlobalPaths] = useState<string[]>([]);
   const [collapsedDirectoriesByProject, setCollapsedDirectoriesByProject] = useState<Record<string, string[]>>({});
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | 'settings' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
@@ -260,6 +304,8 @@ function App() {
   const [wechatStatus, setWechatStatus] = useState<WechatStatus | null>(null);
   const [wechatSetup, setWechatSetup] = useState<WechatSetupSession | null>(null);
   const [wechatState, setWechatState] = useState<LoadState>('idle');
+  const [behaviorRules, setBehaviorRules] = useState<BehaviorRule[]>([]);
+  const [behaviorRulesState, setBehaviorRulesState] = useState<LoadState>('idle');
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -465,6 +511,56 @@ function App() {
     document.documentElement.style.colorScheme = themeMode === 'dark' ? 'dark' : 'light';
   }, [themeMode]);
 
+  const saveFileRef = useRef(saveFile);
+  saveFileRef.current = saveFile;
+
+  const saveShortcutRef = useRef({ selectedPath, isTextFile, fileContent, lastSavedContent });
+  saveShortcutRef.current = { selectedPath, isTextFile, fileContent, lastSavedContent };
+
+  useEffect(() => {
+    function handleGlobalKeyDown(event: KeyboardEvent) {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+
+      if (event.key === 'b' || event.key === 'B') {
+        event.preventDefault();
+        setSidebarOpen((v) => !v);
+        return;
+      }
+
+      if (event.key === 'j' || event.key === 'J') {
+        event.preventDefault();
+        setChatPanelOpen((v) => !v);
+        return;
+      }
+
+      if (event.key === '.' || event.key === '>') {
+        event.preventDefault();
+        setEditorPanelOpen((v) => !v);
+        return;
+      }
+
+      if (event.key === 's' || event.key === 'S') {
+        const target = event.target as HTMLElement;
+        const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        if (isInput) return;
+        event.preventDefault();
+        const { selectedPath: sp, isTextFile: itf, fileContent: fc, lastSavedContent: lsc } = saveShortcutRef.current;
+        if (sp && itf && fc !== lsc) {
+          void saveFileRef.current().then(() => {
+            showToast('文件已保存', 'success');
+          }).catch(() => {
+            showToast('保存失败', 'error');
+          });
+        }
+        return;
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [showToast]);
+
   useEffect(() => {
     writeStoredSelectedProjectId(selectedProjectId);
   }, [selectedProjectId]);
@@ -540,6 +636,9 @@ function App() {
     }
     if (activeToolPanel === 'wechat') {
       void loadWechatStatus();
+    }
+    if (activeToolPanel === 'settings') {
+      void loadBehaviorRules();
     }
   }, [activeToolPanel]);
 
@@ -1356,6 +1455,41 @@ function App() {
     setWechatSetup(status.setupSession);
   }
 
+  async function loadBehaviorRules() {
+    setBehaviorRulesState('loading');
+    try {
+      setBehaviorRules(await apiClient.getBehaviorRules());
+      setBehaviorRulesState('idle');
+    } catch {
+      setBehaviorRulesState('error');
+    }
+  }
+
+  async function saveBehaviorRules() {
+    setBehaviorRulesState('loading');
+    try {
+      setBehaviorRules(await apiClient.saveBehaviorRules(behaviorRules));
+      setBehaviorRulesState('idle');
+    } catch {
+      setBehaviorRulesState('error');
+    }
+  }
+
+  function addBehaviorRule() {
+    setBehaviorRules((current) => [
+      ...current,
+      { id: `custom-${Date.now()}`, label: '自定义规则', content: '', enabled: true, builtIn: false },
+    ]);
+  }
+
+  function removeBehaviorRule(id: string) {
+    setBehaviorRules((current) => current.filter((r) => r.id !== id));
+  }
+
+  function updateBehaviorRule(id: string, patch: Partial<BehaviorRule>) {
+    setBehaviorRules((current) => current.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
   function closeReferenceMenu() {
     setReferenceQuery(null);
     setReferenceSuggestions([]);
@@ -1803,7 +1937,7 @@ function App() {
     setSidebarContextMenu(null);
   }
 
-  function openChatSessionContextMenu(event: React.MouseEvent, sessionId: string) {
+  function openChatSessionContextMenu(event: React.MouseEvent, sessionId: string, title?: string) {
     event.preventDefault();
     event.stopPropagation();
     suppressNextShellClickRef.current = true;
@@ -1815,6 +1949,7 @@ function App() {
       x: Math.max(VIEWPORT_EDGE_GAP, menuX),
       y: Math.max(VIEWPORT_EDGE_GAP, menuY),
       sessionId,
+      title,
     });
   }
 
@@ -2004,6 +2139,19 @@ function App() {
     document.body.classList.add('is-resizing-panels');
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+  }
+
+  function contentAreaColumns(): string {
+    if (editorPanelOpen && chatPanelOpen) {
+      return `1fr 6px ${panelWidths.chat}px`;
+    }
+    if (editorPanelOpen) {
+      return '1fr';
+    }
+    if (chatPanelOpen) {
+      return '1fr';
+    }
+    return '1fr';
   }
 
   function workspaceGridColumns() {
@@ -2201,7 +2349,7 @@ function App() {
       return null;
     }
 
-    const icon = draft.kind === 'folder' ? '▾' : '•';
+    const icon = draft.kind === 'folder' ? <ChevronDown size={12} /> : <File size={12} />;
     return (
       <div
         className="file-node create-entry-draft"
@@ -2252,7 +2400,7 @@ function App() {
         style={{ '--tree-depth': String(pathDepth(entry.path)) } as React.CSSProperties}
         onClick={(event) => event.stopPropagation()}
       >
-        <span className="file-node-icon">{entry.type === 'directory' ? '▾' : '•'}</span>
+        <span className="file-node-icon">{entry.type === 'directory' ? <ChevronDown size={12} /> : <File size={12} />}</span>
         <input
           ref={renameEntryInputRef}
           value={draft.name}
@@ -2368,6 +2516,56 @@ function App() {
       );
       setChatSessionView('active');
       openChatSession(restored.id);
+    } catch (error) {
+      setRunError(errorToMessage(error));
+    }
+  }
+
+  async function renameChatSession(context: ChatSessionContextMenu) {
+    closeChatSessionContextMenu();
+    const current = chatSessions.find((session) => session.id === context.sessionId);
+    const currentTitle = current?.title ?? context.title ?? '';
+    const nextTitle = window.prompt('会话标题', currentTitle)?.trim();
+    if (!nextTitle || nextTitle === currentTitle) return;
+    setRunError(null);
+    try {
+      const updated = await apiClient.updateChatSession(context.sessionId, { title: nextTitle });
+      setChatSessions((currentSessions) =>
+        currentSessions.map((session) => (session.id === updated.id ? updated : session)),
+      );
+    } catch (error) {
+      setRunError(errorToMessage(error));
+    }
+  }
+
+  async function deleteChatSession(context: ChatSessionContextMenu) {
+    closeChatSessionContextMenu();
+    const current = chatSessions.find((session) => session.id === context.sessionId);
+    if (!current) return;
+    const firstConfirm = window.confirm(
+      `确定要删除会话「${current.title}」吗？\n\n该会话的所有聊天记录都将被永久删除，且无法恢复。`,
+    );
+    if (!firstConfirm) return;
+    const typed = window.prompt(`二次确认：请输入会话标题「${current.title}」以完成删除`);
+    if (typed === null) return;
+    if (typed.trim() !== current.title) {
+      setRunError('会话标题不匹配，已取消删除。');
+      return;
+    }
+    setRunError(null);
+    try {
+      await apiClient.deleteChatSession(context.sessionId);
+      setChatSessions((currentSessions) => currentSessions.filter((session) => session.id !== context.sessionId));
+      if (activeChatSessionId === context.sessionId) {
+        setActiveChatSessionId(null);
+        setPrompt('');
+        setReferencedFiles([]);
+        setReferencedSnippets([]);
+        closeReferenceMenu();
+        setRunError(null);
+        setRunState('idle');
+        setCurrentRun(null);
+      }
     } catch (error) {
       setRunError(errorToMessage(error));
     }
@@ -2567,26 +2765,46 @@ function App() {
         closeSelectedTextContextMenu();
       }}
     >
-      <header className="top-bar">
-        <div className="brand-line" aria-label="viwork">
-          <img className="logo-mark" src="/viwork-logo.svg" alt="" aria-hidden="true" />
-          <strong>viwork</strong>
-        </div>
-        <nav className="toolbar-actions" aria-label="页面工具">
-          <button type="button" className="toolbar-text-button" onClick={() => setActiveToolPanel('wechat')}>
-            微信接入
-          </button>
-          <button
-            type="button"
-            className="toolbar-text-button toolbar-theme-button"
-            onClick={() => setThemeMode(nextThemeMode(themeMode))}
-            aria-label={`切换主题，当前${themeModeLabel(themeMode)}`}
-            title={`切换主题，当前${themeModeLabel(themeMode)}`}
-          >
-            {themeModeIcon(themeMode)} {themeModeLabel(themeMode)}
-          </button>
-        </nav>
-      </header>
+      <ActivityRail
+        sidebarOpen={sidebarOpen}
+        editorOpen={editorPanelOpen}
+        chatOpen={chatPanelOpen}
+        themeMode={themeMode as RailThemeMode}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        onToggleEditor={() => setEditorPanelOpen((v) => !v)}
+        onToggleChat={() => setChatPanelOpen((v) => !v)}
+        onToggleTheme={() => setThemeMode(nextThemeMode(themeMode))}
+        onOpenSettings={() => setActiveToolPanel('settings')}
+        onOpenWechat={() => setActiveToolPanel('wechat')}
+      />
+
+      <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
+
+      {sidebarOpen ? (
+        <>
+          <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+          <aside className="sidebar-drawer">
+            <div className="sidebar-header">
+              <h2>工作区</h2>
+              <div className="sidebar-header-actions">
+                <button type="button" className="sidebar-icon-button" onClick={() => void loadProjects()} aria-label="刷新项目" title="刷新项目">
+                  <RefreshCw size={14} />
+                </button>
+                <button type="button" className="sidebar-icon-button" onClick={() => void loadGlobalEntries()} aria-label="刷新全局" title="刷新全局">
+                  <Globe size={14} />
+                </button>
+                <button type="button" className="sidebar-icon-button" onClick={() => startUpload()} aria-label="上传素材" title="上传素材">
+                  <Upload size={14} />
+                </button>
+                <button type="button" className="sidebar-icon-button" onClick={() => startUpload(null, 'folder')} aria-label="上传文件夹" title="上传文件夹">
+                  <FolderUp size={14} />
+                </button>
+                <button type="button" className="sidebar-icon-button" onClick={() => setSidebarOpen(false)} aria-label="关闭" title="关闭">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+            <div className="sidebar-scroll">
 
       {projectLoadState === 'error' ? (
         <section className="notice error-notice">
@@ -2601,45 +2819,7 @@ function App() {
       {projectLoadState === 'loading' ? <section className="notice">正在加载项目...</section> : null}
 
       {projectLoadState !== 'loading' ? (
-        <main
-          ref={workspaceGridRef}
-          className={[
-            'workspace-grid',
-            collapsedPanels.workspace ? 'workspace-grid--workspace-collapsed' : '',
-            collapsedPanels.editor ? 'workspace-grid--editor-collapsed' : '',
-            collapsedPanels.chat ? 'workspace-grid--chat-collapsed' : '',
-          ].filter(Boolean).join(' ')}
-          style={{ gridTemplateColumns: workspaceGridColumns() }}
-        >
-          <aside className="panel sidebar">
-            <section>
-              <div className="panel-heading">
-                <h2>工作区</h2>
-                <div className="sidebar-actions">
-                  <button
-                    type="button"
-                    className="sidebar-tool-button"
-                    onClick={() => setCollapsedPanels((current) => ({ ...current, workspace: true }))}
-                    aria-label="折叠工作区"
-                    title="折叠工作区"
-                  >
-                    ‹
-                  </button>
-                  <button type="button" className="sidebar-tool-button" onClick={() => void loadProjects()} aria-label="刷新项目" title="刷新项目">
-                    ↻
-                  </button>
-                  <button type="button" className="sidebar-tool-button" onClick={() => void loadGlobalEntries()} aria-label="刷新全局" title="刷新全局">
-                    ◎
-                  </button>
-                  <button type="button" className="sidebar-tool-button" onClick={() => startUpload()} aria-label="上传素材" title="上传素材">
-                    ↑
-                  {uploadState === 'uploading' ? <span className="muted">上传中...</span> : null}
-                  </button>
-                  <button type="button" className="sidebar-tool-button" onClick={() => startUpload(null, 'folder')} aria-label="上传文件夹" title="上传文件夹">
-                    ▤
-                  </button>
-                </div>
-              </div>
+        <>
               <input
                 ref={fileUploadRef}
                 type="file"
@@ -2684,7 +2864,7 @@ function App() {
                     onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'global', projectId: null, parentPath: '' })}
                     onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'global', projectId: null })}
                   >
-                    <span className="node-icon">◇</span>
+                    <span className="node-icon"><Diamond size={14} /></span>
                     <span className="node-main">
                       <strong>{WORKSPACE_SECTIONS[0].title}</strong>
                       <small>{WORKSPACE_SECTIONS[0].description}</small>
@@ -2723,8 +2903,8 @@ function App() {
                             <span className="file-node-label">
                               <span className="file-node-icon">
                                 {entry.type === 'directory'
-                                  ? collapsedGlobalPaths.includes(entry.path) ? '▸' : '▾'
-                                  : '•'}
+                                  ? collapsedGlobalPaths.includes(entry.path) ? <ChevronRight size={12} /> : <ChevronDown size={12} />
+                                  : <File size={12} />}
                               </span>
                               <span>{entry.name}</span>
                             </span>
@@ -2743,7 +2923,7 @@ function App() {
                     title={WORKSPACE_SECTIONS[1].description}
                     onContextMenu={(event) => openSidebarContextMenu(event, { projectId: null })}
                   >
-                    <span className="node-icon">▦</span>
+                    <span className="node-icon"><FolderOpen size={14} /></span>
                     <span className="node-main">
                       <strong>{WORKSPACE_SECTIONS[1].title}</strong>
                       <small>{WORKSPACE_SECTIONS[1].description}</small>
@@ -2768,7 +2948,7 @@ function App() {
                             onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'project', projectId: project.id, parentPath: '' })}
                             onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'project', projectId: project.id })}
                           >
-                            <span className="node-icon">▣</span>
+                            <span className="node-icon"><Folder size={14} /></span>
                             <span className="node-main">
                               <strong>{project.name}</strong>
                             </span>
@@ -2807,8 +2987,8 @@ function App() {
                                       <span className="file-node-label">
                                         <span className="file-node-icon">
                                           {entry.type === 'directory'
-                                            ? (collapsedDirectoriesByProject[project.id] ?? []).includes(entry.path) ? '▸' : '▾'
-                                            : '•'}
+                                            ? (collapsedDirectoriesByProject[project.id] ?? []).includes(entry.path) ? <ChevronRight size={12} /> : <ChevronDown size={12} />
+                                            : <File size={12} />}
                                         </span>
                                         <span>{entry.name}</span>
                                       </span>
@@ -2834,7 +3014,7 @@ function App() {
                     onClick={() => setTemporaryWorkspaceCollapsed((current) => !current)}
                     onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'temporary', projectId: selectedTemporaryProjectId })}
                   >
-                    <span className="node-icon">{temporaryWorkspaceCollapsed ? '▸' : '▾'}</span>
+                    <span className="node-icon">{temporaryWorkspaceCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
                     <span className="node-main">
                       <strong>临时会话工作目录</strong>
                       <small>{temporaryChatSessions.length} 个临时会话</small>
@@ -2869,7 +3049,7 @@ function App() {
                               onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'temporary', projectId: session.projectId })}
                               title={session.title}
                             >
-                              <span className="node-icon">{isCollapsed ? '▸' : '▾'}</span>
+                              <span className="node-icon">{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
                               <span className="node-main">
                                 <strong>{session.title}</strong>
                                 <small>{session.archivedAt ? '已归档' : `${session.messages.length} 条消息 · ${formatChatTime(session.updatedAt)}`}</small>
@@ -2910,8 +3090,8 @@ function App() {
                                         <span className="file-node-label">
                                           <span className="file-node-icon">
                                             {entry.type === 'directory'
-                                              ? (collapsedDirectoriesByTemporaryProject[session.projectId] ?? []).includes(entry.path) ? '▸' : '▾'
-                                              : '•'}
+                                              ? (collapsedDirectoriesByTemporaryProject[session.projectId] ?? []).includes(entry.path) ? <ChevronRight size={12} /> : <ChevronDown size={12} />
+                                              : <File size={12} />}
                                           </span>
                                           <span>{entry.name}</span>
                                         </span>
@@ -2931,43 +3111,47 @@ function App() {
                 </div>
               </div>
               {quickActionError ? <p className="inline-error">{quickActionError}</p> : null}
-            </section>
-          </aside>
-
-          <div
-            className="panel-resizer"
-            role="separator"
-            aria-label="调整工作区宽度"
-            aria-orientation="vertical"
-            onPointerDown={(event) => startPanelResize(event, 'workspace')}
-          />
-
-          <section className="panel editor-panel">
-            <div className="panel-heading editor-heading">
-              <div>
-                <p className="eyebrow">编辑器</p>
-                <h2>{selectedPath ?? '选择文件'}</h2>
-              </div>
-              <div className="editor-actions">
-                {hasUnsavedChanges ? <span className="dirty-marker">未保存</span> : null}
-                <button type="button" disabled={!hasUnsavedChanges || saveState === 'saving'} onClick={() => void saveFile()}>
-                  {saveState === 'saving' ? '保存中...' : '保存'}
-                </button>
-                <button
-                  type="button"
-                  className="toolbar-button"
-                  onClick={() => setCollapsedPanels((current) => ({ ...current, editor: true }))}
-                  aria-label="折叠编辑器"
-                  title="折叠编辑器"
-                >
-                  ‹
-                </button>
-              </div>
+            </>
+          ) : null}
             </div>
+          </aside>
+        </>
+      ) : null}
 
-            <div className="editor-scroll" onContextMenu={openSelectedTextContextMenu}>
-              {!selectedEntry ? <div className="editor-empty">从左侧选择一个 Markdown 或文本文件。</div> : null}
-              {selectedEntry?.type === 'directory' ? <div className="editor-empty">这是目录，请选择其中的文本文件进行编辑。</div> : null}
+      {editorPanelOpen ? (
+      <section className="editor-panel">
+        <div className="editor-top-bar">
+          <div className="editor-breadcrumb">
+            <span className="editor-breadcrumb__item">{selectedPath ?? '选择文件'}</span>
+          </div>
+          <div className="editor-actions">
+            {hasUnsavedChanges ? <span className="dirty-marker">未保存</span> : null}
+            <button type="button" disabled={!hasUnsavedChanges || saveState === 'saving'} onClick={() => void saveFile()}>
+              <Save size={14} />
+              {saveState === 'saving' ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+
+        <div className="editor-scroll" onContextMenu={openSelectedTextContextMenu}>
+              {!selectedEntry ? (
+                <div className="editor-empty">
+                  <div className="editor-empty__icon"><File size={48} /></div>
+                  <h3 className="editor-empty__title">选择文件开始编辑</h3>
+                  <p className="editor-empty__hint">从左侧工作区选择一个 Markdown 或文本文件</p>
+                  <p className="editor-empty__shortcut">
+                    <kbd>Ctrl</kbd>+<kbd>B</kbd> 切换工作区 &nbsp;
+                    <kbd>Ctrl</kbd>+<kbd>J</kbd> 切换创作助手
+                  </p>
+                </div>
+              ) : null}
+              {selectedEntry?.type === 'directory' ? (
+                <div className="editor-empty">
+                  <div className="editor-empty__icon"><Folder size={48} /></div>
+                  <h3 className="editor-empty__title">这是一个目录</h3>
+                  <p className="editor-empty__hint">请选择其中的文本文件进行编辑</p>
+                </div>
+              ) : null}
               {selectedEntry?.type === 'file' ? (
                 <>
                   {fileState === 'error' ? (
@@ -3008,51 +3192,46 @@ function App() {
                 </>
               ) : null}
             </div>
-          </section>
+      </section>
+      ) : null}
 
-          <div
-            className="panel-resizer"
-            role="separator"
-            aria-label="调整创作助手宽度"
-            aria-orientation="vertical"
-            onPointerDown={(event) => startPanelResize(event, 'chat')}
-          />
+      {editorPanelOpen && chatPanelOpen ? (
+        <div
+          className="panel-resizer"
+          role="separator"
+          aria-label="调整创作助手宽度"
+          aria-orientation="vertical"
+          onPointerDown={(event) => startPanelResize(event, 'chat')}
+        />
+      ) : null}
 
-          <aside className={`panel session-panel ${chatReadingMode ? 'session-panel--reading' : ''}`}>
-            <div className="panel-heading session-heading">
-              <div className="session-title-stack">
-                <div className="session-title-line">
-                  <h2>创作助手</h2>
-                  <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
-                    {runStatusLabel(runState, currentRun)}
-                  </span>
-                </div>
-                <span className="session-scope-line" title={activeChatScopeName}>
-                  {activeChatScopeName} · {displayedChatSessions.length} 个会话
+      {chatPanelOpen ? (
+        <aside className={`chat-panel ${chatReadingMode ? 'chat-panel--reading' : ''}`}>
+          <div className="chat-panel__heading">
+            <div className="session-title-stack">
+              <div className="session-title-line">
+                <h2>创作助手</h2>
+                <span className={`status-pill ${runState}`} title={runError ? `运行失败：${runError}` : undefined}>
+                  {runStatusLabel(runState, currentRun)}
                 </span>
               </div>
-              <div className="session-heading-actions">
-                <button
-                  type="button"
-                  className={`toolbar-button text-mode-button ${chatReadingMode ? 'active' : ''}`}
-                  onClick={() => setChatReadingMode((current) => !current)}
-                  aria-label={chatReadingMode ? '切换为紧凑字号' : '切换为阅读字号'}
-                  title={chatReadingMode ? '紧凑字号' : '阅读字号'}
-                >
-                  Aa
-                </button>
-                <button type="button" className="toolbar-button" onClick={createNewChatSession} aria-label="新建会话" title="新建会话">
-                  +
-                </button>
-                <button
-                  type="button"
-                  className="toolbar-button"
-                  onClick={() => setCollapsedPanels((current) => ({ ...current, chat: true }))}
-                  aria-label="折叠创作助手"
-                  title="折叠创作助手"
-                >
-                  ›
-                </button>
+              <span className="session-scope-line" title={activeChatScopeName}>
+                {activeChatScopeName} · {displayedChatSessions.length} 个会话
+              </span>
+            </div>
+            <div className="session-heading-actions">
+              <button
+                type="button"
+                className={`toolbar-button text-mode-button ${chatReadingMode ? 'active' : ''}`}
+                onClick={() => setChatReadingMode((current) => !current)}
+                aria-label={chatReadingMode ? '切换为紧凑字号' : '切换为阅读字号'}
+                title={chatReadingMode ? '紧凑字号' : '阅读字号'}
+              >
+                <Type size={18} />
+              </button>
+              <button type="button" className="toolbar-button" onClick={createNewChatSession} aria-label="新建会话" title="新建会话">
+                <Plus size={18} />
+              </button>
               </div>
             </div>
 
@@ -3086,7 +3265,7 @@ function App() {
                     type="button"
                     className={`chat-session-tab ${session.id === activeChatSession?.id ? 'active' : ''}`}
                     onClick={() => openChatSession(session.id)}
-                    onContextMenu={(event) => openChatSessionContextMenu(event, session.id)}
+                    onContextMenu={(event) => openChatSessionContextMenu(event, session.id, session.title)}
                     title={`${session.title} · ${session.messages.length} 条 · ${formatChatTime(session.updatedAt)}`}
                   >
                     <span className="chat-session-tab__title">{session.title}</span>
@@ -3143,15 +3322,15 @@ function App() {
                     <span key={reference.path} className="ctx-chip" title={reference.path}>
                       <span className="ctx-chip__label">@{reference.label}</span>
                       <button type="button" className="ctx-chip__remove" onClick={() => removeReferencedFile(reference.path)} aria-label={`移除 ${reference.label}`}>
-                        ×
+                        <X size={12} />
                       </button>
                     </span>
                   ))}
                   {referencedSnippets.map((snippet) => (
                     <span key={snippet.id} className="ctx-chip ctx-chip--snippet" title={snippet.text}>
-                      <span className="ctx-chip__label">“{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}”</span>
+                      <span className="ctx-chip__label">{'"'}{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}{'"'}</span>
                       <button type="button" className="ctx-chip__remove" onClick={() => removeReferencedSnippet(snippet.id)} aria-label={`移除 ${snippet.label}`}>
-                        ×
+                        <X size={12} />
                       </button>
                     </span>
                   ))}
@@ -3159,7 +3338,7 @@ function App() {
                     <span key={draft.id} className="ctx-chip ctx-chip--image" title={draft.name}>
                       <span className="ctx-chip__label">图：{draft.name}</span>
                       <button type="button" className="ctx-chip__remove" onClick={() => removeImageReferenceDraft(draft.id)} aria-label={`移除 ${draft.name}`}>
-                        ×
+                        <X size={12} />
                       </button>
                     </span>
                   ))}
@@ -3267,56 +3446,27 @@ function App() {
                       aria-label="发送"
                       title="发送"
                     >
-                      ↑
+                      <Send size={16} />
                     </button>
                   </div>
                 </div>
               </div>
             </section>
-          </aside>
-          {collapsedPanels.workspace ? (
-            <button
-              type="button"
-              className="panel-expand-button panel-expand-button--workspace"
-              onClick={() => setCollapsedPanels((current) => ({ ...current, workspace: false }))}
-              aria-label="展开工作区"
-              title="展开工作区"
-            >
-              ›
-            </button>
-          ) : null}
-          {collapsedPanels.editor ? (
-            <button
-              type="button"
-              className="panel-expand-button panel-expand-button--editor"
-              onClick={() => setCollapsedPanels((current) => ({ ...current, editor: false }))}
-              aria-label="展开编辑器"
-              title="展开编辑器"
-            >
-              编辑
-            </button>
-          ) : null}
-          {collapsedPanels.chat ? (
-            <button
-              type="button"
-              className="panel-expand-button panel-expand-button--chat"
-              onClick={() => setCollapsedPanels((current) => ({ ...current, chat: false }))}
-              aria-label="展开创作助手"
-              title="展开创作助手"
-            >
-              AI
-            </button>
-          ) : null}
-        </main>
+        </aside>
       ) : null}
+      </div>
 
       {activeToolPanel ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setActiveToolPanel(null)}>
           <section className="modal-panel" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">{activeToolPanel === 'skills' ? 'Agent Skills' : 'Remote WeChat'}</p>
-                <h2>{activeToolPanel === 'skills' ? 'Agent 技能' : '远程微信接入'}</h2>
+                <p className="eyebrow">
+                  {activeToolPanel === 'skills' ? 'Agent Skills' : activeToolPanel === 'settings' ? 'Agent Settings' : 'Remote WeChat'}
+                </p>
+                <h2>
+                  {activeToolPanel === 'skills' ? 'Agent 技能' : activeToolPanel === 'settings' ? 'Agent 行为规则' : '远程微信接入'}
+                </h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
             </div>
@@ -3366,6 +3516,57 @@ function App() {
                 />
               </div>
             ) : null}
+
+            {activeToolPanel === 'settings' ? (
+              <div className="settings-panel">
+                {behaviorRulesState === 'loading' && behaviorRules.length === 0 ? (
+                  <p className="muted">正在加载行为规则...</p>
+                ) : null}
+                {behaviorRulesState === 'error' ? <p className="inline-error">规则加载失败</p> : null}
+                <p className="muted">以下规则会在每次对话时注入 Agent 指令。修改后立即生效，无需重启。</p>
+                <div className="behavior-rules-list">
+                  {behaviorRules.map((rule) => (
+                    <div key={rule.id} className="behavior-rule-card">
+                      <div className="rule-header">
+                        <label className="rule-toggle">
+                          <input
+                            type="checkbox"
+                            checked={rule.enabled}
+                            onChange={(event) => updateBehaviorRule(rule.id, { enabled: event.target.checked })}
+                          />
+                          <span>{rule.enabled ? '已启用' : '已停用'}</span>
+                        </label>
+                        <input
+                          className="rule-label-input"
+                          value={rule.label}
+                          onChange={(event) => updateBehaviorRule(rule.id, { label: event.target.value })}
+                        />
+                        {rule.builtIn ? (
+                          <span className="status-pill success">内置</span>
+                        ) : (
+                          <button type="button" className="rule-remove-btn" onClick={() => removeBehaviorRule(rule.id)}>
+                            删除
+                          </button>
+                        )}
+                      </div>
+                      <textarea
+                        className="rule-content-input"
+                        rows={4}
+                        value={rule.content}
+                        onChange={(event) => updateBehaviorRule(rule.id, { content: event.target.value })}
+                        placeholder="输入规则内容，会在注入到 Agent 的系统指令中..."
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="settings-actions">
+                  <button type="button" onClick={addBehaviorRule}>+ 添加自定义规则</button>
+                  <button type="button" onClick={() => void saveBehaviorRules()}>
+                    {behaviorRulesState === 'loading' ? '保存中...' : '保存规则'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>
       ) : null}
@@ -3410,11 +3611,16 @@ function App() {
           style={{ left: chatSessionContextMenu.x, top: chatSessionContextMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
+          <button type="button" onClick={() => void renameChatSession(chatSessionContextMenu)}>重命名</button>
           {chatSessions.find((session) => session.id === chatSessionContextMenu.sessionId)?.archivedAt ? (
             <button type="button" onClick={() => void restoreChatSession(chatSessionContextMenu.sessionId)}>恢复会话</button>
           ) : (
             <button type="button" onClick={() => void archiveChatSession(chatSessionContextMenu.sessionId)}>归档会话</button>
           )}
+          <div className="context-menu-separator" />
+          <button type="button" className="danger-item" onClick={() => void deleteChatSession(chatSessionContextMenu)}>
+            删除
+          </button>
         </div>
       ) : null}
       {selectedTextContextMenu ? (
@@ -3426,6 +3632,24 @@ function App() {
         >
           <button type="button" onClick={quoteSelectedTextToComposer}>引入到会话</button>
           <button type="button" onClick={() => void copySelectedText()}>复制文字</button>
+        </div>
+      ) : null}
+
+      {toasts.length > 0 ? (
+        <div className="toast-container">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`toast toast--${toast.type}`}
+              onClick={() => dismissToast(toast.id)}
+              role="status"
+            >
+              <span className="toast__message">{toast.message}</span>
+              <button type="button" className="toast__dismiss" onClick={(e) => { e.stopPropagation(); dismissToast(toast.id); }}>
+                <X size={14} />
+              </button>
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
@@ -3508,7 +3732,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             ))}
             {message.referencedSnippets?.map((snippet) => (
               <span key={`${message.id}-${snippet.id}`} className="ctx-chip ctx-chip--snippet" title={snippet.text}>
-                “{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}”
+                "{snippet.text.slice(0, 18)}{snippet.text.length > 18 ? '...' : ''}"
               </span>
             ))}
           </div>

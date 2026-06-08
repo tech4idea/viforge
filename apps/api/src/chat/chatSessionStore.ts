@@ -17,6 +17,7 @@ export type ChatSessionStore = {
   createSession(projectId: string, options?: { kind?: ChatSessionKind; title?: string }): Promise<ChatSession>;
   archiveSession(sessionId: string): Promise<ChatSession | undefined>;
   restoreSession(sessionId: string): Promise<ChatSession | undefined>;
+  deleteSession(sessionId: string): Promise<{ deleted: true; existed: boolean }>;
   updateSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession | undefined>;
   appendMessage(sessionId: string, message: ChatMessage): Promise<ChatSession | undefined>;
   updateMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession | undefined>;
@@ -142,6 +143,20 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
 
     async restoreSession(sessionId) {
       return updateSessionById(sessionId, (session) => ({ ...session, archivedAt: null, updatedAt: new Date().toISOString() }));
+    },
+
+    async deleteSession(sessionId) {
+      return withStateLock(async () => {
+        const state = await readState();
+        const existed = state.sessions.some((session) => session.id === sessionId);
+        if (!existed) {
+          return { deleted: true, existed: false };
+        }
+        const sessions = state.sessions.filter((session) => session.id !== sessionId);
+        await writeState({ sessions });
+        // TODO: consider cascading to Codex bridge to cancel active runs tied to the session's codexThreadId.
+        return { deleted: true, existed: true };
+      });
     },
 
     async updateSession(sessionId, input) {

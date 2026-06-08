@@ -264,6 +264,10 @@ function systemAgentInstructions(): string {
 - 改编方案：\`02 改编方案/全季改编方案.md\`、\`02 改编方案/<集数>/单集改编方案.md\`
 - 剧本：\`03 剧本/<集数>/剧本.md\`
 
+## 图片工具使用协议
+
+调用 generate_project_image 或 edit_project_image 之前，必须先在回复中向用户展示将使用的提示词（prompt）、图片比例、生成数量、预计保存路径；编辑时还需说明基于哪张原图和修改要点。展示后等待用户明确同意再调用工具。用户未确认或要求调整时，先修改方案再重新展示，不要自行调用。
+
 ## Trace JSON
 
 正式原著分析、改编方案、剧本创作和审稿时，你必须在关键节点输出独立 JSON block，供系统解析并展示 timeline。脑暴对话不需要输出 trace JSON。格式如下：
@@ -317,6 +321,10 @@ function brainstormAgentSkill(): string {
 - 不写项目文件，除非用户明确要求保存到指定路径。
 - 不调用 reviewer-agent，不输出轮次，不受返工上限限制。
 - 不要在没有授权或原文引用边界的情况下复述大段原著文本。
+
+## 图片工具使用协议
+
+调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。
 `;
 }
 
@@ -355,6 +363,10 @@ function sourceAnalystAgentSkill(): string {
 ## 外化处理建议
 
 ## 改编边界与风险
+
+## 图片工具使用协议
+
+调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。
 `;
 }
 
@@ -394,6 +406,10 @@ function adaptationPlannerAgentSkill(): string {
 ## 角色与情节取舍
 
 ## 原著对应关系
+
+## 图片工具使用协议
+
+调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。
 `;
 }
 
@@ -450,6 +466,10 @@ function screenwriterAgentSkill(): string {
 原著对应：
 
 ## 结尾
+
+## 图片工具使用协议
+
+调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。
 `;
 }
 
@@ -504,6 +524,10 @@ function reviewerAgentSkill(): string {
 返工要求：
 1. ...
 2. ...
+
+## 图片工具使用协议
+
+调用 generate_project_image 或 edit_project_image 之前，必须先向用户展示提示词方案并等待确认后再调用。
 `;
 }
 

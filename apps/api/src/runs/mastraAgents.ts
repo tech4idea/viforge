@@ -29,6 +29,7 @@ export type MastraAgentClient = {
   id?: string;
   name?: string;
   stream(messages: string, options: Record<string, unknown>): Promise<MastraStreamOutput>;
+  generate(messages: string, options: Record<string, unknown>): Promise<{ text: string }>;
 };
 
 export type MastraToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;

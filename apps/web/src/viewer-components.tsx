@@ -1,9 +1,10 @@
-import { lazy, memo, Suspense } from 'react';
+import { lazy, memo, Suspense, useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import type { WorkspaceEntry } from './api';
 import { detectViewerKind, type ViewerKind } from './viewers';
+import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from './components/icons';
 
 const LazyMarkdownEditor = lazy(() => import('./editors').then((m) => ({ default: m.MarkdownEditor })));
 const LazySheetEditor = lazy(() => import('./editors').then((m) => ({ default: m.SheetEditor })));
@@ -24,11 +25,114 @@ function EditorFallback({ label }: { label: string }): JSX.Element {
   return <div className="editor-empty">正在加载{label}...</div>;
 }
 
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 10;
+const ZOOM_STEP = 0.15;
+
+function ImageViewer({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const [fitScale, setFitScale] = useState(1);
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const handleImageLoad = useCallback(() => {
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    if (!canvas || !img) return;
+    const cw = canvas.clientWidth - 16;
+    const ch = canvas.clientHeight - 16;
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    if (nw === 0 || nh === 0) return;
+    const fit = Math.min(cw / nw, ch / nh, 1);
+    setFitScale(fit);
+    setScale(fit);
+    setTranslate({ x: 0, y: 0 });
+  }, []);
+
+  const zoom = useCallback((factor: number) => {
+    setScale((s) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s * factor)));
+  }, []);
+
+  const handlePointerDown = useCallback((event: ReactPointerEvent) => {
+    if (event.button !== 0) return;
+    dragging.current = true;
+    lastPos.current = { x: event.clientX, y: event.clientY };
+    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent) => {
+    if (!dragging.current) return;
+    const dx = event.clientX - lastPos.current.x;
+    const dy = event.clientY - lastPos.current.y;
+    lastPos.current = { x: event.clientX, y: event.clientY };
+    setTranslate((t) => ({ x: t.x + dx, y: t.y + dy }));
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
+  const handleDoubleClick = useCallback(() => {
+    setScale(fitScale);
+    setTranslate({ x: 0, y: 0 });
+  }, [fitScale]);
+
+  const resetView = useCallback(() => {
+    setScale(fitScale);
+    setTranslate({ x: 0, y: 0 });
+  }, [fitScale]);
+
+  const percent = Math.round(scale * 100);
+
+  return (
+    <div className="image-viewer">
+      <div className="image-viewer__toolbar">
+        <button type="button" onClick={() => zoom(1 - ZOOM_STEP)} aria-label="缩小" title="缩小">
+          <ZoomOut size={16} />
+        </button>
+        <span className="image-viewer__zoom-label">{percent}%</span>
+        <button type="button" onClick={() => zoom(1 + ZOOM_STEP)} aria-label="放大" title="放大">
+          <ZoomIn size={16} />
+        </button>
+        <span className="image-viewer__separator" />
+        <button type="button" onClick={resetView} aria-label="适应窗口" title="适应窗口">
+          <Maximize2 size={16} />
+        </button>
+        <button type="button" onClick={() => { setScale(1); setTranslate({ x: 0, y: 0 }); }} aria-label="原始大小" title="原始大小 (1:1)">
+          <RotateCcw size={16} />
+        </button>
+      </div>
+      <div
+        className="image-viewer__canvas"
+        ref={canvasRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onDoubleClick={handleDoubleClick}
+      >
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt}
+          className="image-viewer__img"
+          style={{ transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})` }}
+          onLoad={handleImageLoad}
+          draggable={false}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function renderEditorViewer(props: EditorViewerProps): JSX.Element {
   const kind = detectViewerKind(props.entry.path);
 
   if (kind === 'image') {
-    return <img className="asset-preview" src={props.rawPreviewUrl} alt={props.entry.name} />;
+    return <ImageViewer src={props.rawPreviewUrl} alt={props.entry.name} />;
   }
 
   if (kind === 'pdf' || kind === 'html') {

@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import path from 'node:path';
 
 import { workspaceStore } from './storage/workspaceStore';
+import { createBehaviorRulesStore } from './storage/behaviorRulesStore';
 import { createChatSessionStore } from './chat/chatSessionStore';
 import { createMastraRunService } from './runs/mastraRunService';
 import { runBus } from './runs/runBus';
@@ -12,6 +13,7 @@ import { createImageGenerationRoutes } from './routes/imageGenerations';
 import { createProjectsRoutes } from './routes/projects';
 import { createRunEventsRoutes } from './routes/runEvents';
 import { createRunsRoutes } from './routes/runs';
+import { createBehaviorRulesRoutes } from './routes/behaviorRules';
 import { createSkillsRoutes } from './routes/skills';
 import { createWechatRoutes } from './routes/wechat';
 import { createSkillStore } from './skills/skillStore';
@@ -38,7 +40,11 @@ export function createApp(): Hono {
 
   app.route('/api', createProjectsRoutes(workspaceStore));
   app.route('/api', createAigcHubRoutes());
-  app.route('/api', createChatSessionRoutes(chatSessionStore, workspaceStore));
+
+  // WeChat + ilink (zero-config: uses official WeChat https://ilinkai.weixin.qq.com)
+  const wechatStore = createWechatStore(path.join(WORKSPACES_ROOT, '..', 'wechat.json'));
+
+  app.route('/api', createChatSessionRoutes(chatSessionStore, workspaceStore, wechatStore));
   app.route('/api', createImageGenerationRoutes(chatSessionStore, workspaceStore));
 
   const mastraRunService = createMastraRunService(workspaceStore, runBus);
@@ -49,9 +55,9 @@ export function createApp(): Hono {
     agentConfigSkillsRoot: path.join(WORKSPACES_ROOT, '_global', 'Agent 配置', 'skills'),
   })));
 
-  // WeChat + ilink (zero-config: uses official WeChat https://ilinkai.weixin.qq.com)
-  const wechatStore = createWechatStore(path.join(WORKSPACES_ROOT, '..', 'wechat.json'));
-  const wechatCommandService = createWechatCommandService(wechatStore, workspaceStore);
+  app.route('/api', createBehaviorRulesRoutes(createBehaviorRulesStore(workspaceStore)));
+
+  const wechatCommandService = createWechatCommandService(wechatStore, workspaceStore, chatSessionStore);
   const ilinkClient: WechatIlinkClient = createWechatIlinkClient();
   const assistantChatBridge = createAssistantChatBridge(chatSessionStore, mastraRunService, runBus, wechatStore, ilinkClient);
   const sessionRouter: WechatSessionRouter = createWechatSessionRouter(wechatStore, chatSessionStore, workspaceStore);

@@ -66,6 +66,7 @@ export type WechatStore = {
   setRouteState(externalUserId: string, route: WechatRouteState): Promise<void>;
   getActiveChatSessionId(externalUserId: string): Promise<string | null>;
   setActiveChatSessionId(externalUserId: string, sessionId: string | null): Promise<void>;
+  clearActiveChatSessionBindings(sessionId: string): Promise<number>;
   checkAndRecordInbound(externalMessageId: string, externalUserId: string): Promise<{ accepted: boolean }>;
   recordAttachment(ref: { externalMessageId: string; assetPath: string; mimeType: string; name: string }): Promise<void>;
   getAttachmentsForMessage(externalMessageId: string): Promise<Array<{ assetPath: string; mimeType: string; name: string }>>;
@@ -201,6 +202,22 @@ export function createWechatStore(statePath: string): WechatStore {
       const s = await readState();
       const existing = s.users[externalUserId] ?? { route: { ...DEFAULT_ROUTE }, activeChatSessionId: null, pendingSessionAction: null };
       await writeState({ ...s, users: { ...s.users, [externalUserId]: { ...existing, activeChatSessionId: sessionId } } });
+    },
+
+    async clearActiveChatSessionBindings(sessionId) {
+      const s = await readState();
+      let affected = 0;
+      const users = { ...s.users };
+      for (const [externalUserId, state] of Object.entries(users)) {
+        if (state.activeChatSessionId === sessionId) {
+          users[externalUserId] = { ...state, activeChatSessionId: null };
+          affected += 1;
+        }
+      }
+      if (affected > 0) {
+        await writeState({ ...s, users });
+      }
+      return affected;
     },
 
     async checkAndRecordInbound(externalMessageId, externalUserId) {
