@@ -981,6 +981,7 @@ export async function createAgentRegistry(
             '- 专家协作摘要：',
           ].join('\n'),
         },
+        observationalMemory: true,
       },
     });
 
