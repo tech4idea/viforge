@@ -48,17 +48,23 @@ import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import {
   ArrowDown,
+  Braces,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Diamond,
   Edit3,
   File,
+  FileAudio,
+  FileCode,
+  FileImage,
   FileText,
+  FileVideo,
   Folder,
   FolderOpen,
   FolderUp,
   Globe,
+  Hash,
   MoreHorizontal,
   Pin,
   Plus,
@@ -331,6 +337,7 @@ function App() {
   const [temporaryWorkspaceCollapsed, setTemporaryWorkspaceCollapsed] = useState(true);
   const [collapsedGlobalPaths, setCollapsedGlobalPaths] = useState<string[]>([]);
   const [collapsedDirectoriesByProject, setCollapsedDirectoriesByProject] = useState<Record<string, string[]>>({});
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
   const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | 'settings' | null>(null);
@@ -2442,7 +2449,7 @@ function App() {
       return null;
     }
 
-    const icon = draft.kind === 'folder' ? <ChevronDown size={12} /> : <File size={12} />;
+    const icon = draft.kind === 'folder' ? <FolderOpen size={13} /> : <File size={12} />;
     return (
       <div
         className="file-node create-entry-draft"
@@ -2493,7 +2500,7 @@ function App() {
         style={{ '--tree-depth': String(pathDepth(entry.path)) } as React.CSSProperties}
         onClick={(event) => event.stopPropagation()}
       >
-        <span className="file-node-icon">{entry.type === 'directory' ? <ChevronDown size={12} /> : <File size={12} />}</span>
+        <span className="file-node-icon">{entry.type === 'directory' ? <FolderOpen size={13} /> : fileIconForPath(entry.path)}</span>
         <input
           ref={renameEntryInputRef}
           value={draft.name}
@@ -2994,10 +3001,15 @@ function App() {
                             title={entry.path}
                           >
                             <span className="file-node-label">
+                              {entry.type === 'directory' ? (
+                                <span className="file-node-chevron">
+                                  {collapsedGlobalPaths.includes(entry.path) ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+                                </span>
+                              ) : null}
                               <span className="file-node-icon">
                                 {entry.type === 'directory'
-                                  ? collapsedGlobalPaths.includes(entry.path) ? <ChevronRight size={12} /> : <ChevronDown size={12} />
-                                  : <File size={12} />}
+                                  ? collapsedGlobalPaths.includes(entry.path) ? <Folder size={13} /> : <FolderOpen size={13} />
+                                  : fileIconForPath(entry.path)}
                               </span>
                               <span>{entry.name}</span>
                             </span>
@@ -3026,6 +3038,8 @@ function App() {
                     {projects.length === 0 ? <p className="muted">{ACTIVE_PRODUCT_PROFILE.workspaceSections.project.emptyText}</p> : null}
                     {projects.map((project) => {
                       const isSelectedProject = project.id === selectedProjectId;
+                      const isProjectCollapsed = collapsedProjectIds.has(project.id);
+                      const showTree = isSelectedProject && !isProjectCollapsed;
                       return (
                         <div key={project.id} className={`project-node ${isSelectedProject ? 'selected' : ''}`}>
                           <button
@@ -3033,20 +3047,42 @@ function App() {
                             className={`project-root${dropTargetClass('project', project.id, '')}`}
                             onClick={() => {
                               setActiveWorkspaceScope('project');
-                              setSelectedProjectId(project.id);
-                              setChatScope('project');
+                              if (isSelectedProject) {
+                                setCollapsedProjectIds((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(project.id)) {
+                                    next.delete(project.id);
+                                  } else {
+                                    next.add(project.id);
+                                  }
+                                  return next;
+                                });
+                              } else {
+                                setSelectedProjectId(project.id);
+                                setChatScope('project');
+                                setCollapsedProjectIds((current) => {
+                                  const next = new Set(current);
+                                  next.delete(project.id);
+                                  return next;
+                                });
+                              }
                             }}
                             onDragOver={(event) => handleDropTargetDragOver(event, { workspaceScope: 'project', projectId: project.id, parentPath: '' })}
                             onDragLeave={() => setDragOverTargetKey(null)}
                             onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'project', projectId: project.id, parentPath: '' })}
                             onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'project', projectId: project.id })}
                           >
-                            <span className="node-icon"><Folder size={14} /></span>
+                            {isSelectedProject ? (
+                              <span className="file-node-chevron">
+                                {isProjectCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+                              </span>
+                            ) : null}
+                            <span className="node-icon">{showTree ? <FolderOpen size={14} /> : <Folder size={14} />}</span>
                             <span className="node-main">
                               <strong>{project.name}</strong>
                             </span>
                           </button>
-                          {isSelectedProject ? (
+                          {showTree ? (
                             <div className="file-tree nested-tree">
                               {entriesState === 'error' ? <p className="inline-error">{entriesError}</p> : null}
                               {entriesState === 'loading' ? <p className="muted">正在加载文件...</p> : null}
@@ -3078,10 +3114,15 @@ function App() {
                                       title={entry.path}
                                     >
                                       <span className="file-node-label">
+                                        {entry.type === 'directory' ? (
+                                          <span className="file-node-chevron">
+                                            {(collapsedDirectoriesByProject[project.id] ?? []).includes(entry.path) ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+                                          </span>
+                                        ) : null}
                                         <span className="file-node-icon">
                                           {entry.type === 'directory'
-                                            ? (collapsedDirectoriesByProject[project.id] ?? []).includes(entry.path) ? <ChevronRight size={12} /> : <ChevronDown size={12} />
-                                            : <File size={12} />}
+                                            ? (collapsedDirectoriesByProject[project.id] ?? []).includes(entry.path) ? <Folder size={13} /> : <FolderOpen size={13} />
+                                            : fileIconForPath(entry.path)}
                                         </span>
                                         <span>{entry.name}</span>
                                       </span>
@@ -3181,10 +3222,15 @@ function App() {
                                         title={entry.path}
                                       >
                                         <span className="file-node-label">
+                                          {entry.type === 'directory' ? (
+                                            <span className="file-node-chevron">
+                                              {(collapsedDirectoriesByTemporaryProject[session.projectId] ?? []).includes(entry.path) ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+                                            </span>
+                                          ) : null}
                                           <span className="file-node-icon">
                                             {entry.type === 'directory'
-                                              ? (collapsedDirectoriesByTemporaryProject[session.projectId] ?? []).includes(entry.path) ? <ChevronRight size={12} /> : <ChevronDown size={12} />
-                                              : <File size={12} />}
+                                              ? (collapsedDirectoriesByTemporaryProject[session.projectId] ?? []).includes(entry.path) ? <Folder size={13} /> : <FolderOpen size={13} />
+                                              : fileIconForPath(entry.path)}
                                           </span>
                                           <span>{entry.name}</span>
                                         </span>
@@ -4361,6 +4407,43 @@ function clearStoredTemporaryChatSession(): void {
 
 function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path;
+}
+
+const FILE_ICON_MAP: Record<string, (props: { size?: number }) => JSX.Element> = {
+  md: FileText,
+  markdown: FileText,
+  txt: FileText,
+  pug: FileText,
+  html: FileCode,
+  htm: FileCode,
+  css: FileCode,
+  js: FileCode,
+  jsx: FileCode,
+  ts: FileCode,
+  tsx: FileCode,
+  json: Braces,
+  yaml: Braces,
+  yml: Braces,
+  toml: Braces,
+  csv: Hash,
+  png: FileImage,
+  jpg: FileImage,
+  jpeg: FileImage,
+  gif: FileImage,
+  webp: FileImage,
+  svg: FileImage,
+  mp4: FileVideo,
+  webm: FileVideo,
+  mov: FileVideo,
+  mp3: FileAudio,
+  wav: FileAudio,
+  ogg: FileAudio,
+};
+
+function fileIconForPath(path: string, size = 12): JSX.Element {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  const Icon = FILE_ICON_MAP[ext];
+  return Icon ? <Icon size={size} /> : <File size={size} />;
 }
 
 function joinWorkspacePath(base: string | null, leaf: string): string {
