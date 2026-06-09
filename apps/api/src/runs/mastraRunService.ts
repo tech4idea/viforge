@@ -13,7 +13,7 @@ import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
-import { createAgentRegistry, createWorkspaceTools, type AgentRegistry, type MastraAgentClient, type MastraStreamChunk, type MastraStreamOutput, type MastraToolset } from './mastraAgents';
+import { createAgentRegistry, createObservabilityMastra, createWorkspaceTools, type AgentRegistry, type MastraAgentClient, type MastraStreamChunk, type MastraStreamOutput, type MastraToolset } from './mastraAgents';
 
 type MastraRunOptions = {
   createAgent?: (context: {
@@ -57,6 +57,11 @@ export function createMastraRunService(
   bus: RunBus,
   options: MastraRunOptions = {},
 ): RunService {
+  const observabilityMastra = createObservabilityMastra();
+  if (observabilityMastra) {
+    appendJsonLog('api.log', { scope: 'mastra-run', stage: 'observability.enabled', provider: 'langfuse' });
+  }
+
   return {
     async createRun(input) {
       const project = await store.getProject(input.projectId);
@@ -83,7 +88,7 @@ export function createMastraRunService(
         updatedAt: timestamp,
       };
 
-      void executeMastraRun({ bus, input: { ...input, traceId }, options, runId: run.id, store });
+      void executeMastraRun({ bus, input: { ...input, traceId }, options, runId: run.id, store, observabilityMastra });
 
       return { run };
     },
@@ -96,12 +101,14 @@ async function executeMastraRun({
   options,
   runId,
   store,
+  observabilityMastra,
 }: {
   bus: RunBus;
   input: CreateRunInput;
   options: MastraRunOptions;
   runId: string;
   store: WorkspaceStore;
+  observabilityMastra: ReturnType<typeof createObservabilityMastra>;
 }): Promise<void> {
   const emittedAt = () => new Date().toISOString();
   const publish = (event: StreamEvent) => {
@@ -133,6 +140,7 @@ async function executeMastraRun({
       ...options,
       model: input.model ?? options.model,
       traceId: input.traceId,
+      observabilityMastra,
     };
     const registry = options.createAgent
       ? null

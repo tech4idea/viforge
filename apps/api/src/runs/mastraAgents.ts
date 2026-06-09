@@ -1,9 +1,13 @@
 import { Agent } from '@mastra/core/agent';
+import { Mastra } from '@mastra/core';
 import { TokenLimiterProcessor, type Processor } from '@mastra/core/processors';
 import { createTool } from '@mastra/core/tools';
 import { PostgresStore } from '@mastra/pg';
 import { QdrantVector } from '@mastra/qdrant';
 import { Memory } from '@mastra/memory';
+import { Observability } from '@mastra/observability';
+import { LangfuseExporter } from '@mastra/langfuse';
+import { SpanType } from '@mastra/core/observability';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 
@@ -11,7 +15,7 @@ import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, QDRANT_URL } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, QDRANT_URL } from '../env';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
 
@@ -895,6 +899,31 @@ class BinaryDataSanitizer implements Processor<'binary-data-sanitizer'> {
   }
 }
 
+export function createObservabilityMastra(): Mastra | null {
+  if (!LANGFUSE_PUBLIC_KEY || !LANGFUSE_SECRET_KEY || !LANGFUSE_BASE_URL) {
+    return null;
+  }
+
+  return new Mastra({
+    observability: new Observability({
+      configs: {
+        langfuse: {
+          serviceName: 'viwork',
+          exporters: [
+            new LangfuseExporter({
+              publicKey: LANGFUSE_PUBLIC_KEY,
+              secretKey: LANGFUSE_SECRET_KEY,
+              baseUrl: LANGFUSE_BASE_URL,
+              realtime: true,
+            }),
+          ],
+          excludeSpanTypes: [SpanType.MODEL_CHUNK],
+        },
+      },
+    }),
+  });
+}
+
 export async function createAgentRegistry(
   store: WorkspaceStore,
   options: {
@@ -904,11 +933,13 @@ export async function createAgentRegistry(
     connectionString?: string;
     qdrantUrl?: string;
     traceId?: string;
+    observabilityMastra?: Mastra | null;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
   const connectionString = options.connectionString ?? DATABASE_URL;
   const qdrantUrl = options.qdrantUrl ?? QDRANT_URL;
+  const obsMastra = options.observabilityMastra ?? null;
 
   if (!connectionString) {
     throw new Error('DATABASE_URL is required for Mastra agent memory storage.');
@@ -945,7 +976,7 @@ export async function createAgentRegistry(
       },
     });
 
-    return new Agent({
+    const agent = new Agent({
       id: def.id,
       name: def.name,
       instructions,
@@ -953,7 +984,9 @@ export async function createAgentRegistry(
       tools,
       memory,
       inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
-    }) as unknown as MastraAgentClient;
+    });
+    if (obsMastra) agent.__registerMastra(obsMastra);
+    return agent as unknown as MastraAgentClient;
   };
 
   const [brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
@@ -989,7 +1022,7 @@ export async function createAgentRegistry(
       },
     });
 
-    return new Agent({
+    const sysAgent = new Agent({
       id: 'viwork-system-agent',
       name: 'viwork 系统调度',
       instructions,
@@ -997,7 +1030,9 @@ export async function createAgentRegistry(
       tools: toolsOverride ?? tools,
       memory,
       inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
-    }) as unknown as MastraAgentClient;
+    });
+    if (obsMastra) sysAgent.__registerMastra(obsMastra);
+    return sysAgent as unknown as MastraAgentClient;
   };
 
   return { brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };

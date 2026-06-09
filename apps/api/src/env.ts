@@ -39,3 +39,7 @@ export const DATABASE_URL = process.env.DATABASE_URL ?? '';
 export const QDRANT_URL = process.env.QDRANT_URL ?? '';
 
 export const EMBEDDING_MODEL = process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision';
+
+export const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY ?? '';
+export const LANGFUSE_SECRET_KEY = process.env.LANGFUSE_SECRET_KEY ?? '';
+export const LANGFUSE_BASE_URL = process.env.LANGFUSE_BASE_URL ?? '';
