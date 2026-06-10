@@ -117,10 +117,10 @@ describe('chat session routes', () => {
     const updateResponse = await app.request(`/api/chat-sessions/${session.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ codexThreadId: 'thread-1' }),
+      body: JSON.stringify({ title: '更新后的标题' }),
     });
     expect(updateResponse.status).toBe(200);
-    await expect(updateResponse.json()).resolves.toMatchObject({ codexThreadId: 'thread-1' });
+    await expect(updateResponse.json()).resolves.toMatchObject({ title: '更新后的标题' });
 
     const appendResponse = await app.request(`/api/chat-sessions/${session.id}/messages`, {
       method: 'POST',

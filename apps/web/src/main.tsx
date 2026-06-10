@@ -280,6 +280,14 @@ function App() {
   const [selectedGlobalPath, setSelectedGlobalPath] = useState<string | null>(initState.selectedGlobalPath);
   const [selectedTemporaryProjectId, setSelectedTemporaryProjectId] = useState<string | null>(initState.selectedTemporaryProjectId);
   const [selectedTemporaryPath, setSelectedTemporaryPath] = useState<string | null>(initState.selectedTemporaryPath);
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  const selectedProjectPathRef = useRef(selectedProjectPath);
+  const selectedTemporaryProjectIdRef = useRef(selectedTemporaryProjectId);
+  const selectedTemporaryPathRef = useRef(selectedTemporaryPath);
+  selectedProjectIdRef.current = selectedProjectId;
+  selectedProjectPathRef.current = selectedProjectPath;
+  selectedTemporaryProjectIdRef.current = selectedTemporaryProjectId;
+  selectedTemporaryPathRef.current = selectedTemporaryPath;
   const [fileContent, setFileContent] = useState('');
   const [lastSavedContent, setLastSavedContent] = useState('');
   const [fileState, setFileState] = useState<LoadState>('idle');
@@ -479,6 +487,7 @@ function App() {
   }, []);
   const openAttachmentFnRef = useRef<(attachment: ChatMessageAttachment) => void>(() => {});
   openAttachmentFnRef.current = (attachment: ChatMessageAttachment) => {
+    setEditorPanelOpen(true);
     if (isTemporaryProjectId(attachment.projectId)) {
       setActiveWorkspaceScope('temporary');
       setSelectedTemporaryProjectId(attachment.projectId);
@@ -1674,7 +1683,6 @@ function App() {
       const response = await apiClient.createRun({
         projectId: runProjectId,
         sessionId: session.id,
-        codexThreadId: session.codexThreadId ?? undefined,
         prompt: messageText,
         model: sessionModelConfig.chatModel,
         imageGeneration: {
@@ -1839,38 +1847,26 @@ function App() {
   }
 
   async function refreshWorkspaceAfterRun(projectId: string) {
-    await loadEntries(projectId, { keepSelectedPath: selectedProjectPath, selectFirstTextFile: true });
-    if (selectedProjectPath && isSupportedTextFile(selectedProjectPath)) {
-      await loadFile(projectId, selectedProjectPath);
+    const currentSelectedPath = selectedProjectPathRef.current;
+    await loadEntries(projectId, { keepSelectedPath: currentSelectedPath, selectFirstTextFile: true });
+    if (currentSelectedPath && isSupportedTextFile(currentSelectedPath)) {
+      await loadFile(projectId, currentSelectedPath);
     }
   }
 
   function handleRunStreamEvent(sessionId: string, messageId: string, runProjectId: string, event: StreamEvent) {
     autoScrollRef.current = true;
 
-    if (event.type === 'thread.started') {
-      setChatSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id === sessionId
-            ? { ...session, codexThreadId: event.threadId, updatedAt: new Date().toISOString() }
-            : session,
-        ),
-      );
-      void apiClient.updateChatSession(sessionId, { codexThreadId: event.threadId }).catch((error) => {
-        setRunError(errorToMessage(error));
-      });
-    }
-
     if (event.type === 'file.changed' || event.type === 'image.generated') {
       const revealPath = event.type === 'image.generated' ? event.attachment.path : event.path;
       if (isTemporaryProjectId(runProjectId)) {
         void loadTemporaryEntries(runProjectId, {
-          keepSelectedPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+          keepSelectedPath: selectedTemporaryProjectIdRef.current === runProjectId ? selectedTemporaryPathRef.current : null,
           revealPath,
         });
-      } else if (selectedProjectId === runProjectId) {
+      } else if (selectedProjectIdRef.current === runProjectId) {
         void loadEntries(runProjectId, {
-          keepSelectedPath: selectedProjectPath,
+          keepSelectedPath: selectedProjectPathRef.current,
           revealPath,
         });
       }
@@ -1902,10 +1898,10 @@ function App() {
       }
       if (isTemporaryProjectId(runProjectId)) {
         void loadTemporaryEntries(runProjectId, {
-          keepSelectedPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
-          revealPath: selectedTemporaryProjectId === runProjectId ? selectedTemporaryPath : null,
+          keepSelectedPath: selectedTemporaryProjectIdRef.current === runProjectId ? selectedTemporaryPathRef.current : null,
+          revealPath: selectedTemporaryProjectIdRef.current === runProjectId ? selectedTemporaryPathRef.current : null,
         });
-      } else if (selectedProjectId === runProjectId) {
+      } else if (selectedProjectIdRef.current === runProjectId) {
         void refreshWorkspaceAfterRun(runProjectId);
       }
     }
@@ -2993,6 +2989,9 @@ function App() {
                             onClick={() => {
                               setActiveWorkspaceScope('global');
                               setSelectedGlobalPath(entry.path);
+                              if (entry.type === 'file') {
+                                setEditorPanelOpen(true);
+                              }
                               if (entry.type === 'directory') {
                                 toggleGlobalDirectory(entry.path);
                               }
@@ -3106,6 +3105,9 @@ function App() {
                                       onClick={() => {
                                         setActiveWorkspaceScope('project');
                                         setSelectedProjectPath(entry.path);
+                                        if (entry.type === 'file') {
+                                          setEditorPanelOpen(true);
+                                        }
                                         if (entry.type === 'directory') {
                                           toggleDirectory(project.id, entry.path);
                                         }
@@ -3214,6 +3216,9 @@ function App() {
                                           setActiveWorkspaceScope('temporary');
                                           setSelectedTemporaryProjectId(session.projectId);
                                           setSelectedTemporaryPath(entry.path);
+                                          if (entry.type === 'file') {
+                                            setEditorPanelOpen(true);
+                                          }
                                           if (entry.type === 'directory') {
                                             toggleTemporaryDirectory(session.projectId, entry.path);
                                           }

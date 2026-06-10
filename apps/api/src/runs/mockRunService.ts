@@ -7,7 +7,6 @@ import type { WorkspaceStore } from '../storage/workspaceStore';
 export type CreateRunInput = {
   projectId: string;
   sessionId?: string;
-  codexThreadId?: string;
   prompt: string;
   referencedFiles?: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
@@ -33,7 +32,6 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
         id: runId,
         projectId: input.projectId,
         sessionId: input.sessionId,
-        codexThreadId: input.codexThreadId,
         prompt: input.prompt,
         source,
         referencedFiles: input.referencedFiles ?? [],

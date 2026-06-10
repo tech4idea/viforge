@@ -43,7 +43,6 @@ export type AgentRun = {
   id: string;
   projectId: string;
   sessionId?: string;
-  codexThreadId?: string;
   source: RunSource;
   prompt: string;
   model?: string;
@@ -96,7 +95,6 @@ export type ChatSession = {
   id: string;
   projectId: string;
   kind?: ChatSessionKind;
-  codexThreadId?: string | null;
   modelConfig?: ChatSessionModelConfig;
   title: string;
   createdAt: string;

@@ -14,6 +14,7 @@ import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
 import { createAgentRegistry, createObservabilityMastra, createWorkspaceTools, type AgentRegistry, type MastraAgentClient, type MastraStreamChunk, type MastraStreamOutput, type MastraToolset } from './mastraAgents';
+import { getPromptText } from './langfusePromptStore';
 
 type MastraRunOptions = {
   createAgent?: (context: {
@@ -76,7 +77,6 @@ export function createMastraRunService(
         id: runId,
         projectId: input.projectId,
         sessionId: input.sessionId,
-        codexThreadId: input.codexThreadId,
         prompt: input.prompt,
         model: input.model,
         imageGeneration: input.imageGeneration,
@@ -154,7 +154,7 @@ async function executeMastraRun({
     // Run the multi-agent workflow
     if (options.createAgent) {
       // Backward compat: single agent mode
-      const instructions = await buildSystemInstructions(store, productProfile);
+      const instructions = buildSystemInstructions(productProfile);
       const agent = options.createAgent({ instructions, tools });
 
       appendJsonLog('api-runs.jsonl', {
@@ -252,10 +252,11 @@ async function executeMultiAgentWorkflow({
       input,
     }),
   };
-  const systemInstructions = await buildSystemInstructions(store, productProfile);
+  const systemInstructions = buildSystemInstructions(productProfile);
   const behaviorRulesStore = createBehaviorRulesStore(store);
   const behaviorRules = await behaviorRulesStore.getRules();
-  const mainAgent = registry.systemAgent(buildMainAgentInstructions(systemInstructions, behaviorRules), orchestrationTools);
+  const mainInstructions = await buildMainAgentInstructions(systemInstructions, behaviorRules);
+  const mainAgent = await registry.systemAgent(mainInstructions, orchestrationTools);
 
   appendJsonLog('api-runs.jsonl', {
     scope: 'mastra-run',
@@ -667,8 +668,8 @@ async function buildMastraPrompt(store: WorkspaceStore, input: CreateRunInput, p
   ].filter(Boolean).join('\n\n');
 }
 
-async function buildSystemInstructions(store: WorkspaceStore, productProfile: ProductProfile): Promise<string> {
-  const protocol = await readSystemAgentProtocol(store, productProfile);
+function buildSystemInstructions(productProfile: ProductProfile): string {
+  const protocol = readSystemAgentProtocol(productProfile);
   return [
     ...productProfile.mastra.systemIntro,
     '## viwork 多 agent 工作协议',
@@ -676,21 +677,25 @@ async function buildSystemInstructions(store: WorkspaceStore, productProfile: Pr
   ].join('\n\n');
 }
 
-function buildMainAgentInstructions(systemInstructions: string, behaviorRules: BehaviorRule[]): string {
+async function buildMainAgentInstructions(systemInstructions: string, behaviorRules: BehaviorRule[]): Promise<string> {
   const base = [
     systemInstructions,
     '## 主 agent 调度原则',
-    '你是默认工作的主 agent，目标是提供接近 Codex 编程工具的自然协作体验。',
+    '你是默认工作的主 agent，目标是提供自然的创作协作体验。',
     '普通问候、解释问题、读取资料、轻量修改、整理已有内容、保存用户明确指定的小改动，都由你直接完成。',
     '不要先做固定流程分类，不要因为用户提到剧本、方案或故事就自动启动完整流水线。',
     '当用户明确要求生成、绘制、出图、生成角色图/场景图/剧照/分镜图/海报时，使用 generate_project_image 工具生成图片并保存到项目工作区。',
     '调用 generate_project_image 时只填写 prompt、aspectRatio、count；不要尝试填写或猜测模型名，图片模型由系统配置自动注入。',
     '如果用户只是要人物视觉描述、绘图提示词或图片生成建议，不要调用 generate_project_image，直接输出文本。',
+    '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
+    '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
+    '当需要查看或合并结构化项目长期记忆时，调用 read_project_memory；写回完整 Markdown 时调用 update_project_memory。',
+    '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
+    '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
     '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
     '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
-    '每次 specialist 返回的结果中包含 summary 字段，请将关键信息记录到项目记忆中（专家协作摘要部分），方便后续对话引用。',
     '如果用户只是要求”帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
     '在情景剧故事创作中，如果人物动机、角色关系或角色行为边界不清，先委派 character-agent；如果涉及多集历史、固定设定或上一集状态，先委派 continuity-agent。',
     '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿”，再委派给对应 specialist。',
@@ -702,15 +707,12 @@ function buildMainAgentInstructions(systemInstructions: string, behaviorRules: B
     }
   }
 
-  return base.join('\n\n');
+  const localInstructions = base.join('\n\n');
+  return getPromptText('system-agent-instructions', localInstructions);
 }
 
-async function readSystemAgentProtocol(store: WorkspaceStore, productProfile: ProductProfile): Promise<string> {
-  try {
-    return (await store.readGlobalWorkspaceFile('Agent 配置/AGENTS.md')).content;
-  } catch {
-    return productProfile.mastra.fallbackProtocol;
-  }
+function readSystemAgentProtocol(productProfile: ProductProfile): string {
+  return productProfile.mastra.fallbackProtocol;
 }
 
 function stringPayload(chunk: MastraStreamChunk, key: string): string {

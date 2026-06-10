@@ -13,7 +13,6 @@ import type { RunBus } from '../runs/runBus';
 const createRunSchema = z.object({
   projectId: z.string().transform((projectId) => projectId.trim()).pipe(z.string().min(1)),
   sessionId: z.string().transform((sessionId) => sessionId.trim()).pipe(z.string().min(1)).optional(),
-  codexThreadId: z.string().transform((threadId) => threadId.trim()).pipe(z.string().min(1)).optional(),
   prompt: z.string().transform((prompt) => prompt.trim()).pipe(z.string().min(1)),
   model: z.string().transform((model) => model.trim()).pipe(z.string().min(1)).optional(),
   imageGeneration: z.object({
@@ -73,7 +72,6 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
         runId: result.run.id,
         sessionId: result.run.sessionId ?? null,
         projectId: result.run.projectId,
-        codexThreadId: result.run.codexThreadId ?? null,
         response: result,
       });
       if (bus && result.events) {

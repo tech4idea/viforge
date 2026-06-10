@@ -18,7 +18,7 @@ export type ChatSessionStore = {
   archiveSession(sessionId: string): Promise<ChatSession | undefined>;
   restoreSession(sessionId: string): Promise<ChatSession | undefined>;
   deleteSession(sessionId: string): Promise<{ deleted: true; existed: boolean }>;
-  updateSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession | undefined>;
+  updateSession(sessionId: string, input: { title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession | undefined>;
   appendMessage(sessionId: string, message: ChatMessage): Promise<ChatSession | undefined>;
   updateMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession | undefined>;
 };
@@ -123,7 +123,6 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
           id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           projectId,
           kind: options.kind ?? 'assistant',
-          codexThreadId: null,
           modelConfig: {},
           title: options.title ?? '新会话',
           createdAt: now,
@@ -154,7 +153,6 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
         }
         const sessions = state.sessions.filter((session) => session.id !== sessionId);
         await writeState({ sessions });
-        // TODO: consider cascading to Codex bridge to cancel active runs tied to the session's codexThreadId.
         return { deleted: true, existed: true };
       });
     },
@@ -162,7 +160,6 @@ export function createChatSessionStore(statePath: string): ChatSessionStore {
     async updateSession(sessionId, input) {
       return updateSessionById(sessionId, (session) => ({
         ...session,
-        ...(input.codexThreadId !== undefined ? { codexThreadId: input.codexThreadId } : {}),
         ...(input.modelConfig !== undefined ? { modelConfig: normalizeModelConfig({ ...session.modelConfig, ...input.modelConfig }) } : {}),
         ...(input.title !== undefined ? { title: input.title } : {}),
         updatedAt: new Date().toISOString(),

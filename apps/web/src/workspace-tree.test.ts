@@ -24,25 +24,22 @@ describe('workspace tree navigation', () => {
     expect(visibleNodes).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'Agent 配置', depth: 0 }),
       expect.objectContaining({ path: 'Agent 配置/config.toml', depth: 1 }),
-      expect.objectContaining({ path: 'Agent 配置/skills', depth: 1 }),
-      expect.objectContaining({ path: 'Agent 配置/skills/source-analyst-agent', depth: 2 }),
-      expect.objectContaining({ path: 'Agent 配置/skills/source-analyst-agent/SKILL.md', depth: 3 }),
       expect.objectContaining({ path: '知识库/改编知识/小说改编原则.md', depth: 2 }),
     ]));
   });
 
   it('hides descendants of collapsed global directories', () => {
-    const visibleNodes = flattenGlobalWorkspaceTree(GLOBAL_TREE, ['Agent 配置/skills']);
+    const visibleNodes = flattenGlobalWorkspaceTree(GLOBAL_TREE, ['Agent 配置']);
 
-    expect(visibleNodes).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'Agent 配置/skills' })]));
-    expect(visibleNodes).not.toEqual(expect.arrayContaining([expect.objectContaining({ path: 'Agent 配置/skills/source-analyst-agent' })]));
+    expect(visibleNodes).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'Agent 配置' })]));
+    expect(visibleNodes).not.toEqual(expect.arrayContaining([expect.objectContaining({ path: 'Agent 配置/config.toml' })]));
   });
 
   it('defaults global workspace directories to collapsed', () => {
     const collapsedPaths = buildDefaultCollapsedGlobalPaths(GLOBAL_TREE);
     const visibleNodes = flattenGlobalWorkspaceTree(GLOBAL_TREE, collapsedPaths);
 
-    expect(collapsedPaths).toEqual(expect.arrayContaining(['Agent 配置', 'Agent 配置/skills', '知识库', '模板库']));
+    expect(collapsedPaths).toEqual(expect.arrayContaining(['Agent 配置', '知识库', '模板库']));
     expect(visibleNodes.map((node) => node.path)).toEqual(['Agent 配置', '知识库', '模板库']);
   });
 

@@ -58,7 +58,7 @@ describe('api client', () => {
     await client.listTemporaryChatSessions({ includeArchived: true });
     await client.createChatSession('project-1');
     await client.createTemporaryChatSession();
-    await client.updateChatSession('session-1', { codexThreadId: 'thread-1' });
+    await client.updateChatSession('session-1', { title: '更新标题' });
     await client.appendChatMessage('session-1', message);
     await client.updateChatMessage('session-1', 'message-1', { ...message, content: '写第二场' });
     await client.archiveChatSession('session-1');
@@ -83,13 +83,13 @@ describe('api client', () => {
     const client = createApiClient({ fetch: fetchMock, baseUrl: '/base' });
 
     await client.listGlobalWorkspaceEntries();
-    await client.readGlobalWorkspaceFile('Agent 配置/AGENTS.md');
-    await client.writeGlobalWorkspaceFile('Agent 配置/AGENTS.md', '# Global');
+    await client.readGlobalWorkspaceFile('Agent 配置/config.toml');
+    await client.writeGlobalWorkspaceFile('Agent 配置/config.toml', '# viwork agent runtime');
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/base/api/global/files',
-      '/base/api/global/files/Agent%20%E9%85%8D%E7%BD%AE/AGENTS.md',
-      '/base/api/global/files/Agent%20%E9%85%8D%E7%BD%AE/AGENTS.md',
+      '/base/api/global/files/Agent%20%E9%85%8D%E7%BD%AE/config.toml',
+      '/base/api/global/files/Agent%20%E9%85%8D%E7%BD%AE/config.toml',
     ]);
   });
 
@@ -109,7 +109,6 @@ describe('api client', () => {
     await client.createRun({
       projectId: 'project-1',
       sessionId: 'session-1',
-      codexThreadId: 'thread-1',
       prompt: '参考设定补写第一场',
       referencedFiles: [{ path: 'characters.md', label: 'characters.md' }],
       referencedSnippets: [{
@@ -129,7 +128,6 @@ describe('api client', () => {
         body: JSON.stringify({
           projectId: 'project-1',
           sessionId: 'session-1',
-          codexThreadId: 'thread-1',
           prompt: '参考设定补写第一场',
           referencedFiles: [{ path: 'characters.md', label: 'characters.md' }],
           referencedSnippets: [{
