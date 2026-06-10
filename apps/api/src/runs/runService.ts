@@ -10,7 +10,6 @@ export type WechatSendContext = {
 export type CreateRunInput = {
   projectId: string;
   sessionId?: string;
-  codexThreadId?: string;
   prompt: string;
   model?: string;
   imageGeneration?: RunImageGenerationOptions;

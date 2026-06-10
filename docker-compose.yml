@@ -45,6 +45,11 @@ services:
       VIWORK_AIGC_HUB_IMAGE_MODEL: ${VIWORK_AIGC_HUB_IMAGE_MODEL:-}
       VIWORK_AIGC_HUB_CHAT_MODEL: ${VIWORK_AIGC_HUB_CHAT_MODEL:-}
       VIWORK_AIGC_HUB_EMBEDDING_MODEL: ${VIWORK_AIGC_HUB_EMBEDDING_MODEL:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./var/api-data:/data
     depends_on:

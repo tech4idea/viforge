@@ -1,9 +1,13 @@
 import { Agent } from '@mastra/core/agent';
+import { Mastra } from '@mastra/core';
 import { TokenLimiterProcessor, type Processor } from '@mastra/core/processors';
 import { createTool } from '@mastra/core/tools';
 import { PostgresStore } from '@mastra/pg';
 import { QdrantVector } from '@mastra/qdrant';
 import { Memory } from '@mastra/memory';
+import { Observability } from '@mastra/observability';
+import { LangfuseExporter } from '@mastra/langfuse';
+import { SpanType } from '@mastra/core/observability';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 
@@ -11,9 +15,10 @@ import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, QDRANT_URL } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, QDRANT_URL } from '../env';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
+import { getPromptText } from './langfusePromptStore';
 
 export type MastraStreamChunk = {
   type: string;
@@ -34,10 +39,37 @@ export type MastraAgentClient = {
 
 export type MastraToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;
 
+type MemoryToolContext = {
+  memory?: Memory;
+  threadId?: string;
+  resourceId?: string;
+  flushMessages?: () => Promise<void>;
+};
+
+const AGENT_CONTROLLED_SEMANTIC_RECALL = {
+  scope: 'resource' as const,
+  topK: 6,
+  messageRange: { before: 0, after: 0 },
+};
+
+const MEMORY_TOOL_CONFIG = {
+  lastMessages: false as const,
+  semanticRecall: AGENT_CONTROLLED_SEMANTIC_RECALL,
+  workingMemory: { enabled: true, scope: 'resource' as const },
+};
+
+const AGENT_MEMORY_TOOL_PROTOCOL = [
+  '## 长期记忆工具使用原则',
+  '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
+  '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
+  '当需要查看或合并结构化项目长期记忆时，调用 read_project_memory；写回完整 Markdown 时调用 update_project_memory。',
+  '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
+  '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
+].join('\n');
+
 type AgentDef = {
   id: string;
   name: string;
-  skillFile: string;
   workingMemoryTemplate: string;
 };
 
@@ -49,14 +81,13 @@ export type AgentRegistry = {
   adaptationPlanner: MastraAgentClient | null;
   screenwriter: MastraAgentClient | null;
   reviewer: MastraAgentClient | null;
-  systemAgent: (instructions: string, toolsOverride?: MastraToolset) => MastraAgentClient;
+  systemAgent: (instructions: string, toolsOverride?: MastraToolset) => Promise<MastraAgentClient>;
 };
 
 const AGENT_DEFS: AgentDef[] = [
   {
     id: 'brainstorm-agent',
     name: '脑暴助手',
-    skillFile: 'Agent 配置/skills/brainstorm-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 脑暴记忆',
       '- 已探索方向：',
@@ -68,7 +99,6 @@ const AGENT_DEFS: AgentDef[] = [
   {
     id: 'character-agent',
     name: '人物设定',
-    skillFile: 'Agent 配置/skills/character-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 人物设定记忆',
       '- 角色表层目标：',
@@ -80,7 +110,6 @@ const AGENT_DEFS: AgentDef[] = [
   {
     id: 'continuity-agent',
     name: '连续性检查',
-    skillFile: 'Agent 配置/skills/continuity-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 连续性记忆',
       '- 已确认项目事实：',
@@ -93,7 +122,6 @@ const AGENT_DEFS: AgentDef[] = [
   {
     id: 'source-analyst-agent',
     name: '原著分析',
-    skillFile: 'Agent 配置/skills/source-analyst-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 原著分析记忆',
       '- 核心主题与母题：',
@@ -105,7 +133,6 @@ const AGENT_DEFS: AgentDef[] = [
   {
     id: 'adaptation-planner-agent',
     name: '改编方案',
-    skillFile: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 改编方案记忆',
       '- 全季结构规划：',
@@ -117,7 +144,6 @@ const AGENT_DEFS: AgentDef[] = [
   {
     id: 'screenwriter-agent',
     name: '编剧',
-    skillFile: 'Agent 配置/skills/screenwriter-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 编剧记忆',
       '- 对白风格约束：',
@@ -129,7 +155,6 @@ const AGENT_DEFS: AgentDef[] = [
   {
     id: 'reviewer-agent',
     name: '审稿',
-    skillFile: 'Agent 配置/skills/reviewer-agent/SKILL.md',
     workingMemoryTemplate: [
       '# 审稿记忆',
       '- 高频问题模式：',
@@ -223,6 +248,105 @@ export function createWorkspaceTools(
       description: '读取全局工作区中的 UTF-8 文本文件，如知识库、模板或 Agent 配置。',
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path: filePath }) => store.readGlobalWorkspaceFile(filePath),
+    }),
+    read_project_memory: createTool({
+      id: 'read_project_memory',
+      description: [
+        '读取当前项目的结构化长期记忆。',
+        '当需要确认用户偏好、项目长期设定、角色关系、伏笔、质量标准等稳定信息时使用。',
+        '不要把它当作普通聊天历史；普通短期上下文已经由系统保留。',
+      ].join('\n'),
+      inputSchema: z.object({}),
+      execute: async (_input, context) => {
+        const { memory, threadId, resourceId } = requireMemoryToolContext(context);
+        const workingMemory = await memory.getWorkingMemory({ threadId, resourceId, memoryConfig: MEMORY_TOOL_CONFIG });
+        return { memory: workingMemory ?? '' };
+      },
+    }),
+    update_project_memory: createTool({
+      id: 'update_project_memory',
+      description: [
+        '更新当前项目的结构化长期记忆。',
+        '只写入跨轮次仍然有价值的稳定信息，例如用户明确偏好、已确认设定、角色关系变化、伏笔、审稿标准。',
+        '不要写入一次性过程、临时推理、工具调用流水账或未经确认的猜测。',
+        'content 应该是完整的 Markdown 记忆正文；如需增量更新，先调用 read_project_memory 再合并。',
+      ].join('\n'),
+      inputSchema: z.object({
+        content: z.string().min(1).describe('完整的项目结构化长期记忆 Markdown 正文'),
+        reason: z.string().min(1).describe('本次更新的原因，便于审计和追踪'),
+      }),
+      execute: async ({ content, reason }, context) => {
+        const { memory, threadId, resourceId } = requireMemoryToolContext(context);
+        await memory.updateWorkingMemory({ threadId, resourceId, workingMemory: content, memoryConfig: MEMORY_TOOL_CONFIG });
+        return { updated: true, reason, bytes: Buffer.byteLength(content, 'utf8') };
+      },
+    }),
+    recall_project_memory: createTool({
+      id: 'recall_project_memory',
+      description: [
+        '按语义检索当前项目中由 agent 主动写入的精选长期记忆。',
+        '适合在当前任务需要找回早期关键设定、用户偏好、角色关系、已否决方案、审稿结论时使用。',
+        '普通问候、短问题、当前上下文已经足够时不要调用。',
+      ].join('\n'),
+      inputSchema: z.object({
+        query: z.string().min(1).describe('用于语义检索的自然语言查询，写清要找回的信息类型'),
+        topK: z.number().int().min(1).max(12).default(6),
+      }),
+      execute: async ({ query, topK }, context) => {
+        const { memory, resourceId } = requireMemoryToolContext(context);
+        const memoryThreadId = await ensureProjectMemoryThread({ memory, resourceId });
+        await memoryToolContext(context).flushMessages?.();
+        const result = await memory.recall({
+          threadId: memoryThreadId,
+          resourceId,
+          perPage: 0,
+          threadConfig: {
+            ...MEMORY_TOOL_CONFIG,
+            semanticRecall: { ...AGENT_CONTROLLED_SEMANTIC_RECALL, topK },
+          },
+          vectorSearchString: query,
+        });
+        return {
+          query,
+          matches: result.messages.map(formatMemoryMessage),
+          usage: result.usage,
+        };
+      },
+    }),
+    remember_project_memory: createTool({
+      id: 'remember_project_memory',
+      description: [
+        '把一条精选长期记忆写入语义索引，供 recall_project_memory 未来检索。',
+        '只保存对后续创作有复用价值的信息，例如已确认设定、角色规则、用户偏好、已否决方向、审稿结论。',
+        '每条 memory 应简洁、可独立理解，并包含必要上下文；不要保存整段对话或临时分析。',
+      ].join('\n'),
+      inputSchema: z.object({
+        memory: z.string().min(1).describe('要长期保存并建立语义索引的记忆条目'),
+        category: z.enum(['user_preference', 'project_fact', 'character', 'continuity', 'plot_thread', 'rejected_option', 'quality_standard', 'other']).default('other'),
+        reason: z.string().min(1).describe('为什么这条信息值得长期记住'),
+      }),
+      execute: async ({ memory: memoryText, category, reason }, context) => {
+        const { memory, resourceId } = requireMemoryToolContext(context);
+        const memoryThreadId = await ensureProjectMemoryThread({ memory, resourceId });
+        const content = [
+          '# 精选长期记忆',
+          `- category: ${category}`,
+          `- reason: ${reason}`,
+          '',
+          memoryText,
+        ].join('\n');
+        const message = {
+          id: `memory-${randomId()}-${Date.now()}`,
+          type: 'text' as const,
+          role: 'assistant' as const,
+          content: { parts: [{ type: 'text' as const, text: content }], format: 2 as const },
+          createdAt: new Date(),
+          threadId: memoryThreadId,
+          resourceId,
+        };
+        const result = await memory.saveMessages({ messages: [message], memoryConfig: MEMORY_TOOL_CONFIG });
+        return { remembered: true, category, messageId: message.id, usage: result.usage };
+      },
     }),
     generate_project_image: createTool({
       id: 'generate_project_image',
@@ -801,6 +925,63 @@ function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function projectMemoryThreadId(resourceId: string): string {
+  return `${resourceId}::project-memory`;
+}
+
+async function ensureProjectMemoryThread(input: { memory: Memory; resourceId: string }): Promise<string> {
+  const threadId = projectMemoryThreadId(input.resourceId);
+  const existing = await input.memory.getThreadById({ threadId, resourceId: input.resourceId });
+  if (!existing) {
+    await input.memory.createThread({
+      threadId,
+      resourceId: input.resourceId,
+      title: 'Project semantic memory',
+      metadata: { kind: 'project-semantic-memory' },
+      memoryConfig: MEMORY_TOOL_CONFIG,
+    });
+  }
+  return threadId;
+}
+
+function memoryToolContext(context: unknown): MemoryToolContext {
+  return (context ?? {}) as MemoryToolContext;
+}
+
+function requireMemoryToolContext(context: unknown): Required<Pick<MemoryToolContext, 'memory' | 'threadId' | 'resourceId'>> {
+  const resolved = memoryToolContext(context);
+  if (!resolved.memory) throw new Error('当前 agent 未配置 memory，无法使用项目记忆工具。');
+  if (!resolved.threadId) throw new Error('缺少 threadId，无法使用项目记忆工具。');
+  if (!resolved.resourceId) throw new Error('缺少 resourceId，无法使用项目记忆工具。');
+  return { memory: resolved.memory, threadId: resolved.threadId, resourceId: resolved.resourceId };
+}
+
+function textFromMemoryMessage(message: { content?: unknown }): string {
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  if (!content || typeof content !== 'object') return '';
+  const record = content as { content?: unknown; parts?: Array<{ type?: string; text?: string }> };
+  if (typeof record.content === 'string') return record.content;
+  if (Array.isArray(record.parts)) {
+    return record.parts
+      .filter((part) => part.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join('\n');
+  }
+  return '';
+}
+
+function formatMemoryMessage(message: { id: string; role?: string; threadId?: string; createdAt?: Date | string; content?: unknown }) {
+  const text = textFromMemoryMessage(message).trim();
+  return {
+    id: message.id,
+    role: message.role,
+    threadId: message.threadId,
+    createdAt: message.createdAt instanceof Date ? message.createdAt.toISOString() : message.createdAt,
+    text: text.length > 2000 ? `${text.slice(0, 2000)}...` : text,
+  };
+}
+
 async function workspaceFileExists(store: WorkspaceStore, projectId: string, filePath: string): Promise<boolean> {
   try {
     await store.readWorkspaceFile(projectId, filePath);
@@ -895,6 +1076,31 @@ class BinaryDataSanitizer implements Processor<'binary-data-sanitizer'> {
   }
 }
 
+export function createObservabilityMastra(): Mastra | null {
+  if (!LANGFUSE_PUBLIC_KEY || !LANGFUSE_SECRET_KEY || !LANGFUSE_BASE_URL) {
+    return null;
+  }
+
+  return new Mastra({
+    observability: new Observability({
+      configs: {
+        langfuse: {
+          serviceName: 'viwork',
+          exporters: [
+            new LangfuseExporter({
+              publicKey: LANGFUSE_PUBLIC_KEY,
+              secretKey: LANGFUSE_SECRET_KEY,
+              baseUrl: LANGFUSE_BASE_URL,
+              realtime: true,
+            }),
+          ],
+          excludeSpanTypes: [SpanType.MODEL_CHUNK],
+        },
+      },
+    }),
+  });
+}
+
 export async function createAgentRegistry(
   store: WorkspaceStore,
   options: {
@@ -904,11 +1110,13 @@ export async function createAgentRegistry(
     connectionString?: string;
     qdrantUrl?: string;
     traceId?: string;
+    observabilityMastra?: Mastra | null;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
   const connectionString = options.connectionString ?? DATABASE_URL;
   const qdrantUrl = options.qdrantUrl ?? QDRANT_URL;
+  const obsMastra = options.observabilityMastra ?? null;
 
   if (!connectionString) {
     throw new Error('DATABASE_URL is required for Mastra agent memory storage.');
@@ -918,20 +1126,15 @@ export async function createAgentRegistry(
 
   const vector = qdrantUrl ? new QdrantVector({ id: 'viwork-qdrant', url: qdrantUrl }) : undefined;
   const embedder = vector ? buildEmbedder(options) : undefined;
-  const semanticRecallEnabled = Boolean(vector && embedder);
-
-  const loadSkillInstructions = async (skillFile: string): Promise<string> => {
-    try {
-      const raw = (await store.readGlobalWorkspaceFile(skillFile)).content;
-      return stripYamlFrontmatter(raw);
-    } catch {
-      return '';
-    }
-  };
-
   const createAgentWithSkill = async (def: AgentDef): Promise<MastraAgentClient | null> => {
-    const instructions = await loadSkillInstructions(def.skillFile);
+    const fallbackInstructions = await loadSkillInstructions(store, def.id);
+    const [instructions, workingMemoryTemplate] = await Promise.all([
+      getPromptText(`${def.id}-skill`, fallbackInstructions),
+      getPromptText(`${def.id}-working-memory`, def.workingMemoryTemplate),
+    ]);
     if (!instructions) return null;
+
+    const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
 
     const storage = new PostgresStore({ id: `viwork-${def.id}`, connectionString });
     const memory = new Memory({
@@ -940,27 +1143,30 @@ export async function createAgentRegistry(
       ...(embedder ? { embedder } : {}),
       options: {
         lastMessages: 8,
-        semanticRecall: semanticRecallEnabled,
-        workingMemory: { enabled: true, scope: 'resource', template: def.workingMemoryTemplate },
+        semanticRecall: false,
+        workingMemory: { enabled: false, scope: 'resource', template: workingMemoryTemplate },
       },
     });
 
-    return new Agent({
+    const agent = new Agent({
       id: def.id,
       name: def.name,
-      instructions,
+      instructions: agentInstructions,
       model: modelConfig,
       tools,
       memory,
       inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
-    }) as unknown as MastraAgentClient;
+    });
+    if (obsMastra) obsMastra.addAgent(agent);
+    return agent as unknown as MastraAgentClient;
   };
 
   const [brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
     AGENT_DEFS.map(createAgentWithSkill),
   );
 
-  const createSystemAgent = (instructions: string, toolsOverride?: MastraToolset): MastraAgentClient => {
+  const createSystemAgent = async (instructions: string, toolsOverride?: MastraToolset): Promise<MastraAgentClient> => {
+    const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
     const storage = new PostgresStore({ id: 'viwork-system-agent', connectionString });
     const memory = new Memory({
       storage,
@@ -968,36 +1174,22 @@ export async function createAgentRegistry(
       ...(embedder ? { embedder } : {}),
       options: {
         lastMessages: 20,
-        semanticRecall: semanticRecallEnabled,
-        workingMemory: {
-          enabled: true,
-          scope: 'resource',
-          template: [
-            '# viwork 项目记忆',
-            '- 用户偏好：',
-            '- 项目长期设定：',
-            '- 角色与关系：',
-            '- 待回收伏笔：',
-            '- 专家协作摘要：',
-          ].join('\n'),
-        },
-        observationalMemory: {
-          model: modelConfig,
-          observation: { messageTokens: 30_000 },
-          reflection: { observationTokens: 40_000 },
-        },
+        semanticRecall: false,
+        workingMemory: { enabled: false, scope: 'resource' },
       },
     });
 
-    return new Agent({
+    const sysAgent = new Agent({
       id: 'viwork-system-agent',
       name: 'viwork 系统调度',
-      instructions,
+      instructions: agentInstructions,
       model: modelConfig,
       tools: toolsOverride ?? tools,
       memory,
       inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
-    }) as unknown as MastraAgentClient;
+    });
+    if (obsMastra) obsMastra.addAgent(sysAgent);
+    return sysAgent as unknown as MastraAgentClient;
   };
 
   return { brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
@@ -1020,6 +1212,15 @@ function buildEmbedder(options: { baseUrl?: string; apiKey?: string; traceId?: s
   });
 
   return openai.embedding(EMBEDDING_MODEL);
+}
+
+async function loadSkillInstructions(store: WorkspaceStore, agentId: string): Promise<string> {
+  try {
+    const raw = (await store.readGlobalWorkspaceFile(`Agent 配置/skills/${agentId}/SKILL.md`)).content;
+    return stripYamlFrontmatter(raw);
+  } catch {
+    return '';
+  }
 }
 
 function stripYamlFrontmatter(content: string): string {

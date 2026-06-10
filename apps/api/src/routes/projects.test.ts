@@ -43,18 +43,15 @@ describe('projects routes', () => {
     expect(listResponse.status).toBe(200);
     const files = await listResponse.json();
     expect(files).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: 'Agent 配置/AGENTS.md', name: 'AGENTS.md', type: 'file' }),
-      expect.objectContaining({ path: 'Agent 配置/skills/source-analyst-agent/SKILL.md', name: 'SKILL.md', type: 'file' }),
-      expect.objectContaining({ path: 'Agent 配置/skills/adaptation-planner-agent/SKILL.md', name: 'SKILL.md', type: 'file' }),
-      expect.objectContaining({ path: 'Agent 配置/skills/reviewer-agent/SKILL.md', name: 'SKILL.md', type: 'file' }),
+      expect.objectContaining({ path: 'Agent 配置/config.toml', name: 'config.toml', type: 'file' }),
       expect.objectContaining({ path: '模板库/剧本文档模板.md', name: '剧本文档模板.md', type: 'file' }),
     ]));
 
-    const readResponse = await app.request(`/api/global/files/${encodePath('Agent 配置/AGENTS.md')}`);
+    const readResponse = await app.request(`/api/global/files/${encodePath('Agent 配置/config.toml')}`);
     expect(readResponse.status).toBe(200);
     await expect(readResponse.json()).resolves.toEqual({
-      path: 'Agent 配置/AGENTS.md',
-      content: expect.stringContaining('viwork system agent'),
+      path: 'Agent 配置/config.toml',
+      content: expect.stringContaining('max_revision_rounds'),
     });
   });
 

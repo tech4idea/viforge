@@ -82,7 +82,7 @@ export type ApiClient = {
   listTemporaryChatSessions(options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   createChatSession(projectId: string, input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
   createTemporaryChatSession(input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
-  updateChatSession(sessionId: string, input: { codexThreadId?: string | null; title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession>;
+  updateChatSession(sessionId: string, input: { title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession>;
   archiveChatSession(sessionId: string): Promise<ChatSession>;
   restoreChatSession(sessionId: string): Promise<ChatSession>;
   deleteChatSession(sessionId: string): Promise<{ deleted: true }>;
@@ -118,7 +118,6 @@ export type UpdateProjectInput = {
 export type CreateRunInput = {
   projectId: string;
   sessionId?: string;
-  codexThreadId?: string;
   prompt: string;
   model?: string;
   imageGeneration?: {

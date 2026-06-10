@@ -31,19 +31,9 @@ describe('shared contracts', () => {
       expect.objectContaining({
         name: 'Agent 配置',
         type: 'directory',
-        children: expect.arrayContaining([
-          expect.objectContaining({ name: 'AGENTS.md', type: 'file' }),
+        children: [
           expect.objectContaining({ name: 'config.toml', type: 'file' }),
-          expect.objectContaining({
-            name: 'skills',
-            type: 'directory',
-            children: expect.arrayContaining([
-              expect.objectContaining({ name: 'source-analyst-agent', type: 'directory' }),
-              expect.objectContaining({ name: 'adaptation-planner-agent', type: 'directory' }),
-              expect.objectContaining({ name: 'reviewer-agent', type: 'directory' }),
-            ]),
-          }),
-        ]),
+        ],
       }),
       expect.objectContaining({ name: '知识库', type: 'directory' }),
       expect.objectContaining({ name: '模板库', type: 'directory' }),
@@ -71,14 +61,6 @@ describe('shared contracts', () => {
       'character-agent',
       'continuity-agent',
       'story-agent',
-    ]));
-    expect(resolveProductProfile('sitcom').globalDirectories).toEqual(expect.arrayContaining([
-      'Agent 配置/skills/character-agent',
-      'Agent 配置/skills/continuity-agent',
-    ]));
-    expect(resolveProductProfile('sitcom').globalTree[0]?.children?.[2]?.children).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'character-agent', type: 'directory' }),
-      expect.objectContaining({ name: 'continuity-agent', type: 'directory' }),
     ]));
     expect(resolveProductProfile('unknown')).toMatchObject({ id: 'novel-adaptation' });
   });

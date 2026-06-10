@@ -8,17 +8,20 @@
     "start": "tsx src/index.ts",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "seed-prompts": "tsx src/runs/seedLangfusePrompts.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.0",
     "@google/genai": "^1.33.0",
     "@hono/node-server": "^1.13.7",
+    "@langfuse/client": "^5.4.1",
     "@mastra/core": "^1.41.0",
+    "@mastra/langfuse": "^1.3.4",
     "@mastra/memory": "^1.20.0",
+    "@mastra/observability": "^1.14.1",
     "@mastra/pg": "^1.12.0",
     "@mastra/qdrant": "^1.0.0",
-    "@openai/codex-sdk": "^0.130.0",
     "@viwork/shared": "workspace:*",
     "hono": "^4.6.15",
     "qrcode": "^1.5.4",

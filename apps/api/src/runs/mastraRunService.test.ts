@@ -38,7 +38,6 @@ afterEach(async () => {
 describe('mastra run service', () => {
   it('streams text, tool lifecycle events, and workspace file changes through RunBus', async () => {
     const project = await store.createProject({ name: 'Mastra Writers' });
-    await store.writeGlobalWorkspaceFile('Agent 配置/AGENTS.md', '# viwork system agent\n');
     let capturedPrompt = '';
     let capturedThread: unknown = null;
     let writeTool: ReturnType<typeof __mastraRunServiceTest.createWorkspaceTools>['write_workspace_file'] | null = null;
@@ -129,7 +128,7 @@ describe('mastra run service', () => {
           adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
           screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
           reviewer: specialistAgent('reviewer-agent', specialistCalls),
-          systemAgent(_instructions, toolsOverride) {
+          async systemAgent(_instructions, toolsOverride) {
             mainAgentTools = toolsOverride ?? tools;
             return {
               id: 'viwork-system-agent',
@@ -171,7 +170,7 @@ describe('mastra run service', () => {
           adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
           screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
           reviewer: specialistAgent('reviewer-agent', specialistCalls),
-          systemAgent(_instructions, toolsOverride) {
+          async systemAgent(_instructions, toolsOverride) {
             delegateTool = (toolsOverride as typeof tools & { delegate_to_specialist_agent?: typeof delegateTool })?.delegate_to_specialist_agent ?? null;
             return {
               id: 'viwork-system-agent',

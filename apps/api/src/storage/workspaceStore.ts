@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import path from 'node:path';
 
 import {
+  createDefaultGlobalWorkspaceFilesForProfile,
   createDefaultWorkspaceFilesForProfile,
   resolveProductProfile,
   type ProductProfile,
@@ -12,7 +13,6 @@ import {
 } from '@viwork/shared';
 
 import { PRODUCT_PROFILE, WORKSPACES_ROOT } from '../env';
-import { createDefaultGlobalWorkspaceFilesFromProfile } from '../productProfileDefaults';
 
 const METADATA_FILE = 'project.json';
 const GLOBAL_ROOT_NAME = '_global';
@@ -129,14 +129,11 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
 
   async function ensureGlobalWorkspace(): Promise<string> {
     const rootPath = globalRoot();
-    const defaultGlobalFiles = await createDefaultGlobalWorkspaceFilesFromProfile(productProfile);
+    const defaultGlobalFiles = createDefaultGlobalWorkspaceFilesForProfile(productProfile);
     await mkdir(rootPath, { recursive: true });
     await migrateGlobalAgentConfig(rootPath);
     await Promise.all(productProfile.globalDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
-    await updateLegacyDefaultSystemAgent(rootPath);
     await removeLegacyDefaultAgentSkills(rootPath);
-    await updateOutdatedDefaultAgentSkills(rootPath);
-    await ensureAgentSkillFrontmatter(rootPath);
     await ensureViworkAgentConfig(rootPath);
     await Promise.all(
       defaultGlobalFiles.map(async (file) => {
@@ -162,57 +159,6 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
     await migrateGlobalEntry(rootPath, 'installation_id', `${GLOBAL_AGENT_CONFIG_DIR}/installation_id`);
     await migrateGlobalEntry(rootPath, 'skills', `${GLOBAL_AGENT_CONFIG_DIR}/skills`);
     await migrateGlobalEntry(rootPath, 'plugins', `${GLOBAL_AGENT_CONFIG_DIR}/plugins`);
-  }
-
-  async function updateLegacyDefaultSystemAgent(rootPath: string): Promise<void> {
-    const agentsPath = path.join(rootPath, GLOBAL_AGENT_CONFIG_DIR, 'AGENTS.md');
-    try {
-      const currentContent = await readFile(agentsPath, 'utf8');
-      if (!isLegacyDefaultSystemAgent(currentContent) && !isOutdatedDefaultViworkSystemAgent(currentContent)) {
-        return;
-      }
-      const defaultAgent = (await createDefaultGlobalWorkspaceFilesFromProfile(productProfile)).find((file) => file.path === `${GLOBAL_AGENT_CONFIG_DIR}/AGENTS.md`);
-      if (defaultAgent) {
-        await writeFile(agentsPath, defaultAgent.content, 'utf8');
-      }
-    } catch (error) {
-      if (!isNotFoundError(error)) {
-        throw error;
-      }
-    }
-  }
-
-  function isLegacyDefaultSystemAgent(content: string): boolean {
-    return (
-      content.includes('# 情景剧创作工作区') &&
-      content.includes('## 工作目标') &&
-      content.includes('围绕角色、故事、剧本、分镜和视频生成推进情景剧创作。')
-    );
-  }
-
-  function isOutdatedDefaultViworkSystemAgent(content: string): boolean {
-    const looksLikeKnownDefaultViworkAgent = (
-      content.includes('# viwork system agent') &&
-      (
-        content.includes('你必须在关键节点输出独立 JSON block') ||
-        content.includes('正式故事/剧本创作和审稿时，你必须在关键节点输出独立 JSON block')
-      ) &&
-      (
-        content.includes('1. 用户只是在探索想法时') ||
-        content.includes('允许的 agentId：system、brainstorm-agent、story-agent、screenwriter-agent、reviewer-agent。') ||
-        content.includes('允许的 agentId：system、brainstorm-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent。')
-      )
-    );
-    return (
-      looksLikeKnownDefaultViworkAgent &&
-      (
-        !content.includes('小说改编剧本工作台') ||
-        !content.includes('"maxIterations"') ||
-        !content.includes('脑暴不调用 reviewer-agent') ||
-        !content.includes('同一次回复里直接给出对应 agent 的实质内容') ||
-        !content.includes('不要调用 `update_plan`')
-      )
-    );
   }
 
   async function removeLegacyDefaultAgentSkills(rootPath: string): Promise<void> {
@@ -246,108 +192,6 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
       'story-agent': '你是情景剧故事创作 agent。你的目标是根据人类给出的方向或想法，创作一个符合单元剧设定的好故事。',
     };
     return content.includes(defaultFragments[skillName] ?? '__never__');
-  }
-
-  async function updateOutdatedDefaultAgentSkills(rootPath: string): Promise<void> {
-    await Promise.all(
-      ['brainstorm-agent', 'source-analyst-agent', 'adaptation-planner-agent', 'screenwriter-agent', 'reviewer-agent'].map((skillName) =>
-        updateOutdatedDefaultSkill(
-          rootPath,
-          skillName,
-          (content) => isKnownDefaultViworkSkill(skillName, content) && !hasAgentSkillFrontmatter(content),
-        ),
-      ),
-    );
-    await updateOutdatedDefaultSkill(
-      rootPath,
-      'brainstorm-agent',
-      (content) =>
-        isKnownDefaultViworkSkill('brainstorm-agent', content) &&
-        (!content.includes('不调用 reviewer-agent') || !content.includes('小说改编脑暴 agent')),
-    );
-  }
-
-  async function updateOutdatedDefaultSkill(
-    rootPath: string,
-    skillName: string,
-    isOutdated: (content: string) => boolean,
-  ): Promise<void> {
-    const skillPath = path.join(rootPath, GLOBAL_AGENT_CONFIG_DIR, 'skills', skillName, 'SKILL.md');
-    try {
-      const content = await readFile(skillPath, 'utf8');
-      if (!isOutdated(content)) {
-        return;
-      }
-      const defaultSkill = (await createDefaultGlobalWorkspaceFilesFromProfile(productProfile)).find(
-        (file) => file.path === `${GLOBAL_AGENT_CONFIG_DIR}/skills/${skillName}/SKILL.md`,
-      );
-      if (defaultSkill) {
-        await writeFile(skillPath, defaultSkill.content, 'utf8');
-      }
-    } catch (error) {
-      if (!isNotFoundError(error)) {
-        throw error;
-      }
-    }
-  }
-
-  async function ensureAgentSkillFrontmatter(rootPath: string): Promise<void> {
-    const skillsRoot = path.join(rootPath, GLOBAL_AGENT_CONFIG_DIR, 'skills');
-    let entries: Array<{ name: string; isDirectory(): boolean }>;
-    try {
-      entries = await readdir(skillsRoot, { withFileTypes: true });
-    } catch (error) {
-      if (isNotFoundError(error)) {
-        return;
-      }
-      throw error;
-    }
-
-    await Promise.all(
-      entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
-        const skillPath = path.join(skillsRoot, entry.name, 'SKILL.md');
-        try {
-          const content = await readFile(skillPath, 'utf8');
-          if (hasAgentSkillFrontmatter(content)) {
-            return;
-          }
-          await writeFile(skillPath, `${customSkillFrontmatter(entry.name)}${content}`, 'utf8');
-        } catch (error) {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
-        }
-      }),
-    );
-  }
-
-  function isKnownDefaultViworkSkill(skillName: string, content: string): boolean {
-    const fragments: Record<string, string[]> = {
-      'brainstorm-agent': ['# brainstorm-agent'],
-      'source-analyst-agent': ['# source-analyst-agent', '你是小说原著分析 agent', '## 好原著分析标准'],
-      'adaptation-planner-agent': ['# adaptation-planner-agent', '你是小说改编方案 agent', '## 好改编方案标准'],
-      'screenwriter-agent': ['# screenwriter-agent', '## 好剧本标准'],
-      'reviewer-agent': ['# reviewer-agent', '结论：通过 / 打回'],
-    };
-    return (fragments[skillName] ?? []).every((fragment) => content.includes(fragment));
-  }
-
-  function hasAgentSkillFrontmatter(content: string): boolean {
-    return /^---\r?\n[\s\S]*?\r?\n---\r?\n/.test(content);
-  }
-
-  function customSkillFrontmatter(skillName: string): string {
-    return [
-      '---',
-      `name: ${yamlString(skillName)}`,
-      `description: ${yamlString(`Custom viwork agent skill: ${skillName}. Use when explicitly requested or when the skill body matches the task.`)}`,
-      '---',
-      '',
-    ].join('\n');
-  }
-
-  function yamlString(value: string): string {
-    return JSON.stringify(value);
   }
 
   async function ensureViworkAgentConfig(rootPath: string): Promise<void> {

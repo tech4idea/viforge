@@ -44,7 +44,6 @@ const chatMessageSchema = z.object({
 });
 
 const updateSessionSchema = z.object({
-  codexThreadId: z.string().min(1).nullable().optional(),
   title: z.string().trim().min(1).optional(),
   modelConfig: z.object({
     chatModel: z.string().trim().min(1).optional(),
