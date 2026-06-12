@@ -7,8 +7,8 @@ import {
   Moon,
   Palette,
   Settings,
+  Smartphone,
   Sun,
-  Wifi,
 } from './icons';
 
 export type ThemeMode = 'light' | 'dark' | 'soft';
@@ -89,7 +89,7 @@ export function ActivityRail({
         aria-label="微信接入"
         title="微信接入"
       >
-        <Wifi size={20} />
+        <Smartphone size={20} />
       </button>
 
       <button
