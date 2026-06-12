@@ -2651,6 +2651,14 @@ function App() {
       setSelectedTemporaryProjectId(session.projectId);
       writeStoredTemporaryChatSession({ projectId: session.projectId, sessionId: session.id });
     }
+    if (session?.modelConfig) {
+      const mc = session.modelConfig;
+      if (mc.chatModel !== undefined) setChatModel(mc.chatModel);
+      if (mc.imageModel !== undefined) setImageModel(mc.imageModel);
+      if (mc.imageAspectRatio) setImageAspectRatio(mc.imageAspectRatio);
+      if (mc.imageThinkingLevel) setImageThinkingLevel(mc.imageThinkingLevel);
+      if (mc.imageCount) setImageCount(mc.imageCount);
+    }
     setPrompt('');
     setReferencedFiles([]);
     setReferencedSnippets([]);
