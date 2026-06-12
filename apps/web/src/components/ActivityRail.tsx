@@ -1,6 +1,7 @@
 import {
   Diamond,
   FileText,
+  GitBranch,
   LayoutPanelLeft,
   MessageCircle,
   Moon,
@@ -29,6 +30,7 @@ export function ActivityRail({
   onToggleTheme,
   onOpenSettings,
   onOpenWechat,
+  onOpenGitSync,
 }: {
   sidebarOpen: boolean;
   editorOpen: boolean;
@@ -40,6 +42,7 @@ export function ActivityRail({
   onToggleTheme: () => void;
   onOpenSettings: () => void;
   onOpenWechat: () => void;
+  onOpenGitSync: () => void;
 }): JSX.Element {
   return (
     <nav className="activity-rail" aria-label="主导航">
@@ -87,6 +90,16 @@ export function ActivityRail({
         title="微信接入"
       >
         <Wifi size={20} />
+      </button>
+
+      <button
+        type="button"
+        className="rail-button"
+        onClick={onOpenGitSync}
+        aria-label="版本管理"
+        title="版本管理"
+      >
+        <GitBranch size={20} />
       </button>
 
       <button

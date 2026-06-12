@@ -422,3 +422,15 @@ export function Square(props: IconProps) {
     </svg>
   );
 }
+
+export function GitBranch(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <line x1="7" y1="7" x2="7" y2="17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7" cy="19" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="17" cy="7" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M17 9c0 4-3 5-10 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}

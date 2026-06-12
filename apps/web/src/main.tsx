@@ -47,6 +47,7 @@ import {
 import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { GitSyncPanel } from './components/GitSyncPanel';
 import {
   ArrowDown,
   Braces,
@@ -396,7 +397,7 @@ function App() {
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | 'settings' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | 'settings' | 'git' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
@@ -2963,6 +2964,7 @@ function App() {
         onToggleTheme={() => setThemeMode(nextThemeMode(themeMode))}
         onOpenSettings={() => setActiveToolPanel('settings')}
         onOpenWechat={() => setActiveToolPanel('wechat')}
+        onOpenGitSync={() => setActiveToolPanel('git')}
       />
 
       <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
@@ -3560,7 +3562,7 @@ function App() {
                     message={message}
                     onTextSelection={handleChatTextSelection}
                     onOpenAttachment={handleOpenChatAttachment}
-                    onChoiceSelect={(option) => { setPrompt(option); }}
+                    onChoiceSelect={(option) => { setPrompt((prev) => prev.trim() ? `${prev}\n${option}` : option); }}
                   />
                 ))
               ) : (
@@ -3743,10 +3745,10 @@ function App() {
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">
-                  {activeToolPanel === 'skills' ? 'Agent Skills' : activeToolPanel === 'settings' ? 'Agent Settings' : 'Remote WeChat'}
+                  {activeToolPanel === 'skills' ? 'Agent Skills' : activeToolPanel === 'settings' ? 'Agent Settings' : activeToolPanel === 'git' ? 'Version Control' : 'Remote WeChat'}
                 </p>
                 <h2>
-                  {activeToolPanel === 'skills' ? 'Agent 技能' : activeToolPanel === 'settings' ? 'Agent 行为规则' : '远程微信接入'}
+                  {activeToolPanel === 'skills' ? 'Agent 技能' : activeToolPanel === 'settings' ? 'Agent 行为规则' : activeToolPanel === 'git' ? '版本管理与安全备份' : '远程微信接入'}
                 </h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
@@ -3847,6 +3849,14 @@ function App() {
                   </button>
                 </div>
               </div>
+            ) : null}
+
+            {activeToolPanel === 'git' ? (
+              <GitSyncPanel
+                apiClient={apiClient}
+                projects={projects}
+                selectedProjectId={selectedProjectId}
+              />
             ) : null}
           </section>
         </div>

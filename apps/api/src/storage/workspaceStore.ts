@@ -40,6 +40,7 @@ export type WorkspaceStore = {
   listProjects(): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
   updateProject(id: string, input: UpdateProjectInput): Promise<Project>;
+  updateProjectGitConfig(id: string, git: Project['git']): Promise<Project>;
   getProjectRoot(projectId: string): string;
   getGlobalRoot(): string;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
@@ -255,6 +256,10 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
           continue;
         }
 
+        if (directoryEntry.name === '.git') {
+          continue;
+        }
+
         const absolutePath = path.join(directory, directoryEntry.name);
         const relativePath = normalizeWorkspacePath(path.relative(rootPath, absolutePath));
 
@@ -289,6 +294,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
 
     for (const directoryEntry of directoryEntries) {
       if (targetDir === rootPath && directoryEntry.name === METADATA_FILE) continue;
+      if (directoryEntry.name === '.git') continue;
 
       const absolutePath = path.join(targetDir, directoryEntry.name);
       const relativePath = normalizeWorkspacePath(path.relative(rootPath, absolutePath));
@@ -395,6 +401,20 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
         ...project,
         name: typeof input.name === 'string' ? input.name : project.name,
         description: typeof input.description === 'string' ? input.description : project.description,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeFile(metadataPath(projectId), JSON.stringify(next, null, 2), 'utf8');
+      return next;
+    },
+
+    async updateProjectGitConfig(projectId, git) {
+      const project = await readProject(projectId);
+      if (!project || project.temporary) {
+        throw new Error('Project not found');
+      }
+      const next: Project = {
+        ...project,
+        git,
         updatedAt: new Date().toISOString(),
       };
       await writeFile(metadataPath(projectId), JSON.stringify(next, null, 2), 'utf8');
