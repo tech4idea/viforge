@@ -1,3 +1,5 @@
+import { exec } from 'node:child_process';
+
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
 import { TokenLimiterProcessor, type Processor } from '@mastra/core/processors';
@@ -38,13 +40,6 @@ export type MastraAgentClient = {
 };
 
 export type MastraToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;
-
-type MemoryToolContext = {
-  memory?: Memory;
-  threadId?: string;
-  resourceId?: string;
-  flushMessages?: () => Promise<void>;
-};
 
 const AGENT_CONTROLLED_SEMANTIC_RECALL = {
   scope: 'resource' as const,
@@ -165,6 +160,25 @@ const AGENT_DEFS: AgentDef[] = [
   },
 ];
 
+function createProjectMemoryStore(options: { traceId?: string } = {}): Memory {
+  const connectionString = DATABASE_URL;
+  if (!connectionString) throw new Error('DATABASE_URL is required for project memory tools.');
+  const qdrantUrl = QDRANT_URL;
+  const storage = new PostgresStore({ id: 'viwork-project-memory', connectionString });
+  const vector = qdrantUrl ? new QdrantVector({ id: 'viwork-project-memory-qdrant', url: qdrantUrl }) : undefined;
+  const embedder = vector ? buildEmbedder(options) : undefined;
+  return new Memory({
+    storage,
+    ...(vector ? { vector } : {}),
+    ...(embedder ? { embedder } : {}),
+    options: {
+      lastMessages: 0,
+      semanticRecall: false,
+      workingMemory: { enabled: true, scope: 'resource' as const },
+    },
+  });
+}
+
 export function createWorkspaceTools(
   store: WorkspaceStore,
   projectId: string,
@@ -173,12 +187,24 @@ export function createWorkspaceTools(
   emittedAt: () => string,
   options: { imageGeneration?: RunImageGenerationOptions; traceId?: string; wechat?: WechatSendContext } = {},
 ) {
+  const projectMemory = createProjectMemoryStore({ traceId: options.traceId });
+  const resource = projectId;
+
   const tools: Record<string, ReturnType<typeof createTool>> = {
     list_workspace_entries: createTool({
       id: 'list_workspace_entries',
-      description: '列出当前项目工作区中的所有文件和目录',
-      inputSchema: z.object({}),
-      execute: async () => ({ entries: await store.listWorkspaceEntries(projectId) }),
+      description: [
+        '列出当前项目工作区中的文件和目录。',
+        '默认只列出顶层条目；传入 path 可浏览子目录；传入 query 可模糊搜索所有文件。',
+        '文件较多时优先用 path 或 query 缩小范围，避免一次性加载全部列表。',
+      ].join('\n'),
+      inputSchema: z.object({
+        path: z.string().optional().describe('要列出的子目录路径（相对工作区根），不传则列顶层'),
+        query: z.string().optional().describe('按文件名或路径模糊搜索，支持子序列匹配'),
+      }),
+      execute: async ({ path: subPath, query }) => ({
+        entries: await store.listWorkspaceEntries(projectId, { path: subPath, query }),
+      }),
     }),
     read_workspace_file: createTool({
       id: 'read_workspace_file',
@@ -232,16 +258,45 @@ export function createWorkspaceTools(
       }),
       execute: async ({ source, target }) => {
         if (source === target) {
-          throw new Error(`source 与 target 不能相同: ${source}`);
+          return { error: `source 与 target 不能相同: ${source}` };
         }
         if (await workspaceFileExists(store, projectId, target)) {
-          throw new Error(`target 已存在，拒绝覆盖: ${target}`);
+          return { error: `target 已存在，拒绝覆盖: ${target}` };
         }
-        const moved = await store.moveWorkspaceEntry(projectId, source, target);
-        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: source, change: 'deleted' });
-        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: moved.path, change: 'created' });
-        return moved;
+        try {
+          const moved = await store.moveWorkspaceEntry(projectId, source, target);
+          publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: source, change: 'deleted' });
+          publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: moved.path, change: 'created' });
+          return moved;
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) };
+        }
       },
+    }),
+    run_bash: createTool({
+      id: 'run_bash',
+      description: [
+        '在当前项目工作区目录下执行 shell 命令（bash）。',
+        '适合批量处理文件、用脚本提取内容、搜索大文件、格式转换等 read_workspace_file 不便处理的场景。',
+        '命令的工作目录就是项目工作区根目录；默认超时 120 秒，可按需要调整；输出超过 8000 字符会被截断。',
+        '不要执行需要交互输入的命令，不要安装系统级软件包，不要访问工作区之外的路径。',
+      ].join('\n'),
+      inputSchema: z.object({
+        command: z.string().min(1).describe('要执行的 bash 命令'),
+        timeout: z.number().int().min(1).max(300).default(120).describe('超时秒数，默认 120，最大 300'),
+      }),
+      execute: ({ command, timeout }) => new Promise((resolve) => {
+        const cwd = store.getProjectRoot(projectId);
+        exec(command, { cwd, timeout: timeout * 1000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+          const out = stdout.length > 8000 ? stdout.slice(0, 8000) + '\n... [truncated]' : stdout;
+          const err = stderr.length > 2000 ? stderr.slice(0, 2000) + '\n... [truncated]' : stderr;
+          if (error && error.killed) {
+            resolve({ exitCode: -1, stdout: out, stderr: `命令超时（${timeout} 秒限制）` });
+            return;
+          }
+          resolve({ exitCode: error?.code ?? 0, stdout: out, stderr: err });
+        });
+      }),
     }),
     read_global_file: createTool({
       id: 'read_global_file',
@@ -257,9 +312,9 @@ export function createWorkspaceTools(
         '不要把它当作普通聊天历史；普通短期上下文已经由系统保留。',
       ].join('\n'),
       inputSchema: z.object({}),
-      execute: async (_input, context) => {
-        const { memory, threadId, resourceId } = requireMemoryToolContext(context);
-        const workingMemory = await memory.getWorkingMemory({ threadId, resourceId, memoryConfig: MEMORY_TOOL_CONFIG });
+      execute: async () => {
+        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
+        const workingMemory = await projectMemory.getWorkingMemory({ threadId: memoryThreadId, resourceId: resource, memoryConfig: MEMORY_TOOL_CONFIG });
         return { memory: workingMemory ?? '' };
       },
     }),
@@ -275,9 +330,9 @@ export function createWorkspaceTools(
         content: z.string().min(1).describe('完整的项目结构化长期记忆 Markdown 正文'),
         reason: z.string().min(1).describe('本次更新的原因，便于审计和追踪'),
       }),
-      execute: async ({ content, reason }, context) => {
-        const { memory, threadId, resourceId } = requireMemoryToolContext(context);
-        await memory.updateWorkingMemory({ threadId, resourceId, workingMemory: content, memoryConfig: MEMORY_TOOL_CONFIG });
+      execute: async ({ content, reason }) => {
+        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
+        await projectMemory.updateWorkingMemory({ threadId: memoryThreadId, resourceId: resource, workingMemory: content, memoryConfig: MEMORY_TOOL_CONFIG });
         return { updated: true, reason, bytes: Buffer.byteLength(content, 'utf8') };
       },
     }),
@@ -292,13 +347,11 @@ export function createWorkspaceTools(
         query: z.string().min(1).describe('用于语义检索的自然语言查询，写清要找回的信息类型'),
         topK: z.number().int().min(1).max(12).default(6),
       }),
-      execute: async ({ query, topK }, context) => {
-        const { memory, resourceId } = requireMemoryToolContext(context);
-        const memoryThreadId = await ensureProjectMemoryThread({ memory, resourceId });
-        await memoryToolContext(context).flushMessages?.();
-        const result = await memory.recall({
+      execute: async ({ query, topK }) => {
+        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
+        const result = await projectMemory.recall({
           threadId: memoryThreadId,
-          resourceId,
+          resourceId: resource,
           perPage: 0,
           threadConfig: {
             ...MEMORY_TOOL_CONFIG,
@@ -325,9 +378,8 @@ export function createWorkspaceTools(
         category: z.enum(['user_preference', 'project_fact', 'character', 'continuity', 'plot_thread', 'rejected_option', 'quality_standard', 'other']).default('other'),
         reason: z.string().min(1).describe('为什么这条信息值得长期记住'),
       }),
-      execute: async ({ memory: memoryText, category, reason }, context) => {
-        const { memory, resourceId } = requireMemoryToolContext(context);
-        const memoryThreadId = await ensureProjectMemoryThread({ memory, resourceId });
+      execute: async ({ memory: memoryText, category, reason }) => {
+        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
         const content = [
           '# 精选长期记忆',
           `- category: ${category}`,
@@ -342,9 +394,9 @@ export function createWorkspaceTools(
           content: { parts: [{ type: 'text' as const, text: content }], format: 2 as const },
           createdAt: new Date(),
           threadId: memoryThreadId,
-          resourceId,
+          resourceId: resource,
         };
-        const result = await memory.saveMessages({ messages: [message], memoryConfig: MEMORY_TOOL_CONFIG });
+        const result = await projectMemory.saveMessages({ messages: [message], memoryConfig: MEMORY_TOOL_CONFIG });
         return { remembered: true, category, messageId: message.id, usage: result.usage };
       },
     }),
@@ -944,18 +996,6 @@ async function ensureProjectMemoryThread(input: { memory: Memory; resourceId: st
   return threadId;
 }
 
-function memoryToolContext(context: unknown): MemoryToolContext {
-  return (context ?? {}) as MemoryToolContext;
-}
-
-function requireMemoryToolContext(context: unknown): Required<Pick<MemoryToolContext, 'memory' | 'threadId' | 'resourceId'>> {
-  const resolved = memoryToolContext(context);
-  if (!resolved.memory) throw new Error('当前 agent 未配置 memory，无法使用项目记忆工具。');
-  if (!resolved.threadId) throw new Error('缺少 threadId，无法使用项目记忆工具。');
-  if (!resolved.resourceId) throw new Error('缺少 resourceId，无法使用项目记忆工具。');
-  return { memory: resolved.memory, threadId: resolved.threadId, resourceId: resolved.resourceId };
-}
-
 function textFromMemoryMessage(message: { content?: unknown }): string {
   const content = message.content;
   if (typeof content === 'string') return content;
@@ -991,7 +1031,7 @@ async function workspaceFileExists(store: WorkspaceStore, projectId: string, fil
   }
 }
 
-const TOOL_OUTPUT_SIZE_LIMIT = 2000;
+const TOOL_OUTPUT_SIZE_LIMIT = 30000;
 const BASE64_PATTERN = /^[A-Za-z0-9+/=]{200,}$/;
 
 function stripLargeStringsFromJson(value: unknown): unknown {

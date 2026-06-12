@@ -238,7 +238,7 @@ export function createProjectsRoutes(store: WorkspaceStore): Hono {
         return context.json({ error: 'Project not found' }, 404);
       }
 
-      return context.json(await store.listWorkspaceEntries(projectId));
+      return context.json(await store.listWorkspaceEntries(projectId, { query: '' }));
     } catch (error) {
       return handleKnownError(context, error, 'Project not found');
     }

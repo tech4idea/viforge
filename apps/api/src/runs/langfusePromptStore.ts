@@ -36,9 +36,8 @@ export async function getPromptText(
       type: 'text',
       label: options?.label ?? LANGFUSE_PROMPT_LABEL,
       cacheTtlSeconds: options?.cacheTtlSeconds ?? LANGFUSE_PROMPT_CACHE_TTL,
-      fallback,
     });
-    return prompt.prompt;
+    return prompt.prompt ?? fallback;
   } catch {
     return fallback;
   }

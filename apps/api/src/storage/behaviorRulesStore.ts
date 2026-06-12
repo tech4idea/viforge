@@ -34,7 +34,7 @@ const DEFAULT_RULES: BehaviorRule[] = [
     id: 'image-tool-confirmation',
     label: '图片工具确认协议',
     content:
-      '调用 generate_project_image 或 edit_project_image 之前，必须先在回复中向用户展示完整的提示词（prompt）、图片比例、生成数量、预计保存路径；编辑时还需说明基于哪张原图和修改要点。展示后等待用户明确同意（如"可以""确认""好的""开始吧"等）再调用工具。用户未确认或要求调整时，先修改方案再重新展示，不要自行调用。',
+      '调用 generate_project_image 或 edit_project_image 之前，必须先在回复中向用户展示完整的提示词（prompt）、图片比例、生成数量、预计保存路径；编辑时还需说明基于哪张原图和修改要点。展示后等待用户确认再执行，不要在用户未确认时自行调用。',
     enabled: true,
     builtIn: true,
   },

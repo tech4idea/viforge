@@ -46,6 +46,7 @@ import {
 } from './workspace-tree';
 import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import {
   ArrowDown,
   Braces,
@@ -71,6 +72,7 @@ import {
   RefreshCw,
   Save,
   Send,
+  Square,
   Trash2,
   Type,
   Upload,
@@ -256,6 +258,8 @@ function App() {
   const suppressNextShellClickRef = useRef(false);
   const streamBatchRef = useRef<Map<string, { sessionId: string; messageId: string; runProjectId: string; events: StreamEvent[] }>>(new Map());
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeStreamCloseRef = useRef<(() => void) | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const initState = useMemo(() => readInitialStoredState(), []);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initState.selectedProjectId);
@@ -341,6 +345,50 @@ function App() {
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  type ConfirmDialogState = {
+    title: string;
+    message?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    danger?: boolean;
+    promptMode?: boolean;
+    promptPlaceholder?: string;
+    promptInitialValue?: string;
+    requireMatch?: string;
+    onConfirm: (value?: string) => void;
+    onCancel: () => void;
+  };
+  const [confirmDialogState, setConfirmDialogState] = useState<ConfirmDialogState | null>(null);
+
+  function showConfirm(options: { title: string; message: string; danger?: boolean; confirmLabel?: string }): Promise<boolean> {
+    return new Promise((resolve) => {
+      setConfirmDialogState({
+        title: options.title,
+        message: options.message,
+        danger: options.danger,
+        confirmLabel: options.confirmLabel ?? '确认',
+        onConfirm: () => { setConfirmDialogState(null); resolve(true); },
+        onCancel: () => { setConfirmDialogState(null); resolve(false); },
+      });
+    });
+  }
+
+  function showPrompt(options: { title: string; message?: string; placeholder?: string; initialValue?: string; requireMatch?: string; confirmLabel?: string }): Promise<string | null> {
+    return new Promise((resolve) => {
+      setConfirmDialogState({
+        title: options.title,
+        message: options.message,
+        promptMode: true,
+        promptPlaceholder: options.placeholder,
+        promptInitialValue: options.initialValue ?? '',
+        requireMatch: options.requireMatch,
+        confirmLabel: options.confirmLabel ?? '确认',
+        onConfirm: (value) => { setConfirmDialogState(null); resolve(value ?? null); },
+        onCancel: () => { setConfirmDialogState(null); resolve(null); },
+      });
+    });
+  }
 
   const [temporaryWorkspaceCollapsed, setTemporaryWorkspaceCollapsed] = useState(true);
   const [collapsedGlobalPaths, setCollapsedGlobalPaths] = useState<string[]>([]);
@@ -1036,13 +1084,13 @@ function App() {
   }
 
   async function createProjectFromContext() {
-    const name = window.prompt(`新${WORKSPACE_SECTIONS[1].title.replace(/区域$/, '')}名称`, DEFAULT_PROJECT_NAME)?.trim();
-    if (!name) return;
-    const description = window.prompt('一句话描述题材', DEFAULT_PROJECT_DESCRIPTION)?.trim() || '';
+    const name = await showPrompt({ title: `新建${WORKSPACE_SECTIONS[1].title.replace(/区域$/, '')}`, placeholder: DEFAULT_PROJECT_NAME, initialValue: DEFAULT_PROJECT_NAME, confirmLabel: '创建' });
+    if (!name?.trim()) return;
+    const description = await showPrompt({ title: '项目描述', message: '一句话描述题材', placeholder: DEFAULT_PROJECT_DESCRIPTION, initialValue: DEFAULT_PROJECT_DESCRIPTION, confirmLabel: '确认' }) ?? '';
     setIsCreatingProject(true);
     setCreateProjectError(null);
     try {
-      const project = await apiClient.createProject({ name, description });
+      const project = await apiClient.createProject({ name: name.trim(), description: description.trim() });
       setProjects((currentProjects) => [project, ...currentProjects.filter((item) => item.id !== project.id)]);
       setSelectedProjectId(project.id);
     } catch (error) {
@@ -1057,11 +1105,11 @@ function App() {
     if (!projectId) return;
     const current = projects.find((project) => project.id === projectId);
     if (!current) return;
-    const nextName = window.prompt('项目名称', current.name)?.trim();
-    if (!nextName || nextName === current.name) return;
+    const nextName = await showPrompt({ title: '重命名项目', placeholder: current.name, initialValue: current.name, confirmLabel: '保存' });
+    if (!nextName?.trim() || nextName.trim() === current.name) return;
     setQuickActionError(null);
     try {
-      const updated = await apiClient.updateProject(projectId, { name: nextName });
+      const updated = await apiClient.updateProject(projectId, { name: nextName.trim() });
       setProjects((currentProjects) => currentProjects.map((project) => (project.id === updated.id ? updated : project)));
     } catch (error) {
       setQuickActionError(errorToMessage(error));
@@ -1073,13 +1121,16 @@ function App() {
     if (!projectId) return;
     const current = projects.find((project) => project.id === projectId);
     if (!current) return;
-    const firstConfirm = window.confirm(
-      `确定要删除项目「${current.name}」吗？\n\n项目目录及其中的所有文件、聊天记录都将被永久删除，且无法恢复。`,
-    );
+    const firstConfirm = await showConfirm({
+      title: `删除项目「${current.name}」`,
+      message: '项目目录及其中的所有文件、聊天记录都将被永久删除，且无法恢复。',
+      danger: true,
+      confirmLabel: '继续删除',
+    });
     if (!firstConfirm) return;
-    const typed = window.prompt(`二次确认：请输入项目名「${current.name}」以完成删除`);
+    const typed = await showPrompt({ title: '二次确认', message: `请输入项目名「${current.name}」以完成删除`, requireMatch: current.name, confirmLabel: '确认删除' });
     if (typed === null) return;
-    if (typed.trim() !== current.name) {
+    if (typed !== current.name) {
       setQuickActionError('项目名不匹配，已取消删除。');
       return;
     }
@@ -1643,7 +1694,13 @@ function App() {
 
   async function submitPrompt() {
     const messageText = prompt.trim();
+    if (!messageText) {
+      return;
+    }
+    await submitPromptWith(messageText);
+  }
 
+  async function submitPromptWith(messageText: string) {
     if (!messageText) {
       return;
     }
@@ -1726,9 +1783,12 @@ function App() {
           status: 'running',
         });
         appendMessageToSession(session.id, assistantMessage);
-        apiClient.streamRunEvents(response.run.id, {
+        activeRunIdRef.current = response.run.id;
+        activeStreamCloseRef.current = apiClient.streamRunEvents(response.run.id, {
           onEvent: (event) => handleRunStreamEvent(session.id, assistantMessage.id, runProjectId, event),
           onError: (error) => {
+            activeStreamCloseRef.current = null;
+            activeRunIdRef.current = null;
             const message = userFacingRunError(error);
             setRunState('error');
             setRunError(message);
@@ -1751,6 +1811,22 @@ function App() {
         }),
       );
     }
+  }
+
+  async function stopRun() {
+    const runId = activeRunIdRef.current;
+    const closeStream = activeStreamCloseRef.current;
+    activeRunIdRef.current = null;
+    activeStreamCloseRef.current = null;
+    closeStream?.();
+    if (runId) {
+      try {
+        await apiClient.cancelRun(runId);
+      } catch {
+        // cancel request may fail if run already ended; safe to ignore
+      }
+    }
+    setRunState('idle');
   }
 
   async function submitAssistantImagePrompt(session: ChatSession, messageText: string) {
@@ -1885,14 +1961,16 @@ function App() {
     }
 
     if (event.type === 'run.end') {
+      activeStreamCloseRef.current = null;
+      activeRunIdRef.current = null;
       if (streamFlushTimerRef.current) {
         clearTimeout(streamFlushTimerRef.current);
         streamFlushTimerRef.current = null;
       }
       flushStreamBatch();
-      const streamEndStatus = event.status === 'success' ? 'success' as const : 'error' as const;
+      const streamEndStatus = event.status === 'cancelled' ? 'idle' as const : event.status === 'success' ? 'success' as const : 'error' as const;
       setRunState(streamEndStatus);
-      notifyRunComplete(streamEndStatus);
+      if (streamEndStatus !== 'idle') notifyRunComplete(streamEndStatus);
       if (event.errorMessage) {
         setRunError(userFacingRunError(event.errorMessage));
       }
@@ -1970,7 +2048,7 @@ function App() {
                 content = `运行失败：${userFacingRunError(event.errorMessage)}`;
               }
               if (event.type === 'run.end') {
-                finalStatus = event.status === 'success' ? 'success' : 'error';
+                finalStatus = event.status === 'error' ? 'error' : 'success';
               }
             }
 
@@ -2238,16 +2316,17 @@ function App() {
   }
 
   function contentAreaColumns(): string {
+    const sidebarCol = sidebarOpen ? `${panelWidths.workspace}px ` : '';
     if (editorPanelOpen && chatPanelOpen) {
-      return `1fr 6px ${panelWidths.chat}px`;
+      return `${sidebarCol}1fr 6px ${panelWidths.chat}px`;
     }
     if (editorPanelOpen) {
-      return '1fr';
+      return `${sidebarCol}1fr`;
     }
     if (chatPanelOpen) {
-      return '1fr';
+      return `${sidebarCol}1fr`;
     }
-    return '1fr';
+    return `${sidebarCol}1fr`;
   }
 
   function workspaceGridColumns() {
@@ -2417,7 +2496,7 @@ function App() {
       } else {
         setSelectedProjectPath(context.entryPath);
       }
-      const targetPath = window.prompt('移动到', context.entryPath);
+      const targetPath = await showPrompt({ title: '移动文件', placeholder: context.entryPath, initialValue: context.entryPath, confirmLabel: '移动' });
       if (targetPath && targetPath !== context.entryPath) {
         await moveSelectedEntry(targetPath);
       }
@@ -2433,7 +2512,8 @@ function App() {
       } else {
         setSelectedProjectPath(context.entryPath);
       }
-      if (window.confirm(`删除 ${context.entryPath}？`)) {
+      const confirmed = await showConfirm({ title: '删除文件', message: `确定要删除 ${context.entryPath} 吗？`, danger: true, confirmLabel: '删除' });
+      if (confirmed) {
         await deleteSelectedEntry();
       }
     }
@@ -2621,11 +2701,11 @@ function App() {
     closeChatSessionContextMenu();
     const current = chatSessions.find((session) => session.id === context.sessionId);
     const currentTitle = current?.title ?? context.title ?? '';
-    const nextTitle = window.prompt('会话标题', currentTitle)?.trim();
-    if (!nextTitle || nextTitle === currentTitle) return;
+    const nextTitle = await showPrompt({ title: '重命名会话', placeholder: currentTitle, initialValue: currentTitle, confirmLabel: '保存' });
+    if (!nextTitle?.trim() || nextTitle.trim() === currentTitle) return;
     setRunError(null);
     try {
-      const updated = await apiClient.updateChatSession(context.sessionId, { title: nextTitle });
+      const updated = await apiClient.updateChatSession(context.sessionId, { title: nextTitle.trim() });
       setChatSessions((currentSessions) =>
         currentSessions.map((session) => (session.id === updated.id ? updated : session)),
       );
@@ -2638,13 +2718,16 @@ function App() {
     closeChatSessionContextMenu();
     const current = chatSessions.find((session) => session.id === context.sessionId);
     if (!current) return;
-    const firstConfirm = window.confirm(
-      `确定要删除会话「${current.title}」吗？\n\n该会话的所有聊天记录都将被永久删除，且无法恢复。`,
-    );
+    const firstConfirm = await showConfirm({
+      title: `删除会话「${current.title}」`,
+      message: '该会话的所有聊天记录都将被永久删除，且无法恢复。',
+      danger: true,
+      confirmLabel: '继续删除',
+    });
     if (!firstConfirm) return;
-    const typed = window.prompt(`二次确认：请输入会话标题「${current.title}」以完成删除`);
+    const typed = await showPrompt({ title: '二次确认', message: `请输入会话标题「${current.title}」以完成删除`, requireMatch: current.title, confirmLabel: '确认删除' });
     if (typed === null) return;
-    if (typed.trim() !== current.title) {
+    if (typed !== current.title) {
       setRunError('会话标题不匹配，已取消删除。');
       return;
     }
@@ -2877,30 +2960,25 @@ function App() {
       <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
 
       {sidebarOpen ? (
-        <>
-          <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
-          <aside className="sidebar-drawer">
-            <div className="sidebar-header">
-              <h2>工作区</h2>
-              <div className="sidebar-header-actions">
-                <button type="button" className="sidebar-icon-button" onClick={() => void loadProjects()} aria-label="刷新项目" title="刷新项目">
-                  <RefreshCw size={14} />
-                </button>
-                <button type="button" className="sidebar-icon-button" onClick={() => void loadGlobalEntries()} aria-label="刷新全局" title="刷新全局">
-                  <Globe size={14} />
-                </button>
-                <button type="button" className="sidebar-icon-button" onClick={() => startUpload()} aria-label="上传素材" title="上传素材">
-                  <Upload size={14} />
-                </button>
-                <button type="button" className="sidebar-icon-button" onClick={() => startUpload(null, 'folder')} aria-label="上传文件夹" title="上传文件夹">
-                  <FolderUp size={14} />
-                </button>
-                <button type="button" className="sidebar-icon-button" onClick={() => setSidebarOpen(false)} aria-label="关闭" title="关闭">
-                  <X size={14} />
-                </button>
-              </div>
+        <aside className="sidebar-panel">
+          <div className="sidebar-header">
+            <h2>工作区</h2>
+            <div className="sidebar-header-actions">
+              <button type="button" className="sidebar-icon-button" onClick={() => void loadProjects()} aria-label="刷新项目" title="刷新项目">
+                <RefreshCw size={14} />
+              </button>
+              <button type="button" className="sidebar-icon-button" onClick={() => void loadGlobalEntries()} aria-label="刷新全局" title="刷新全局">
+                <Globe size={14} />
+              </button>
+              <button type="button" className="sidebar-icon-button" onClick={() => startUpload()} aria-label="上传素材" title="上传素材">
+                <Upload size={14} />
+              </button>
+              <button type="button" className="sidebar-icon-button" onClick={() => startUpload(null, 'folder')} aria-label="上传文件夹" title="上传文件夹">
+                <FolderUp size={14} />
+              </button>
             </div>
-            <div className="sidebar-scroll">
+          </div>
+          <div className="sidebar-scroll">
 
       {projectLoadState === 'error' ? (
         <section className="notice error-notice">
@@ -3258,8 +3336,7 @@ function App() {
             </>
           ) : null}
             </div>
-          </aside>
-        </>
+        </aside>
       ) : null}
 
       {editorPanelOpen ? (
@@ -3475,6 +3552,7 @@ function App() {
                     message={message}
                     onTextSelection={handleChatTextSelection}
                     onOpenAttachment={handleOpenChatAttachment}
+                    onChoiceSelect={(option) => { setPrompt(option); }}
                   />
                 ))
               ) : (
@@ -3623,16 +3701,28 @@ function App() {
                   onClick={(event) => updateReferenceMenu(prompt, event.currentTarget.selectionStart ?? prompt.length)}
                   onKeyDown={handleComposerKeyDown}
                 />
-                <button
-                  type="button"
-                  className="composer__send"
-                  disabled={activeChatSessionArchived || !prompt.trim() || runState === 'running'}
-                  onClick={() => void submitPrompt()}
-                  aria-label="发送"
-                  title="发送"
-                >
-                  <Send size={16} />
-                </button>
+                {runState === 'running' ? (
+                  <button
+                    type="button"
+                    className="composer__stop"
+                    onClick={() => { void stopRun(); }}
+                    aria-label="停止"
+                    title="停止运行"
+                  >
+                    <Square size={14} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="composer__send"
+                    disabled={activeChatSessionArchived || !prompt.trim()}
+                    onClick={() => void submitPrompt()}
+                    aria-label="发送"
+                    title="发送"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
               </div>
             </section>
         </aside>
@@ -3835,6 +3925,21 @@ function App() {
           ))}
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmDialogState !== null}
+        title={confirmDialogState?.title ?? ''}
+        message={confirmDialogState?.message}
+        confirmLabel={confirmDialogState?.confirmLabel}
+        cancelLabel={confirmDialogState?.cancelLabel}
+        danger={confirmDialogState?.danger}
+        promptMode={confirmDialogState?.promptMode}
+        promptPlaceholder={confirmDialogState?.promptPlaceholder}
+        promptInitialValue={confirmDialogState?.promptInitialValue}
+        requireMatch={confirmDialogState?.requireMatch}
+        onConfirm={confirmDialogState?.onConfirm ?? (() => {})}
+        onCancel={confirmDialogState?.onCancel ?? (() => {})}
+      />
     </div>
   );
 }
@@ -3916,10 +4021,12 @@ const ChatMessageItem = memo(function ChatMessageItem({
   message,
   onTextSelection,
   onOpenAttachment,
+  onChoiceSelect,
 }: {
   message: ChatMessage;
   onTextSelection: ChatMessageTextSelectionHandler;
   onOpenAttachment: (attachment: ChatMessageAttachment) => void;
+  onChoiceSelect?: (option: string) => void;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
   const canCopy = message.content.trim().length > 0;
@@ -3974,7 +4081,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             title={copied ? '已复制' : '复制'}
           />
           {message.role === 'assistant' ? (
-            <AssistantStreamBody message={message} />
+            <AssistantStreamBody message={message} onChoiceSelect={onChoiceSelect} />
           ) : (
             <p>{message.content}</p>
           )}

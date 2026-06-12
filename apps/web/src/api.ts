@@ -91,6 +91,7 @@ export type ApiClient = {
   listAigcHubModels(): Promise<AigcHubModelListResponse>;
   createImageGeneration(input: ImageGenerationRequest): Promise<ImageGenerationResponse>;
   createRun(input: CreateRunInput): Promise<CreateRunResponse>;
+  cancelRun(runId: string): Promise<void>;
   streamRunEvents(runId: string, handlers: StreamRunHandlers): () => void;
   listSkills(): Promise<TheaterSkill[]>;
   createSkill(input: CreateSkillInput): Promise<TheaterSkill>;
@@ -324,6 +325,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    cancelRun: (runId) =>
+      request(fetcher, baseUrl, `/api/runs/${encodePathSegment(runId)}/cancel`, { method: 'POST' }).then(() => {}),
     streamRunEvents: (runId, handlers) => {
       const source = new EventSource(`${baseUrl}/api/runs/${encodePathSegment(runId)}/events`);
       let closedAfterTerminalEvent = false;

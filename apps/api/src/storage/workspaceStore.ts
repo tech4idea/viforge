@@ -23,6 +23,11 @@ export type CreateProjectInput = {
   description?: string;
 };
 
+export type ListWorkspaceOptions = {
+  path?: string;
+  query?: string;
+};
+
 export type UpdateProjectInput = {
   name?: string;
   description?: string;
@@ -46,7 +51,7 @@ export type WorkspaceStore = {
   createGlobalWorkspaceAsset(filePath: string, bytes: Buffer, mimeType?: string): Promise<WorkspaceEntry>;
   moveGlobalWorkspaceEntry(sourcePath: string, targetPath: string): Promise<WorkspaceEntry>;
   deleteGlobalWorkspaceEntry(entryPath: string): Promise<{ deleted: true }>;
-  listWorkspaceEntries(projectId: string): Promise<WorkspaceEntry[]>;
+  listWorkspaceEntries(projectId: string, options?: ListWorkspaceOptions): Promise<WorkspaceEntry[]>;
   readWorkspaceFile(projectId: string, filePath: string): Promise<WorkspaceFile>;
   readWorkspaceFileBytes(projectId: string, filePath: string): Promise<{ path: string; bytes: Buffer; mimeType: string }>;
   writeWorkspaceFile(projectId: string, filePath: string, content: string): Promise<WorkspaceFile>;
@@ -277,6 +282,49 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
     return entries.sort((left, right) => left.path.localeCompare(right.path));
   }
 
+  async function listEntriesShallow(rootPath: string, subPath?: string): Promise<WorkspaceEntry[]> {
+    const targetDir = subPath ? assertSafePath(rootPath, subPath).absolutePath : rootPath;
+    const entries: WorkspaceEntry[] = [];
+    const directoryEntries = await readdir(targetDir, { withFileTypes: true });
+
+    for (const directoryEntry of directoryEntries) {
+      if (targetDir === rootPath && directoryEntry.name === METADATA_FILE) continue;
+
+      const absolutePath = path.join(targetDir, directoryEntry.name);
+      const relativePath = normalizeWorkspacePath(path.relative(rootPath, absolutePath));
+
+      if (directoryEntry.isDirectory()) {
+        entries.push({ path: relativePath, name: directoryEntry.name, type: 'directory' });
+      } else if (directoryEntry.isFile()) {
+        const fileStat = await stat(absolutePath);
+        entries.push({
+          path: relativePath,
+          name: directoryEntry.name,
+          type: 'file',
+          size: fileStat.size,
+          updatedAt: fileStat.mtime.toISOString(),
+          mimeType: inferMimeType(relativePath),
+        });
+      }
+    }
+    return entries.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  function fuzzyMatch(name: string, query: string): boolean {
+    const lower = name.toLowerCase();
+    const q = query.toLowerCase();
+    let qi = 0;
+    for (let i = 0; i < lower.length && qi < q.length; i++) {
+      if (lower[i] === q[qi]) qi++;
+    }
+    return qi === q.length;
+  }
+
+  async function listEntriesSearch(rootPath: string, query: string): Promise<WorkspaceEntry[]> {
+    const all = await listEntriesForRoot(rootPath);
+    return all.filter((entry) => fuzzyMatch(entry.name, query) || fuzzyMatch(entry.path, query));
+  }
+
   async function writeTextFile(absolutePath: string, content: string): Promise<void> {
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, content, 'utf8');
@@ -462,8 +510,12 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
       return { deleted: true };
     },
 
-    async listWorkspaceEntries(projectId) {
-      return listEntriesForRoot(projectRoot(projectId));
+    async listWorkspaceEntries(projectId, options) {
+      const root = projectRoot(projectId);
+      if (options && options.query != null) {
+        return listEntriesSearch(root, options.query);
+      }
+      return listEntriesShallow(root, options?.path);
     },
 
     async readWorkspaceFile(projectId, filePath) {
@@ -513,6 +565,11 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
     async moveWorkspaceEntry(projectId, sourcePath, targetPath) {
       const source = assertSafeWorkspacePath(projectId, sourcePath);
       const target = assertSafeWorkspacePath(projectId, targetPath);
+      try {
+        await stat(source.absolutePath);
+      } catch {
+        throw new Error(`源路径不存在: ${source.relativePath}`);
+      }
       await mkdir(path.dirname(target.absolutePath), { recursive: true });
       await rename(source.absolutePath, target.absolutePath);
       const movedStat = await stat(target.absolutePath);
