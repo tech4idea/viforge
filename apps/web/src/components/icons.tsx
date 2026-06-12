@@ -355,6 +355,16 @@ export function Wifi(props: IconProps) {
   );
 }
 
+export function Smartphone(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+      <line x1="10" y1="5" x2="14" y2="5" />
+      <circle cx="12" cy="18.5" r="0.8" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function Archive(props: IconProps) {
   return (
     <svg {...base(props)}>
