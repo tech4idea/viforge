@@ -5,6 +5,7 @@ export type Project = {
   createdAt: string;
   updatedAt: string;
   temporary?: boolean;
+  git?: ProjectGitConfig;
 };
 
 export type WorkspaceEntry = {
@@ -269,4 +270,41 @@ export type WechatSetupSession = {
   status: 'qr_ready' | 'connected' | 'cancelled';
   qrUrl: string;
   expiresAt: string;
+};
+
+export type ProjectGitConfig = {
+  remoteUrl: string;
+  accessToken?: string;
+  lastSyncAt?: string;
+  lastCommitHash?: string;
+  branch?: string;
+};
+
+export type GlobalGitConfig = {
+  accessToken: string;
+  defaultBranch?: string;
+};
+
+export type GitSyncResult = {
+  success: boolean;
+  commitHash?: string;
+  filesChanged: number;
+  message: string;
+};
+
+export type GitLogEntry = {
+  hash: string;
+  shortHash: string;
+  message: string;
+  author: string;
+  date: string;
+};
+
+export type ProjectGitStatus = {
+  initialized: boolean;
+  hasRemote: boolean;
+  changedFiles: number;
+  lastSyncAt?: string;
+  lastCommitHash?: string;
+  branch?: string;
 };

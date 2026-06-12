@@ -10,11 +10,16 @@ import type {
   GeminiImageAspectRatio,
   GeminiImageModel,
   GeminiImageThinkingLevel,
+  GlobalGitConfig,
+  GitLogEntry,
+  GitSyncResult,
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
   ProductProfile,
   Project,
+  ProjectGitConfig,
+  ProjectGitStatus,
   ReferencedChatSnippet,
   ReferencedFile,
   RunEvent,
@@ -39,11 +44,16 @@ export type {
   GeminiImageAspectRatio,
   GeminiImageModel,
   GeminiImageThinkingLevel,
+  GlobalGitConfig,
+  GitLogEntry,
+  GitSyncResult,
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
   ProductProfile,
   Project,
+  ProjectGitConfig,
+  ProjectGitStatus,
   ReferencedChatSnippet,
   ReferencedFile,
   RunEvent,
@@ -103,6 +113,13 @@ export type ApiClient = {
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
   disconnectWechat(): Promise<{ disconnected: boolean }>;
   sendWechatNotify(status: 'success' | 'error'): Promise<{ sent: boolean; reason?: string }>;
+  getGlobalGitConfig(): Promise<GlobalGitConfig | null>;
+  setGlobalGitConfig(config: GlobalGitConfig): Promise<GlobalGitConfig>;
+  getProjectGitStatus(projectId: string): Promise<ProjectGitStatus>;
+  setProjectGitConfig(projectId: string, config: { remoteUrl: string; accessToken?: string; branch?: string }): Promise<ProjectGitConfig>;
+  syncProjectToRemote(projectId: string, message?: string): Promise<GitSyncResult>;
+  pullProjectFromRemote(projectId: string): Promise<GitSyncResult>;
+  getProjectGitLog(projectId: string, maxCount?: number): Promise<GitLogEntry[]>;
 };
 
 
@@ -390,6 +407,37 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       }),
+    getGlobalGitConfig: () =>
+      request<GlobalGitConfig | null>(fetcher, baseUrl, '/api/git/config'),
+    setGlobalGitConfig: (config) =>
+      request<GlobalGitConfig>(fetcher, baseUrl, '/api/git/config', {
+        method: 'PUT',
+        body: JSON.stringify(config),
+      }),
+    getProjectGitStatus: (projectId) =>
+      request<ProjectGitStatus>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/git`),
+    setProjectGitConfig: (projectId, config) =>
+      request<ProjectGitConfig>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/git`, {
+        method: 'PUT',
+        body: JSON.stringify(config),
+      }),
+    syncProjectToRemote: (projectId, message) =>
+      request<GitSyncResult>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/git/sync`, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      }),
+    pullProjectFromRemote: (projectId) =>
+      request<GitSyncResult>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/git/pull`, {
+        method: 'POST',
+      }),
+    getProjectGitLog: (projectId, maxCount) =>
+      request<GitLogEntry[]>(
+        fetcher,
+        baseUrl,
+        withQuery(`/api/projects/${encodePathSegment(projectId)}/git/log`, {
+          maxCount: maxCount !== undefined ? String(maxCount) : undefined,
+        }),
+      ),
 
   };
 }

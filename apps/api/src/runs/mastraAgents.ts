@@ -18,6 +18,8 @@ import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRati
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, QDRANT_URL } from '../env';
+import type { GitService } from '../storage/gitService';
+import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
 import { getPromptText } from './langfusePromptStore';
@@ -185,7 +187,7 @@ export function createWorkspaceTools(
   publish: (event: StreamEvent) => void,
   runId: string,
   emittedAt: () => string,
-  options: { imageGeneration?: RunImageGenerationOptions; traceId?: string; wechat?: WechatSendContext } = {},
+  options: { imageGeneration?: RunImageGenerationOptions; traceId?: string; wechat?: WechatSendContext; gitService?: GitService; gitConfigStore?: GitConfigStore } = {},
 ) {
   const projectMemory = createProjectMemoryStore({ traceId: options.traceId });
   const resource = projectId;
@@ -297,6 +299,53 @@ export function createWorkspaceTools(
           resolve({ exitCode: error?.code ?? 0, stdout: out, stderr: err });
         });
       }),
+    }),
+    sync_to_remote: createTool({
+      id: 'sync_to_remote',
+      description: [
+        '将当前项目工作区的所有改动提交并推送到远端 Git 仓库。',
+        '在完成一轮有实质产出的工作后（如写完剧本、完成分析），主动调用此工具备份成果。',
+        '不需要手动执行 git add/commit，工具会自动处理。',
+        'message 是提交说明，应简要概括本次改动内容。',
+      ].join('\n'),
+      inputSchema: z.object({
+        message: z.string().min(1).describe('提交说明，概括本次改动内容'),
+      }),
+      execute: async ({ message }) => {
+        const git = options.gitService;
+        const gitCfg = options.gitConfigStore;
+        if (!git || !gitCfg) {
+          return { error: '版本管理服务未启用' };
+        }
+
+        const project = await store.getProject(projectId);
+        if (!project?.git?.remoteUrl) {
+          return { error: '当前项目未配置远端仓库，无法同步' };
+        }
+
+        const globalConfig = await gitCfg.getGlobalGitConfig();
+        const token = project.git.accessToken ?? globalConfig?.accessToken;
+        if (!token) {
+          return { error: '未配置访问令牌，无法推送' };
+        }
+
+        const branch = project.git.branch ?? 'main';
+        const projectRoot = store.getProjectRoot(projectId);
+
+        try {
+          const result = await git.commitAndPush(projectRoot, message, project.git.remoteUrl, token, branch);
+          if (result.success && result.commitHash) {
+            await store.updateProjectGitConfig(projectId, {
+              ...project.git,
+              lastSyncAt: new Date().toISOString(),
+              lastCommitHash: result.commitHash,
+            });
+          }
+          return result;
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : '同步失败' };
+        }
+      },
     }),
     read_global_file: createTool({
       id: 'read_global_file',

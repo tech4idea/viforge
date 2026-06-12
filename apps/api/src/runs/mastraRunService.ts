@@ -10,6 +10,8 @@ import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { BehaviorRule } from '../storage/behaviorRulesStore';
 import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
+import type { GitService } from '../storage/gitService';
+import type { GitConfigStore } from '../storage/gitConfigStore';
 
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
@@ -32,6 +34,8 @@ type MastraRunOptions = {
   connectionString?: string;
   qdrantUrl?: string;
   productProfile?: ProductProfile;
+  gitService?: GitService;
+  gitConfigStore?: GitConfigStore;
 };
 
 type ToolState = {
@@ -135,6 +139,8 @@ async function executeMastraRun({
       imageGeneration: input.imageGeneration,
       traceId: input.traceId,
       wechat: input.wechat,
+      gitService: options.gitService,
+      gitConfigStore: options.gitConfigStore,
     });
     // Create agent registry from skills
     const registryOptions = {
@@ -150,7 +156,7 @@ async function executeMastraRun({
         : await createAgentRegistry(store, registryOptions, tools);
 
     // Build the combined prompt with references
-    const prompt = await buildMastraPrompt(store, input, productProfile);
+    const prompt = buildMastraPrompt(input, productProfile);
 
     // Run the multi-agent workflow
     let assistantText = '';
@@ -251,6 +257,8 @@ async function executeMultiAgentWorkflow({
     imageGeneration: input.imageGeneration,
     traceId: input.traceId,
     wechat: input.wechat,
+    gitService: options.gitService,
+    gitConfigStore: options.gitConfigStore,
   });
   const orchestrationTools: MastraToolset = {
     ...baseTools,
@@ -655,15 +663,10 @@ async function* toAsyncIterable(stream: MastraStreamOutput['fullStream']): Async
   }
 }
 
-async function buildMastraPrompt(store: WorkspaceStore, input: CreateRunInput, productProfile: ProductProfile): Promise<string> {
-  const referenceBlocks = await Promise.all((input.referencedFiles ?? []).map(async (file) => {
-    try {
-      const content = await store.readWorkspaceFile(input.projectId, file.path);
-      return `## @${file.label} (${file.path})\n\n${content.content}`;
-    } catch {
-      return `## @${file.label} (${file.path})\n\n[引用文件读取失败]`;
-    }
-  }));
+function buildMastraPrompt(input: CreateRunInput, productProfile: ProductProfile): string {
+  const referenceBlocks = (input.referencedFiles ?? []).map((file) =>
+    `## @${file.label}\n路径：${file.path}\n（使用 read_workspace_file 工具读取内容）`,
+  );
   const snippetBlocks = (input.referencedSnippets ?? []).map((snippet, index) => [
     `## 片段 ${index + 1}: ${snippet.label}`,
     `来源：${snippet.role === 'user' ? '用户' : '创作助手'} / ${snippet.createdAt} / messageId=${snippet.messageId}`,

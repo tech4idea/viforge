@@ -27,6 +27,8 @@ FROM source AS api-runtime
 ENV NODE_ENV=production
 ENV PORT=3001
 
+RUN apk add --no-cache git && git config --global user.name viwork && git config --global user.email viwork@local
+
 EXPOSE 3001
 
 CMD ["pnpm", "--filter", "@viwork/api", "start"]

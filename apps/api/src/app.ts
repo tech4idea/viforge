@@ -16,6 +16,9 @@ import { createRunsRoutes } from './routes/runs';
 import { createBehaviorRulesRoutes } from './routes/behaviorRules';
 import { createSkillsRoutes } from './routes/skills';
 import { createWechatRoutes } from './routes/wechat';
+import { createGitRoutes } from './routes/git';
+import { createGitService } from './storage/gitService';
+import { createGitConfigStore } from './storage/gitConfigStore';
 import { createSkillStore } from './skills/skillStore';
 import { createWechatStore } from './wechat/wechatStore';
 import { createWechatCommandService } from './wechat/wechatCommandService';
@@ -47,7 +50,13 @@ export function createApp(): Hono {
   app.route('/api', createChatSessionRoutes(chatSessionStore, workspaceStore, wechatStore));
   app.route('/api', createImageGenerationRoutes(chatSessionStore, workspaceStore));
 
-  const mastraRunService = createMastraRunService(workspaceStore, runBus);
+  const gitService = createGitService();
+  const gitConfigStore = createGitConfigStore(workspaceStore);
+
+  const mastraRunService = createMastraRunService(workspaceStore, runBus, {
+    gitService,
+    gitConfigStore,
+  });
   app.route('/api', createRunsRoutes(mastraRunService, runBus));
   app.route('/api', createRunEventsRoutes(runBus));
 
@@ -56,6 +65,8 @@ export function createApp(): Hono {
   })));
 
   app.route('/api', createBehaviorRulesRoutes(createBehaviorRulesStore(workspaceStore)));
+
+  app.route('/api', createGitRoutes(gitService, gitConfigStore, workspaceStore));
 
   const wechatCommandService = createWechatCommandService(wechatStore, workspaceStore, chatSessionStore);
   const ilinkClient: WechatIlinkClient = createWechatIlinkClient();
