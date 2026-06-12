@@ -12,11 +12,16 @@ type TraceSnapshot = {
   maxIterations?: number;
 };
 
-export const AssistantStreamBody = memo(function AssistantStreamBody({ message }: { message: ChatMessage }): JSX.Element {
+export const AssistantStreamBody = memo(function AssistantStreamBody({ message, onChoiceSelect }: { message: ChatMessage; onChoiceSelect?: (option: string) => void }): JSX.Element {
   const traceEvents = useMemo(() => collectAgentTraceEvents(message.streamEvents), [message.streamEvents]);
   const displayContent = useMemo(() => stripAgentTraceBlocks(message.content), [message.content]);
   const thinking = useMemo(() => collectThinkingBlocks(message.streamEvents), [message.streamEvents]);
   const tools = useMemo(() => collectToolCalls(message.streamEvents), [message.streamEvents]);
+  const choices = useMemo(() => collectChoiceRequests(message.streamEvents), [message.streamEvents]);
+  const isCancelled = useMemo(() => {
+    const endEvent = [...message.streamEvents].reverse().find((e): e is Extract<StreamEvent, { type: 'run.end' }> => e.type === 'run.end');
+    return endEvent?.status === 'cancelled';
+  }, [message.streamEvents]);
 
   if (message.streamEvents.length === 0) {
     return (
@@ -52,6 +57,30 @@ export const AssistantStreamBody = memo(function AssistantStreamBody({ message }
       <div className="chat-markdown">
         <MarkdownReadPreview content={displayContent || (message.status === 'running' ? '正在生成...' : '')} />
       </div>
+      {choices.length > 0 && message.status !== 'running' ? (
+        <div className="chat-choice-group">
+          {choices.map((choice, index) => (
+            <div key={`${choice.question}-${index}`} className="chat-choice">
+              <span className="chat-choice__question">{choice.question}</span>
+              <div className="chat-choice__options">
+                {choice.options.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className="chat-choice__btn"
+                    onClick={() => onChoiceSelect?.(option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {isCancelled ? (
+        <div className="chat-cancelled-badge">已中断</div>
+      ) : null}
     </div>
   );
 });
@@ -168,6 +197,12 @@ function currentTraceSnapshot(events: AgentTraceEvent[]): TraceSnapshot | null {
 
 export function collectAgentTraceEvents(events: StreamEvent[]): AgentTraceEvent[] {
   return events.filter((event): event is AgentTraceEvent => event.type.startsWith('agent.'));
+}
+
+export function collectChoiceRequests(events: StreamEvent[]): Array<{ question: string; options: [string, ...string[]] }> {
+  return events
+    .filter((event): event is Extract<StreamEvent, { type: 'choice.request' }> => event.type === 'choice.request')
+    .map((event) => ({ question: event.question, options: event.options }));
 }
 
 export function streamEventsFromRunEvents(events: RunEvent[]): StreamEvent[] {

@@ -218,6 +218,7 @@ export type StreamEvent =
   | { type: 'file.changed'; runId: string; emittedAt: string; path: string; change: 'created' | 'modified' | 'deleted' }
   | { type: 'image.generated'; runId: string; emittedAt: string; attachment: ChatMessageAttachment }
   | { type: 'wechat.file_sent'; runId: string; emittedAt: string; path: string; mimeType: string }
+  | { type: 'choice.request'; runId: string; emittedAt: string; question: string; options: [string, ...string[]] }
   | { type: 'run.end'; runId: string; emittedAt: string; status: StreamRunStatus; errorMessage: string | null }
   | AgentTraceEvent;
 

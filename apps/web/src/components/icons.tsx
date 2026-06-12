@@ -414,3 +414,11 @@ export function RotateCcw(props: IconProps) {
     </svg>
   );
 }
+
+export function Square(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

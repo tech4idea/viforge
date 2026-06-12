@@ -49,6 +49,7 @@ export function createAssistantChatBridge(
 
       const session = await chatSessionStore.getSession(sessionId);
       const modelConfig = session?.modelConfig ?? {};
+      const runModel = modelConfig.chatModel || runInput.model;
       const runImageGeneration = {
         model: runInput.imageGeneration?.model ?? modelConfig.imageModel,
       };
@@ -77,6 +78,7 @@ export function createAssistantChatBridge(
 
         const { run } = await runService.createRun({
           ...runInput,
+          model: runModel,
           imageGeneration: runImageGeneration,
           sessionId,
           source: 'wechat',

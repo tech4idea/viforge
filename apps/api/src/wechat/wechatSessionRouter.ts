@@ -33,7 +33,7 @@ export function createWechatSessionRouter(
     apiKey?: string;
   } = {},
 ): WechatSessionRouter {
-  const modelConfig = buildModelConfig(modelOptions);
+  const modelConfig = buildModelConfig({ ...modelOptions, model: 'minimax/minimax-m2.7' });
 
   return {
     async routeMessage(input) {

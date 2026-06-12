@@ -13,11 +13,14 @@ type RunBuffer = {
 export type RunBus = {
   publish(event: StreamEvent): void;
   subscribe(runId: string, subscriber: Subscriber): () => void;
+  getAbortSignal(runId: string): AbortSignal;
+  abortRun(runId: string): void;
 };
 
 class InMemoryRunBus implements RunBus {
   private readonly buffers = new Map<string, RunBuffer>();
   private readonly subscribers = new Map<string, Set<Subscriber>>();
+  private readonly abortControllers = new Map<string, AbortController>();
 
   publish(event: StreamEvent): void {
     const buffer = this.bufferFor(event.runId);
@@ -31,6 +34,7 @@ class InMemoryRunBus implements RunBus {
     }
 
     if (event.type === 'run.end') {
+      this.abortControllers.delete(event.runId);
       if (buffer.dropTimer) clearTimeout(buffer.dropTimer);
       buffer.dropTimer = setTimeout(() => {
         this.buffers.delete(event.runId);
@@ -54,6 +58,23 @@ class InMemoryRunBus implements RunBus {
         this.subscribers.delete(runId);
       }
     };
+  }
+
+  getAbortSignal(runId: string): AbortSignal {
+    let controller = this.abortControllers.get(runId);
+    if (!controller) {
+      controller = new AbortController();
+      this.abortControllers.set(runId, controller);
+    }
+    return controller.signal;
+  }
+
+  abortRun(runId: string): void {
+    const controller = this.abortControllers.get(runId);
+    if (controller) {
+      controller.abort();
+      this.abortControllers.delete(runId);
+    }
   }
 
   private bufferFor(runId: string): RunBuffer {

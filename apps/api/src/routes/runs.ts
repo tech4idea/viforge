@@ -90,6 +90,13 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
     }
   });
 
+  routes.post('/runs/:runId/cancel', (context) => {
+    const runId = context.req.param('runId');
+    if (!bus) return context.json({ error: 'Run bus not available' }, 500);
+    bus.abortRun(runId);
+    return context.json({ cancelled: true });
+  });
+
   return routes;
 }
 

@@ -4,7 +4,8 @@ import { createTool } from '@mastra/core/tools';
 import type { ProductProfile, StreamEvent } from '@viwork/shared';
 import { z } from 'zod';
 
-import { PRODUCT_PROFILE } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_CHAT_MODEL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
+import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { BehaviorRule } from '../storage/behaviorRulesStore';
@@ -58,8 +59,7 @@ export function createMastraRunService(
   bus: RunBus,
   options: MastraRunOptions = {},
 ): RunService {
-  const observabilityMastra = createObservabilityMastra();
-  if (observabilityMastra) {
+  if (LANGFUSE_PUBLIC_KEY && LANGFUSE_SECRET_KEY && LANGFUSE_BASE_URL) {
     appendJsonLog('api.log', { scope: 'mastra-run', stage: 'observability.enabled', provider: 'langfuse' });
   }
 
@@ -88,7 +88,7 @@ export function createMastraRunService(
         updatedAt: timestamp,
       };
 
-      void executeMastraRun({ bus, input: { ...input, traceId }, options, runId: run.id, store, observabilityMastra });
+      void executeMastraRun({ bus, input: { ...input, traceId }, options, runId: run.id, store });
 
       return { run };
     },
@@ -101,14 +101,12 @@ async function executeMastraRun({
   options,
   runId,
   store,
-  observabilityMastra,
 }: {
   bus: RunBus;
   input: CreateRunInput;
   options: MastraRunOptions;
   runId: string;
   store: WorkspaceStore;
-  observabilityMastra: ReturnType<typeof createObservabilityMastra>;
 }): Promise<void> {
   const emittedAt = () => new Date().toISOString();
   const publish = (event: StreamEvent) => {
@@ -125,9 +123,12 @@ async function executeMastraRun({
   publish({ type: 'run.start', runId, emittedAt: emittedAt() });
   const threadId = input.sessionId ?? runId;
   publish({ type: 'thread.started', runId, emittedAt: emittedAt(), threadId: `mastra:${threadId}` });
+  const signal = bus.getAbortSignal(runId);
 
   try {
     const productProfile = options.productProfile ?? PRODUCT_PROFILE;
+
+    const observabilityMastra = createObservabilityMastra();
 
     // Build tools
     const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
@@ -152,6 +153,7 @@ async function executeMastraRun({
     const prompt = await buildMastraPrompt(store, input, productProfile);
 
     // Run the multi-agent workflow
+    let assistantText = '';
     if (options.createAgent) {
       // Backward compat: single agent mode
       const instructions = buildSystemInstructions(productProfile);
@@ -171,9 +173,9 @@ async function executeMastraRun({
         maxSteps: 25,
         memory: { thread: threadId, resource: input.projectId },
       });
-      await consumeMastraStream(streamed.fullStream, { emittedAt, publish, runId });
+      assistantText = await consumeMastraStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
     } else {
-      await executeMultiAgentWorkflow({
+      assistantText = await executeMultiAgentWorkflow({
         registry: registry!,
         store,
         input,
@@ -184,10 +186,16 @@ async function executeMastraRun({
         runId,
         threadId,
         options,
+        signal,
       });
     }
 
-    publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
+    if (signal.aborted) {
+      publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'cancelled', errorMessage: null });
+    } else {
+      await detectChoiceRequest(assistantText, publish, runId, emittedAt);
+      publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
+    }
   } catch (error) {
     const modelNotFound = isModelNotFoundError(error);
     
@@ -224,6 +232,8 @@ async function executeMultiAgentWorkflow({
   emittedAt,
   runId,
   threadId,
+  options,
+  signal,
 }: {
   registry: AgentRegistry;
   store: WorkspaceStore;
@@ -235,7 +245,8 @@ async function executeMultiAgentWorkflow({
   runId: string;
   threadId: string;
   options: MastraRunOptions;
-}): Promise<void> {
+  signal?: AbortSignal;
+}): Promise<string> {
   const baseTools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
     imageGeneration: input.imageGeneration,
     traceId: input.traceId,
@@ -267,7 +278,7 @@ async function executeMultiAgentWorkflow({
     prompt: textLogValue(prompt),
   });
 
-  await runAgentStream(mainAgent, prompt, publish, emittedAt, runId, threadId, input, 40, threadId);
+  return runAgentStream(mainAgent, prompt, publish, emittedAt, runId, threadId, input, 40, threadId, signal);
 }
 
 function createSpecialistDelegationTool({
@@ -449,6 +460,7 @@ async function runAgentStream(
   input: CreateRunInput,
   maxSteps: number,
   memoryThread = `${threadId}-${agent.id ?? 'agent'}`,
+  signal?: AbortSignal,
 ): Promise<string> {
   const streamed = await agent.stream(prompt, {
     runId,
@@ -456,8 +468,7 @@ async function runAgentStream(
     memory: { thread: memoryThread, resource: input.projectId },
   });
 
-  // Use consumeMastraStream for real-time event publishing + accumulate text for context chaining
-  const text = await consumeMastraStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId });
+  const text = await consumeMastraStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
 
   return text;
 }
@@ -488,6 +499,7 @@ export async function accumulateStreamText(stream: MastraStreamOutput['fullStrea
 async function consumeMastraStreamAndAccumulate(
   stream: MastraStreamOutput['fullStream'],
   context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string },
+  signal?: AbortSignal,
 ): Promise<string> {
   const state: ToolState = {
     inputByToolCallId: new Map(),
@@ -500,6 +512,7 @@ async function consumeMastraStreamAndAccumulate(
   };
   const textParts: string[] = [];
   for await (const chunk of toAsyncIterable(stream)) {
+    if (signal?.aborted) break;
     handleMastraChunk(chunk, state, context);
     if (chunk.type === 'text-delta' && chunk.payload && typeof chunk.payload.text === 'string') {
       textParts.push(chunk.payload.text);
@@ -677,6 +690,105 @@ function buildSystemInstructions(productProfile: ProductProfile): string {
   ].join('\n\n');
 }
 
+const CHOICE_DETECTION_SYSTEM_PROMPT = [
+  '你是一个结构分析器。分析给定的助手回复，判断其中是否包含需要用户做出选择或确认的选项。',
+  '以下情况判定为需要选择（hasChoice: true）：',
+  '- 明确列出了 2~4 个可供选择的方案、选项或行动',
+  '- 要求用户确认后才能继续（如"确认后我再生成"、"回复OK或生成我再调工具"）',
+  '- 给出了 2~4 个可选的回复关键词让用户选择（如"回复A或B"）',
+  '以下情况不算（hasChoice: false）：',
+  '- 普通的开放式问答、解释说明、单一建议、已完成的操作性回复',
+  '- 只是询问用户意见但没有给出具体可选项',
+  '严格输出 JSON，不要输出其他内容。',
+  '格式: {"hasChoice": boolean, "question": string, "options": [string, ...]}',
+  'options 最多 4 个。hasChoice 为 false 时 question 和 options 可以省略。',
+  '对于确认类选择，question 用助手的确认问题，options 为用户可选的回复关键词。',
+].join('\n');
+
+async function detectChoiceRequest(
+  assistantText: string,
+  publish: (event: StreamEvent) => void,
+  runId: string,
+  emittedAt: () => string,
+): Promise<void> {
+  if (!assistantText.trim()) {
+    appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.empty', runId });
+    return;
+  }
+
+  try {
+    const baseUrl = AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+    const model = 'minimax/minimax-m2.7';
+    const headers = buildAigcHubHeaders({ apiKey: AIGC_HUB_API_KEY, contentType: 'application/json' });
+
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: CHOICE_DETECTION_SYSTEM_PROMPT },
+          { role: 'user', content: assistantText.slice(-8000) },
+        ],
+        temperature: 0,
+        max_tokens: 4096,
+      }),
+    });
+
+    if (!response.ok) {
+      appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.http-error', runId, status: response.status });
+      return;
+    }
+
+    const body = await response.json() as Record<string, unknown>;
+    if (body.error) {
+      appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.api-error', runId, error: body.error, model });
+      return;
+    }
+    const choices = body.choices as Array<{ message?: { content?: string; reasoning_content?: string } & Record<string, unknown> }> | undefined;
+    const raw = choices?.[0]?.message?.content?.trim();
+    if (!raw) {
+      const msg = choices?.[0]?.message;
+      appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.empty-response', runId, messageKeys: msg ? Object.keys(msg) : null, reasoningLength: msg?.reasoning_content?.length ?? 0, reasoningPreview: msg?.reasoning_content?.slice(0, 200) });
+      return;
+    }
+
+    appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'llm-response', runId, raw });
+
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.no-json', runId, raw: cleaned });
+      return;
+    }
+
+    let parsed: { hasChoice?: boolean; question?: string; options?: string[] };
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (parseError) {
+      appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.parse-error', runId, json: jsonMatch[0], error: parseError instanceof Error ? parseError.message : String(parseError) });
+      return;
+    }
+    if (!parsed.hasChoice || !parsed.question || !Array.isArray(parsed.options) || parsed.options.length < 1) {
+      appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.no-choice', runId, parsed });
+      return;
+    }
+
+    appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'published', runId, question: parsed.question, options: parsed.options });
+
+    publish({
+      type: 'choice.request',
+      runId,
+      emittedAt: emittedAt(),
+      question: parsed.question,
+      options: parsed.options.slice(0, 4) as [string, ...string[]],
+    });
+  } catch (error) {
+    appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'error', runId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function buildMainAgentInstructions(systemInstructions: string, behaviorRules: BehaviorRule[]): Promise<string> {
   const base = [
     systemInstructions,
@@ -701,14 +813,17 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿”，再委派给对应 specialist。',
   ];
 
+  const localBase = base.join('\n\n');
+  const resolved = await getPromptText('system-agent-instructions', localBase);
+
+  const sections = [resolved];
   for (const rule of behaviorRules) {
     if (rule.enabled && rule.content.trim()) {
-      base.push(`## ${rule.label}\n\n${rule.content}`);
+      sections.push(`## ${rule.label}\n\n${rule.content}`);
     }
   }
 
-  const localInstructions = base.join('\n\n');
-  return getPromptText('system-agent-instructions', localInstructions);
+  return sections.join('\n\n');
 }
 
 function readSystemAgentProtocol(productProfile: ProductProfile): string {
