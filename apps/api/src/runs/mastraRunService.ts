@@ -52,6 +52,7 @@ const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'brainstorm-agent': '脑暴',
   'character-agent': '人物设定',
   'continuity-agent': '连续性检查',
+  'story-agent': '故事创作',
   'source-analyst-agent': '原著分析',
   'adaptation-planner-agent': '改编方案',
   'screenwriter-agent': '编剧',
@@ -316,6 +317,7 @@ function createSpecialistDelegationTool({
         'brainstorm-agent',
         'character-agent',
         'continuity-agent',
+        'story-agent',
         'source-analyst-agent',
         'adaptation-planner-agent',
         'screenwriter-agent',
@@ -486,6 +488,7 @@ function getSpecialistAgent(registry: AgentRegistry, agentId: string): MastraAge
     case 'brainstorm-agent': return registry.brainstorm;
     case 'character-agent': return registry.character;
     case 'continuity-agent': return registry.continuity;
+    case 'story-agent': return registry.story;
     case 'source-analyst-agent': return registry.sourceAnalyst;
     case 'adaptation-planner-agent': return registry.adaptationPlanner;
     case 'screenwriter-agent': return registry.screenwriter;
@@ -808,7 +811,7 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
     '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
     '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
-    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
+    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
     '如果用户只是要求”帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
