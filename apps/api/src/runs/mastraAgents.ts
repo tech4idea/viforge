@@ -74,6 +74,7 @@ export type AgentRegistry = {
   brainstorm: MastraAgentClient | null;
   character: MastraAgentClient | null;
   continuity: MastraAgentClient | null;
+  story: MastraAgentClient | null;
   sourceAnalyst: MastraAgentClient | null;
   adaptationPlanner: MastraAgentClient | null;
   screenwriter: MastraAgentClient | null;
@@ -114,6 +115,17 @@ const AGENT_DEFS: AgentDef[] = [
       '- 角色关系变化：',
       '- 不可违背设定：',
       '- 可回收包袱：',
+    ].join('\n'),
+  },
+  {
+    id: 'story-agent',
+    name: '故事创作',
+    workingMemoryTemplate: [
+      '# 故事创作记忆',
+      '- 已确定的单集方向：',
+      '- A/B 故事线与交叉点：',
+      '- 已使用的喜剧机制：',
+      '- 待回收的伏笔与包袱：',
     ].join('\n'),
   },
   {
@@ -1250,7 +1262,7 @@ export async function createAgentRegistry(
     return agent as unknown as MastraAgentClient;
   };
 
-  const [brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
+  const [brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
     AGENT_DEFS.map(createAgentWithSkill),
   );
 
@@ -1281,7 +1293,7 @@ export async function createAgentRegistry(
     return sysAgent as unknown as MastraAgentClient;
   };
 
-  return { brainstorm, character, continuity, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
+  return { brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
 }
 
 function buildEmbedder(options: { baseUrl?: string; apiKey?: string; traceId?: string }) {
