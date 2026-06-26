@@ -51,7 +51,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./var/api-data:/data
+      - ${VIWORK_API_DATA_DIR:-./var/api-data}:/data
     depends_on:
       postgres:
         condition: service_healthy
