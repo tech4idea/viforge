@@ -51,7 +51,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./var/api-data:/data
+      - /home/wbo/data/docker_mnt/.viwork/api-data:/data
     depends_on:
       postgres:
         condition: service_healthy
