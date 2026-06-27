@@ -5,7 +5,7 @@ import path from 'node:path';
 import { workspaceStore } from './storage/workspaceStore';
 import { createBehaviorRulesStore } from './storage/behaviorRulesStore';
 import { createChatSessionStore } from './chat/chatSessionStore';
-import { createMastraRunService } from './runs/mastraRunService';
+import { createLangGraphRunService } from './runs/langGraphRunService';
 import { runBus } from './runs/runBus';
 import { createAigcHubRoutes } from './routes/aigcHub';
 import { createChatSessionRoutes } from './routes/chatSessions';
@@ -53,11 +53,11 @@ export function createApp(): Hono {
   const gitService = createGitService();
   const gitConfigStore = createGitConfigStore(workspaceStore);
 
-  const mastraRunService = createMastraRunService(workspaceStore, runBus, {
+  const langGraphRunService = createLangGraphRunService(workspaceStore, runBus, {
     gitService,
     gitConfigStore,
   });
-  app.route('/api', createRunsRoutes(mastraRunService, runBus));
+  app.route('/api', createRunsRoutes(langGraphRunService, runBus));
   app.route('/api', createRunEventsRoutes(runBus));
 
   app.route('/api', createSkillsRoutes(createSkillStore({
@@ -70,7 +70,7 @@ export function createApp(): Hono {
 
   const wechatCommandService = createWechatCommandService(wechatStore, workspaceStore, chatSessionStore);
   const ilinkClient: WechatIlinkClient = createWechatIlinkClient();
-  const assistantChatBridge = createAssistantChatBridge(chatSessionStore, mastraRunService, runBus, wechatStore, ilinkClient);
+  const assistantChatBridge = createAssistantChatBridge(chatSessionStore, langGraphRunService, runBus, wechatStore, ilinkClient);
   const sessionRouter: WechatSessionRouter = createWechatSessionRouter(wechatStore, chatSessionStore, workspaceStore);
 
   const wechatPoller: WechatPoller = createWechatPoller(ilinkClient, wechatStore, async (update) => {

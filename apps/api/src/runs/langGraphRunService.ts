@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { createTool } from '@mastra/core/tools';
 import type { ProductProfile, StreamEvent } from '@viwork/shared';
 import { z } from 'zod';
 
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_CHAT_MODEL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -16,23 +15,22 @@ import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
-import { createAgentRegistry, createObservabilityMastra, createWorkspaceTools, type AgentRegistry, type MastraAgentClient, type MastraStreamChunk, type MastraStreamOutput, type MastraToolset } from './mastraAgents';
+import { createAgentRegistry, createLangGraphObservability, createTool, createWorkspaceTools, type AgentRegistry, type LangGraphAgentClient, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
 import { getPromptText } from './langfusePromptStore';
 
-type MastraRunOptions = {
+type LangGraphRunOptions = {
   createAgent?: (context: {
     instructions: string;
     tools: ReturnType<typeof createWorkspaceTools>;
-  }) => MastraAgentClient;
+  }) => LangGraphAgentClient;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; qdrantUrl?: string; traceId?: string },
+    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
   apiKey?: string;
   connectionString?: string;
-  qdrantUrl?: string;
   productProfile?: ProductProfile;
   gitService?: GitService;
   gitConfigStore?: GitConfigStore;
@@ -59,13 +57,13 @@ const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'reviewer-agent': '审稿',
 };
 
-export function createMastraRunService(
+export function createLangGraphRunService(
   store: WorkspaceStore,
   bus: RunBus,
-  options: MastraRunOptions = {},
+  options: LangGraphRunOptions = {},
 ): RunService {
   if (LANGFUSE_PUBLIC_KEY && LANGFUSE_SECRET_KEY && LANGFUSE_BASE_URL) {
-    appendJsonLog('api.log', { scope: 'mastra-run', stage: 'observability.enabled', provider: 'langfuse' });
+    appendJsonLog('api.log', { scope: 'langgraph-run', stage: 'observability.enabled', provider: 'langfuse' });
   }
 
   return {
@@ -93,14 +91,14 @@ export function createMastraRunService(
         updatedAt: timestamp,
       };
 
-      void executeMastraRun({ bus, input: { ...input, traceId }, options, runId: run.id, store });
+      void executeLangGraphRun({ bus, input: { ...input, traceId }, options, runId: run.id, store });
 
       return { run };
     },
   };
 }
 
-async function executeMastraRun({
+async function executeLangGraphRun({
   bus,
   input,
   options,
@@ -109,14 +107,14 @@ async function executeMastraRun({
 }: {
   bus: RunBus;
   input: CreateRunInput;
-  options: MastraRunOptions;
+  options: LangGraphRunOptions;
   runId: string;
   store: WorkspaceStore;
 }): Promise<void> {
   const emittedAt = () => new Date().toISOString();
   const publish = (event: StreamEvent) => {
     appendJsonLog('api-runs.jsonl', {
-      scope: 'mastra-run',
+      scope: 'langgraph-run',
       stage: 'stream.publish',
       runId,
       projectId: input.projectId,
@@ -127,13 +125,13 @@ async function executeMastraRun({
 
   publish({ type: 'run.start', runId, emittedAt: emittedAt() });
   const threadId = input.sessionId ?? runId;
-  publish({ type: 'thread.started', runId, emittedAt: emittedAt(), threadId: `mastra:${threadId}` });
+  publish({ type: 'thread.started', runId, emittedAt: emittedAt(), threadId: `langgraph:${threadId}` });
   const signal = bus.getAbortSignal(runId);
 
   try {
     const productProfile = options.productProfile ?? PRODUCT_PROFILE;
 
-    const observabilityMastra = createObservabilityMastra();
+    const observabilityLangGraph = createLangGraphObservability();
 
     // Build tools
     const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
@@ -148,26 +146,29 @@ async function executeMastraRun({
       ...options,
       model: input.model ?? options.model,
       traceId: input.traceId,
-      observabilityMastra,
+      observabilityLangGraph,
     };
-    const registry = options.createAgent
-      ? null
-      : options.createAgentRegistry
-        ? await options.createAgentRegistry(tools, registryOptions)
+    const registry = options.createAgentRegistry
+      ? await options.createAgentRegistry(tools, registryOptions)
+      : options.createAgent
+        ? null
         : await createAgentRegistry(store, registryOptions, tools);
 
-    // Build the combined prompt with references
-    const prompt = buildMastraPrompt(input, productProfile);
+    // Build the combined prompt with references.
+    const prompt = buildLangGraphPrompt(input, productProfile);
 
     // Run the multi-agent workflow
     let assistantText = '';
     if (options.createAgent) {
       // Backward compat: single agent mode
       const instructions = buildSystemInstructions(productProfile);
-      const agent = options.createAgent({ instructions, tools });
+      const singleAgentTools = registry
+        ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input }) }
+        : tools;
+      const agent = options.createAgent({ instructions, tools: singleAgentTools });
 
       appendJsonLog('api-runs.jsonl', {
-        scope: 'mastra-run',
+        scope: 'langgraph-run',
         stage: 'agent.stream.input',
         runId,
         projectId: input.projectId,
@@ -180,7 +181,7 @@ async function executeMastraRun({
         maxSteps: 25,
         memory: { thread: threadId, resource: input.projectId },
       });
-      assistantText = await consumeMastraStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
+      assistantText = await consumeLangGraphStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
     } else {
       assistantText = await executeMultiAgentWorkflow({
         registry: registry!,
@@ -207,7 +208,7 @@ async function executeMastraRun({
     const modelNotFound = isModelNotFoundError(error);
     
     appendJsonLog('api-runs.jsonl', {
-      scope: 'mastra-run',
+      scope: 'langgraph-run',
       stage: 'execute.error',
       runId,
       projectId: input.projectId,
@@ -251,7 +252,7 @@ async function executeMultiAgentWorkflow({
   emittedAt: () => string;
   runId: string;
   threadId: string;
-  options: MastraRunOptions;
+  options: LangGraphRunOptions;
   signal?: AbortSignal;
 }): Promise<string> {
   const baseTools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
@@ -261,7 +262,7 @@ async function executeMultiAgentWorkflow({
     gitService: options.gitService,
     gitConfigStore: options.gitConfigStore,
   });
-  const orchestrationTools: MastraToolset = {
+  const orchestrationTools: LangGraphToolset = {
     ...baseTools,
     delegate_to_specialist_agent: createSpecialistDelegationTool({
       registry,
@@ -279,7 +280,7 @@ async function executeMultiAgentWorkflow({
   const mainAgent = await registry.systemAgent(mainInstructions, orchestrationTools);
 
   appendJsonLog('api-runs.jsonl', {
-    scope: 'mastra-run',
+    scope: 'langgraph-run',
     stage: 'main-agent.stream.input',
     runId,
     projectId: input.projectId,
@@ -390,7 +391,7 @@ async function runSpecialistAgent({
   try {
     const memoryThread = `${threadId}-${agentId}`;
     appendJsonLog('api-runs.jsonl', {
-      scope: 'mastra-run',
+      scope: 'langgraph-run',
       stage: 'specialist.generate.input',
       runId,
       agentId,
@@ -412,7 +413,7 @@ async function runSpecialistAgent({
     output = result.text;
 
     appendJsonLog('api-runs.jsonl', {
-      scope: 'mastra-run',
+      scope: 'langgraph-run',
       stage: 'specialist.generate.output',
       runId,
       agentId,
@@ -421,7 +422,7 @@ async function runSpecialistAgent({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     appendJsonLog('api-runs.jsonl', {
-      scope: 'mastra-run',
+      scope: 'langgraph-run',
       stage: 'specialist.generate.error',
       runId,
       agentId,
@@ -461,7 +462,7 @@ function buildSpecialistSummary(agentId: string, phase: string, task: string, ou
 }
 
 async function runAgentStream(
-  agent: MastraAgentClient,
+  agent: LangGraphAgentClient,
   prompt: string,
   publish: (event: StreamEvent) => void,
   emittedAt: () => string,
@@ -478,12 +479,12 @@ async function runAgentStream(
     memory: { thread: memoryThread, resource: input.projectId },
   });
 
-  const text = await consumeMastraStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
+  const text = await consumeLangGraphStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
 
   return text;
 }
 
-function getSpecialistAgent(registry: AgentRegistry, agentId: string): MastraAgentClient | null {
+function getSpecialistAgent(registry: AgentRegistry, agentId: string): LangGraphAgentClient | null {
   switch (agentId) {
     case 'brainstorm-agent': return registry.brainstorm;
     case 'character-agent': return registry.character;
@@ -497,7 +498,7 @@ function getSpecialistAgent(registry: AgentRegistry, agentId: string): MastraAge
   }
 }
 
-export async function accumulateStreamText(stream: MastraStreamOutput['fullStream']): Promise<string> {
+export async function accumulateStreamText(stream: LangGraphStreamOutput['fullStream']): Promise<string> {
   const parts: string[] = [];
   for await (const chunk of toAsyncIterable(stream)) {
     if (chunk.type === 'text-delta' && chunk.payload && typeof chunk.payload.text === 'string') {
@@ -507,8 +508,8 @@ export async function accumulateStreamText(stream: MastraStreamOutput['fullStrea
   return parts.join('');
 }
 
-async function consumeMastraStreamAndAccumulate(
-  stream: MastraStreamOutput['fullStream'],
+async function consumeLangGraphStreamAndAccumulate(
+  stream: LangGraphStreamOutput['fullStream'],
   context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string },
   signal?: AbortSignal,
 ): Promise<string> {
@@ -524,7 +525,7 @@ async function consumeMastraStreamAndAccumulate(
   const textParts: string[] = [];
   for await (const chunk of toAsyncIterable(stream)) {
     if (signal?.aborted) break;
-    handleMastraChunk(chunk, state, context);
+    handleLangGraphChunk(chunk, state, context);
     if (chunk.type === 'text-delta' && chunk.payload && typeof chunk.payload.text === 'string') {
       textParts.push(chunk.payload.text);
     }
@@ -534,8 +535,8 @@ async function consumeMastraStreamAndAccumulate(
 
 // --- Stream consuming (same as before, exported for backward compat) ---
 
-async function consumeMastraStream(
-  stream: MastraStreamOutput['fullStream'],
+async function consumeLangGraphStream(
+  stream: LangGraphStreamOutput['fullStream'],
   context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string },
 ): Promise<void> {
   const state: ToolState = {
@@ -548,12 +549,12 @@ async function consumeMastraStream(
     toolSequence: 0,
   };
   for await (const chunk of toAsyncIterable(stream)) {
-    handleMastraChunk(chunk, state, context);
+    handleLangGraphChunk(chunk, state, context);
   }
 }
 
-function handleMastraChunk(
-  chunk: MastraStreamChunk,
+function handleLangGraphChunk(
+  chunk: LangGraphStreamChunk,
   state: ToolState,
   context: { emittedAt: () => string; publish: (event: StreamEvent) => void; runId: string },
 ): void {
@@ -648,13 +649,13 @@ function publishToolDelta(
   });
 }
 
-async function* toAsyncIterable(stream: MastraStreamOutput['fullStream']): AsyncIterable<MastraStreamChunk> {
-  const maybeAsyncIterable = stream as AsyncIterable<MastraStreamChunk>;
+async function* toAsyncIterable(stream: LangGraphStreamOutput['fullStream']): AsyncIterable<LangGraphStreamChunk> {
+  const maybeAsyncIterable = stream as AsyncIterable<LangGraphStreamChunk>;
   if (Symbol.asyncIterator in maybeAsyncIterable) {
     yield* maybeAsyncIterable;
     return;
   }
-  const reader = (stream as ReadableStream<MastraStreamChunk>).getReader();
+  const reader = (stream as ReadableStream<LangGraphStreamChunk>).getReader();
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -666,7 +667,7 @@ async function* toAsyncIterable(stream: MastraStreamOutput['fullStream']): Async
   }
 }
 
-function buildMastraPrompt(input: CreateRunInput, productProfile: ProductProfile): string {
+function buildLangGraphPrompt(input: CreateRunInput, productProfile: ProductProfile): string {
   const referenceBlocks = (input.referencedFiles ?? []).map((file) =>
     `## @${file.label}\n路径：${file.path}\n（使用 read_workspace_file 工具读取内容）`,
   );
@@ -719,6 +720,11 @@ async function detectChoiceRequest(
 ): Promise<void> {
   if (!assistantText.trim()) {
     appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.empty', runId });
+    return;
+  }
+
+  if (!AIGC_HUB_API_KEY) {
+    appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.unconfigured', runId });
     return;
   }
 
@@ -836,7 +842,7 @@ function readSystemAgentProtocol(productProfile: ProductProfile): string {
   return productProfile.mastra.fallbackProtocol;
 }
 
-function stringPayload(chunk: MastraStreamChunk, key: string): string {
+function stringPayload(chunk: LangGraphStreamChunk, key: string): string {
   const value = chunk.payload?.[key];
   return typeof value === 'string' ? value : '';
 }
@@ -867,6 +873,6 @@ function isModelNotFoundError(error: unknown): boolean {
   return false;
 }
 
-export const __mastraRunServiceTest = {
+export const __langGraphRunServiceTest = {
   createWorkspaceTools,
 };

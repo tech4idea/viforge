@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { WechatSetupSession, WechatStatus } from '@viwork/shared';
@@ -94,34 +94,71 @@ export type WechatStore = {
 };
 
 export function createWechatStore(statePath: string): WechatStore {
+  let writeQueue = Promise.resolve();
+
+  const defaultState = (): WechatState => ({
+    connection: null,
+    setupSession: null,
+    inboundMessageIds: [],
+    users: {},
+    attachmentRefs: [],
+    ilink: {
+      qrcode: null,
+      qrUrl: null,
+      botToken: null,
+      pollCursor: null,
+      contextTokens: {},
+      pollerEnabled: false,
+    },
+  });
+
+  function normalizeState(parsed: Partial<WechatState>): WechatState {
+    const fallback = defaultState();
+    const ilink = parsed.ilink ?? fallback.ilink;
+    return {
+      connection: (parsed.connection ?? null) as WechatConnection | null,
+      setupSession: (parsed.setupSession ?? null) as WechatSetupSession | null,
+      inboundMessageIds: Array.isArray(parsed.inboundMessageIds) ? parsed.inboundMessageIds : [],
+      users: (parsed.users ?? {}) as Record<string, WechatUserState>,
+      attachmentRefs: Array.isArray(parsed.attachmentRefs) ? parsed.attachmentRefs : [],
+      ilink: {
+        qrcode: ilink.qrcode ?? null,
+        qrUrl: ilink.qrUrl ?? null,
+        botToken: ilink.botToken ?? null,
+        pollCursor: ilink.pollCursor ?? null,
+        contextTokens: ilink.contextTokens ?? {},
+        pollerEnabled: ilink.pollerEnabled ?? false,
+      },
+    };
+  }
+
   async function readState(): Promise<WechatState> {
+    await writeQueue.catch(() => undefined);
     try {
-      const parsed = JSON.parse(await readFile(statePath, 'utf8')) as Partial<WechatState>;
-      return {
-        connection: (parsed.connection ?? null) as WechatConnection | null,
-        setupSession: (parsed.setupSession ?? null) as WechatSetupSession | null,
-        inboundMessageIds: Array.isArray(parsed.inboundMessageIds) ? parsed.inboundMessageIds : [],
-        users: (parsed.users ?? {}) as Record<string, WechatUserState>,
-        attachmentRefs: Array.isArray(parsed.attachmentRefs) ? parsed.attachmentRefs : [],
-        ilink: (parsed.ilink ?? {
-          qrcode: null, qrUrl: null, botToken: null,
-          pollCursor: null, contextTokens: {}, pollerEnabled: false,
-        }) as WechatIlinkState,
-      };
+      const raw = await readFile(statePath, 'utf8');
+      if (!raw.trim()) return defaultState();
+      return normalizeState(JSON.parse(raw) as Partial<WechatState>);
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-        return {
-          connection: null, setupSession: null, inboundMessageIds: [], users: {}, attachmentRefs: [],
-          ilink: { qrcode: null, qrUrl: null, botToken: null, pollCursor: null, contextTokens: {}, pollerEnabled: false },
-        };
+        return defaultState();
+      }
+      if (error instanceof SyntaxError) {
+        console.warn('[wechat-store] ignoring invalid state file', { statePath, error: error.message });
+        return defaultState();
       }
       throw error;
     }
   }
 
   async function writeState(state: WechatState): Promise<void> {
-    await mkdir(path.dirname(statePath), { recursive: true });
-    await writeFile(statePath, JSON.stringify(state, null, 2), 'utf8');
+    const write = async () => {
+      await mkdir(path.dirname(statePath), { recursive: true });
+      const tmpPath = `${statePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+      await writeFile(tmpPath, JSON.stringify(state, null, 2), 'utf8');
+      await rename(tmpPath, statePath);
+    };
+    writeQueue = writeQueue.then(write, write);
+    await writeQueue;
   }
 
   const DEFAULT_ROUTE: WechatRouteState = {

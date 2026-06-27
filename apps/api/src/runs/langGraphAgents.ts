@@ -1,47 +1,128 @@
 import { exec } from 'node:child_process';
 
-import { Agent } from '@mastra/core/agent';
-import { Mastra } from '@mastra/core';
-import { TokenLimiterProcessor, type Processor } from '@mastra/core/processors';
-import { createTool } from '@mastra/core/tools';
-import { PostgresStore } from '@mastra/pg';
-import { QdrantVector } from '@mastra/qdrant';
-import { Memory } from '@mastra/memory';
-import { Observability } from '@mastra/observability';
-import { LangfuseExporter } from '@mastra/langfuse';
-import { SpanType } from '@mastra/core/observability';
-import { createOpenAI } from '@ai-sdk/openai';
+import { tool, type StructuredToolInterface } from '@langchain/core/tools';
+import { AIMessage, AIMessageChunk, HumanMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { BaseCheckpointSaver, BaseStore, Item } from '@langchain/langgraph';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { InMemoryStore, MemorySaver } from '@langchain/langgraph';
+import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
+import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store';
+import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { z } from 'zod';
 
-import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, DATABASE_URL, EMBEDDING_MODEL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, QDRANT_URL } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MODEL } from '../env';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
 import { getPromptText } from './langfusePromptStore';
 
-export type MastraStreamChunk = {
+type LangGraphMemoryBackend = {
+  checkpointer: BaseCheckpointSaver;
+  store: BaseStore;
+};
+
+const inMemoryBackends = new Map<string, LangGraphMemoryBackend>();
+let postgresMemoryBackend: Promise<LangGraphMemoryBackend> | null = null;
+
+async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
+  const databaseUrl = process.env.DATABASE_URL ?? '';
+  if (!databaseUrl) {
+    const key = process.env.VITEST_WORKER_ID ?? 'default';
+    let backend = inMemoryBackends.get(key);
+    if (!backend) {
+      backend = { checkpointer: new MemorySaver(), store: new InMemoryStore() };
+      inMemoryBackends.set(key, backend);
+    }
+    return backend;
+  }
+
+  if (!postgresMemoryBackend) {
+    postgresMemoryBackend = createPostgresLangGraphMemoryBackend(databaseUrl);
+  }
+  return postgresMemoryBackend;
+}
+
+async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promise<LangGraphMemoryBackend> {
+  const checkpointer = PostgresSaver.fromConnString(databaseUrl, { schema: 'langgraph' });
+  await checkpointer.setup();
+
+  const store = PostgresStore.fromConnString(databaseUrl, {
+    schema: 'langgraph_store',
+    index: createStoreIndexConfig(),
+    textSearchLanguage: 'simple',
+  });
+  await store.setup();
+
+  return { checkpointer, store };
+}
+
+function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0]['index'] | undefined {
+  if (!process.env.VIWORK_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
+
+  return {
+    dims: Number(process.env.VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
+    embed: createMemoryEmbeddings(),
+    fields: ['content', 'memory'],
+  };
+}
+
+function createMemoryEmbeddings(): OpenAIEmbeddings {
+  const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+  const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  return new OpenAIEmbeddings({
+    model: EMBEDDING_MODEL,
+    apiKey,
+    configuration: {
+      baseURL: trimTrailingSlashes(baseUrl),
+      defaultHeaders: buildAigcHubHeaders(),
+    },
+  });
+}
+
+export type LangGraphStreamChunk = {
   type: string;
   payload?: Record<string, unknown>;
   object?: unknown;
 };
 
-export type MastraStreamOutput = {
-  fullStream: ReadableStream<MastraStreamChunk> | AsyncIterable<MastraStreamChunk>;
+export type LangGraphStreamOutput = {
+  fullStream: ReadableStream<LangGraphStreamChunk> | AsyncIterable<LangGraphStreamChunk>;
 };
 
-export type MastraAgentClient = {
+export type LangGraphAgentClient = {
   id?: string;
   name?: string;
-  stream(messages: string, options: Record<string, unknown>): Promise<MastraStreamOutput>;
+  stream(messages: string, options: Record<string, unknown>): Promise<LangGraphStreamOutput>;
   generate(messages: string, options: Record<string, unknown>): Promise<{ text: string }>;
 };
 
-export type MastraToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;
+export type LangGraphToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;
+
+type ViworkTool = StructuredToolInterface & {
+  id: string;
+  execute?: (input: Record<string, unknown>, options?: unknown) => Promise<unknown>;
+};
+
+export function createTool<Schema extends z.AnyZodObject>(fields: {
+  id: string;
+  description: string;
+  inputSchema: Schema;
+  execute: (input: z.infer<Schema>) => Promise<unknown> | unknown;
+}): ViworkTool {
+  const created = tool(async (input: z.infer<Schema>) => fields.execute(input), {
+    name: fields.id,
+    description: fields.description,
+    schema: fields.inputSchema,
+  }) as unknown as ViworkTool;
+  created.id = fields.id;
+  created.execute = async (input) => fields.execute(input as z.infer<Schema>);
+  return created;
+}
 
 const AGENT_CONTROLLED_SEMANTIC_RECALL = {
   scope: 'resource' as const,
@@ -71,15 +152,15 @@ type AgentDef = {
 };
 
 export type AgentRegistry = {
-  brainstorm: MastraAgentClient | null;
-  character: MastraAgentClient | null;
-  continuity: MastraAgentClient | null;
-  story: MastraAgentClient | null;
-  sourceAnalyst: MastraAgentClient | null;
-  adaptationPlanner: MastraAgentClient | null;
-  screenwriter: MastraAgentClient | null;
-  reviewer: MastraAgentClient | null;
-  systemAgent: (instructions: string, toolsOverride?: MastraToolset) => Promise<MastraAgentClient>;
+  brainstorm: LangGraphAgentClient | null;
+  character: LangGraphAgentClient | null;
+  continuity: LangGraphAgentClient | null;
+  story: LangGraphAgentClient | null;
+  sourceAnalyst: LangGraphAgentClient | null;
+  adaptationPlanner: LangGraphAgentClient | null;
+  screenwriter: LangGraphAgentClient | null;
+  reviewer: LangGraphAgentClient | null;
+  systemAgent: (instructions: string, toolsOverride?: LangGraphToolset) => Promise<LangGraphAgentClient>;
 };
 
 const AGENT_DEFS: AgentDef[] = [
@@ -174,23 +255,74 @@ const AGENT_DEFS: AgentDef[] = [
   },
 ];
 
-function createProjectMemoryStore(options: { traceId?: string } = {}): Memory {
-  const connectionString = DATABASE_URL;
-  if (!connectionString) throw new Error('DATABASE_URL is required for project memory tools.');
-  const qdrantUrl = QDRANT_URL;
-  const storage = new PostgresStore({ id: 'viwork-project-memory', connectionString });
-  const vector = qdrantUrl ? new QdrantVector({ id: 'viwork-project-memory-qdrant', url: qdrantUrl }) : undefined;
-  const embedder = vector ? buildEmbedder(options) : undefined;
-  return new Memory({
-    storage,
-    ...(vector ? { vector } : {}),
-    ...(embedder ? { embedder } : {}),
-    options: {
-      lastMessages: 0,
-      semanticRecall: false,
-      workingMemory: { enabled: true, scope: 'resource' as const },
+type ProjectMemoryMessage = {
+  id: string;
+  role: string;
+  threadId: string;
+  resourceId: string;
+  content: string;
+  createdAt: string;
+  score?: number;
+};
+
+type ProjectMemoryStore = {
+  getWorkingMemory(input: { resourceId: string }): Promise<string>;
+  updateWorkingMemory(input: { resourceId: string; content: string }): Promise<void>;
+  saveMemory(input: { resourceId: string; content: string; traceId?: string }): Promise<{ messageId: string; usage?: unknown }>;
+  recall(input: { resourceId: string; query: string; topK: number; traceId?: string }): Promise<{ messages: ProjectMemoryMessage[]; usage?: unknown }>;
+};
+
+function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
+  const workingMemoryNamespace = (resourceId: string) => ['viwork', 'projects', resourceId, 'working-memory'];
+  const semanticMemoryNamespace = (resourceId: string) => ['viwork', 'projects', resourceId, 'memories'];
+
+  return {
+    async getWorkingMemory({ resourceId }) {
+      const item = await store.get(workingMemoryNamespace(resourceId), 'main');
+      return typeof item?.value.content === 'string' ? item.value.content : '';
     },
-  });
+    async updateWorkingMemory({ resourceId, content }) {
+      await store.put(workingMemoryNamespace(resourceId), 'main', {
+        content,
+        resourceId,
+        updatedAt: new Date().toISOString(),
+      }, ['content']);
+    },
+    async saveMemory({ resourceId, content }) {
+      const messageId = `memory-${randomId()}-${Date.now()}`;
+      const createdAt = new Date().toISOString();
+      await store.put(semanticMemoryNamespace(resourceId), messageId, {
+        role: 'assistant',
+        threadId: 'project-memory',
+        resourceId,
+        content,
+        createdAt,
+      }, ['content']);
+      return { messageId, usage: { store: 'langgraph', indexed: true } };
+    },
+    async recall({ resourceId, query, topK }) {
+      const items = await store.search(semanticMemoryNamespace(resourceId), { query, limit: topK });
+      const fallbackItems = items.length > 0
+        ? items
+        : await store.search(semanticMemoryNamespace(resourceId), { limit: topK });
+      return { messages: fallbackItems.map(storeItemToMemoryMessage), usage: { store: 'langgraph', query } };
+    },
+  };
+}
+
+type ScoredItem = Item & { score?: number };
+
+function storeItemToMemoryMessage(item: ScoredItem): ProjectMemoryMessage {
+  const value = item.value ?? {};
+  return {
+    id: item.key,
+    role: typeof value.role === 'string' ? value.role : 'assistant',
+    threadId: typeof value.threadId === 'string' ? value.threadId : 'project-memory',
+    resourceId: typeof value.resourceId === 'string' ? value.resourceId : item.namespace.at(2) ?? '',
+    content: typeof value.content === 'string' ? value.content : JSON.stringify(value),
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : item.createdAt.toISOString(),
+    score: typeof item.score === 'number' ? item.score : undefined,
+  };
 }
 
 export function createWorkspaceTools(
@@ -201,7 +333,7 @@ export function createWorkspaceTools(
   emittedAt: () => string,
   options: { imageGeneration?: RunImageGenerationOptions; traceId?: string; wechat?: WechatSendContext; gitService?: GitService; gitConfigStore?: GitConfigStore } = {},
 ) {
-  const projectMemory = createProjectMemoryStore({ traceId: options.traceId });
+  const projectMemory = getLangGraphMemoryBackend().then(({ store }) => createProjectMemoryStore(store));
   const resource = projectId;
 
   const tools: Record<string, ReturnType<typeof createTool>> = {
@@ -374,8 +506,7 @@ export function createWorkspaceTools(
       ].join('\n'),
       inputSchema: z.object({}),
       execute: async () => {
-        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
-        const workingMemory = await projectMemory.getWorkingMemory({ threadId: memoryThreadId, resourceId: resource, memoryConfig: MEMORY_TOOL_CONFIG });
+        const workingMemory = await (await projectMemory).getWorkingMemory({ resourceId: resource });
         return { memory: workingMemory ?? '' };
       },
     }),
@@ -392,8 +523,7 @@ export function createWorkspaceTools(
         reason: z.string().min(1).describe('本次更新的原因，便于审计和追踪'),
       }),
       execute: async ({ content, reason }) => {
-        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
-        await projectMemory.updateWorkingMemory({ threadId: memoryThreadId, resourceId: resource, workingMemory: content, memoryConfig: MEMORY_TOOL_CONFIG });
+        await (await projectMemory).updateWorkingMemory({ resourceId: resource, content });
         return { updated: true, reason, bytes: Buffer.byteLength(content, 'utf8') };
       },
     }),
@@ -409,17 +539,7 @@ export function createWorkspaceTools(
         topK: z.number().int().min(1).max(12).default(6),
       }),
       execute: async ({ query, topK }) => {
-        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
-        const result = await projectMemory.recall({
-          threadId: memoryThreadId,
-          resourceId: resource,
-          perPage: 0,
-          threadConfig: {
-            ...MEMORY_TOOL_CONFIG,
-            semanticRecall: { ...AGENT_CONTROLLED_SEMANTIC_RECALL, topK },
-          },
-          vectorSearchString: query,
-        });
+        const result = await (await projectMemory).recall({ resourceId: resource, query, topK, traceId: options.traceId });
         return {
           query,
           matches: result.messages.map(formatMemoryMessage),
@@ -440,7 +560,6 @@ export function createWorkspaceTools(
         reason: z.string().min(1).describe('为什么这条信息值得长期记住'),
       }),
       execute: async ({ memory: memoryText, category, reason }) => {
-        const memoryThreadId = await ensureProjectMemoryThread({ memory: projectMemory, resourceId: resource });
         const content = [
           '# 精选长期记忆',
           `- category: ${category}`,
@@ -448,17 +567,8 @@ export function createWorkspaceTools(
           '',
           memoryText,
         ].join('\n');
-        const message = {
-          id: `memory-${randomId()}-${Date.now()}`,
-          type: 'text' as const,
-          role: 'assistant' as const,
-          content: { parts: [{ type: 'text' as const, text: content }], format: 2 as const },
-          createdAt: new Date(),
-          threadId: memoryThreadId,
-          resourceId: resource,
-        };
-        const result = await projectMemory.saveMessages({ messages: [message], memoryConfig: MEMORY_TOOL_CONFIG });
-        return { remembered: true, category, messageId: message.id, usage: result.usage };
+        const result = await (await projectMemory).saveMemory({ resourceId: resource, content, traceId: options.traceId });
+        return { remembered: true, category, messageId: result.messageId, usage: result.usage };
       },
     }),
     generate_project_image: createTool({
@@ -1038,25 +1148,6 @@ function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function projectMemoryThreadId(resourceId: string): string {
-  return `${resourceId}::project-memory`;
-}
-
-async function ensureProjectMemoryThread(input: { memory: Memory; resourceId: string }): Promise<string> {
-  const threadId = projectMemoryThreadId(input.resourceId);
-  const existing = await input.memory.getThreadById({ threadId, resourceId: input.resourceId });
-  if (!existing) {
-    await input.memory.createThread({
-      threadId,
-      resourceId: input.resourceId,
-      title: 'Project semantic memory',
-      metadata: { kind: 'project-semantic-memory' },
-      memoryConfig: MEMORY_TOOL_CONFIG,
-    });
-  }
-  return threadId;
-}
-
 function textFromMemoryMessage(message: { content?: unknown }): string {
   const content = message.content;
   if (typeof content === 'string') return content;
@@ -1149,57 +1240,8 @@ function sanitizeToolOutputValue(output: unknown): { changed: boolean; output: u
   return { changed: false, output };
 }
 
-class BinaryDataSanitizer implements Processor<'binary-data-sanitizer'> {
-  readonly id = 'binary-data-sanitizer' as const;
-  readonly name = 'Binary Data Sanitizer';
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  processLLMRequest(args: any): any {
-    const prompt = args.prompt as Array<{ role: string; content: unknown }>;
-    if (!Array.isArray(prompt)) return undefined;
-    let modified = false;
-
-    for (const message of prompt) {
-      if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
-      const content = message.content as Array<{ type: string; output?: unknown }>;
-      for (const part of content) {
-        if (part.type !== 'tool-result' || !part.output) continue;
-        const result = sanitizeToolOutputValue(part.output);
-        if (result.changed) {
-          part.output = result.output;
-          modified = true;
-        }
-      }
-    }
-
-    if (!modified) return undefined;
-    return { prompt };
-  }
-}
-
-export function createObservabilityMastra(): Mastra | null {
-  if (!LANGFUSE_PUBLIC_KEY || !LANGFUSE_SECRET_KEY || !LANGFUSE_BASE_URL) {
-    return null;
-  }
-
-  return new Mastra({
-    observability: new Observability({
-      configs: {
-        langfuse: {
-          serviceName: 'viwork',
-          exporters: [
-            new LangfuseExporter({
-              publicKey: LANGFUSE_PUBLIC_KEY,
-              secretKey: LANGFUSE_SECRET_KEY,
-              baseUrl: LANGFUSE_BASE_URL,
-              realtime: true,
-            }),
-          ],
-          excludeSpanTypes: [SpanType.MODEL_CHUNK],
-        },
-      },
-    }),
-  });
+export function createLangGraphObservability(): null {
+  return null;
 }
 
 export async function createAgentRegistry(
@@ -1209,110 +1251,52 @@ export async function createAgentRegistry(
     baseUrl?: string;
     apiKey?: string;
     connectionString?: string;
-    qdrantUrl?: string;
     traceId?: string;
-    observabilityMastra?: Mastra | null;
+    observabilityLangGraph?: null;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
-  const connectionString = options.connectionString ?? DATABASE_URL;
-  const qdrantUrl = options.qdrantUrl ?? QDRANT_URL;
-  const obsMastra = options.observabilityMastra ?? null;
-
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is required for Mastra agent memory storage.');
-  }
-
   const modelConfig = buildModelConfig(options);
+  const { checkpointer, store: memoryStore } = await getLangGraphMemoryBackend();
 
-  const vector = qdrantUrl ? new QdrantVector({ id: 'viwork-qdrant', url: qdrantUrl }) : undefined;
-  const embedder = vector ? buildEmbedder(options) : undefined;
-  const createAgentWithSkill = async (def: AgentDef): Promise<MastraAgentClient | null> => {
+  const createAgentWithSkill = async (def: AgentDef): Promise<LangGraphAgentClient | null> => {
     const fallbackInstructions = await loadSkillInstructions(store, def.id);
-    const [instructions, workingMemoryTemplate] = await Promise.all([
+    const [instructions] = await Promise.all([
       getPromptText(`${def.id}-skill`, fallbackInstructions),
       getPromptText(`${def.id}-working-memory`, def.workingMemoryTemplate),
     ]);
     if (!instructions) return null;
 
     const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
-
-    const storage = new PostgresStore({ id: `viwork-${def.id}`, connectionString });
-    const memory = new Memory({
-      storage,
-      ...(vector ? { vector } : {}),
-      ...(embedder ? { embedder } : {}),
-      options: {
-        lastMessages: 8,
-        semanticRecall: false,
-        workingMemory: { enabled: false, scope: 'resource', template: workingMemoryTemplate },
-      },
-    });
-
-    const agent = new Agent({
+    return createLangGraphAgentClient({
       id: def.id,
       name: def.name,
       instructions: agentInstructions,
       model: modelConfig,
       tools,
-      memory,
-      inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 500_000, strategy: 'truncate' })],
+      checkpointer,
+      store: memoryStore,
     });
-    if (obsMastra) obsMastra.addAgent(agent);
-    return agent as unknown as MastraAgentClient;
   };
 
   const [brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
     AGENT_DEFS.map(createAgentWithSkill),
   );
 
-  const createSystemAgent = async (instructions: string, toolsOverride?: MastraToolset): Promise<MastraAgentClient> => {
+  const createSystemAgent = async (instructions: string, toolsOverride?: LangGraphToolset): Promise<LangGraphAgentClient> => {
     const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
-    const storage = new PostgresStore({ id: 'viwork-system-agent', connectionString });
-    const memory = new Memory({
-      storage,
-      ...(vector ? { vector } : {}),
-      ...(embedder ? { embedder } : {}),
-      options: {
-        lastMessages: 20,
-        semanticRecall: false,
-        workingMemory: { enabled: false, scope: 'resource' },
-      },
-    });
-
-    const sysAgent = new Agent({
+    return createLangGraphAgentClient({
       id: 'viwork-system-agent',
       name: 'viwork 系统调度',
       instructions: agentInstructions,
       model: modelConfig,
       tools: toolsOverride ?? tools,
-      memory,
-      inputProcessors: [new BinaryDataSanitizer(), new TokenLimiterProcessor({ limit: 800_000, strategy: 'truncate' })],
+      checkpointer,
+      store: memoryStore,
     });
-    if (obsMastra) obsMastra.addAgent(sysAgent);
-    return sysAgent as unknown as MastraAgentClient;
   };
 
   return { brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
-}
-
-function buildEmbedder(options: { baseUrl?: string; apiKey?: string; traceId?: string }) {
-  const baseUrl = options.baseUrl
-    || process.env.VIWORK_AIGC_HUB_BASE_URL
-    || process.env.AIGC_HUB_BASE_URL
-    || 'https://api.yukeon.top/v1';
-  const apiKey = options.apiKey
-    || process.env.VIWORK_AIGC_HUB_API_KEY
-    || process.env.AIGC_HUB_API_KEY
-    || '';
-
-  const openai = createOpenAI({
-    baseURL: trimTrailingSlashes(baseUrl),
-    apiKey,
-    headers: buildAigcHubHeaders({ traceId: options.traceId }),
-  });
-
-  return openai.embedding(EMBEDDING_MODEL);
 }
 
 async function loadSkillInstructions(store: WorkspaceStore, agentId: string): Promise<string> {
@@ -1340,35 +1324,172 @@ export function buildModelConfig(options: {
   baseUrl?: string;
   apiKey?: string;
   traceId?: string;
-}): OpenAICompatibleConfig {
+}): { model: string; baseUrl: string; apiKey: string; headers: Record<string, string> } {
   const rawId = options.model
     || process.env.VIWORK_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
-    || process.env.VIWORK_MASTRA_MODEL
+    || process.env.VIWORK_LANGGRAPH_MODEL
     || 'ds/deepseek-v4-pro';
-  // Mastra parses id as provider/model and only sends model to the API.
-  // Prepend openai/ so the gateway receives the full model path (e.g. gemini/gemini-3.1-pro-preview).
-  const id = (`openai/${rawId}`) as `${string}/${string}`;
 
   const baseUrl = options.baseUrl
     || process.env.VIWORK_AIGC_HUB_BASE_URL
     || process.env.AIGC_HUB_BASE_URL
-    || process.env.VIWORK_MASTRA_BASE_URL
+    || process.env.VIWORK_LANGGRAPH_BASE_URL
     || process.env.OPENAI_BASE_URL
     || 'https://api.yukeon.top/v1';
 
   const apiKey = options.apiKey
     || process.env.VIWORK_AIGC_HUB_API_KEY
     || process.env.AIGC_HUB_API_KEY
-    || process.env.VIWORK_MASTRA_API_KEY
+    || process.env.VIWORK_LANGGRAPH_API_KEY
     || process.env.OPENAI_API_KEY
     || process.env.CODEX_API_KEY
     || '';
 
   return {
-    id: id as `${string}/${string}`,
-    url: baseUrl,
+    model: rawId,
+    baseUrl,
     apiKey,
     headers: buildAigcHubHeaders({ traceId: options.traceId }),
   };
+}
+
+function createChatModel(config: ReturnType<typeof buildModelConfig>): ChatOpenAI {
+  return new ChatOpenAI({
+    model: config.model,
+    apiKey: config.apiKey || 'missing-api-key',
+    configuration: {
+      baseURL: trimTrailingSlashes(config.baseUrl),
+      defaultHeaders: config.headers,
+    },
+  });
+}
+
+function createLangGraphAgentClient(input: {
+  id: string;
+  name: string;
+  instructions: string;
+  model: ReturnType<typeof buildModelConfig>;
+  tools: LangGraphToolset;
+  checkpointer: BaseCheckpointSaver;
+  store: BaseStore;
+}): LangGraphAgentClient {
+  const runnable = createReactAgent({
+    llm: createChatModel(input.model),
+    tools: Object.values(input.tools).filter(isLangGraphTool),
+    prompt: input.instructions,
+    checkpointer: input.checkpointer,
+    store: input.store,
+    name: input.id,
+  });
+
+  return {
+    id: input.id,
+    name: input.name,
+    async stream(prompt, options) {
+      const config = langGraphRunnableConfig(input.id, options);
+      return { fullStream: toLangGraphStreamChunks(runnable.streamEvents({ messages: [new HumanMessage(prompt)] }, config)) };
+    },
+    async generate(prompt, options) {
+      const config = langGraphRunnableConfig(input.id, options);
+      const output = await runnable.invoke({ messages: [new HumanMessage(prompt)] }, config);
+      return { text: textFromMessages(Array.isArray(output.messages) ? output.messages : []) };
+    },
+  };
+}
+
+function isLangGraphTool(value: unknown): value is StructuredToolInterface {
+  return Boolean(value && typeof value === 'object' && 'name' in value && 'invoke' in value);
+}
+
+function langGraphRunnableConfig(agentId: string, options: Record<string, unknown>) {
+  const memory = options.memory as { thread?: string; resource?: string } | undefined;
+  const runId = typeof options.runId === 'string' ? options.runId : undefined;
+  const maxSteps = typeof options.maxSteps === 'number' ? options.maxSteps : 25;
+  return {
+    version: 'v2' as const,
+    recursionLimit: maxSteps * 2,
+    runName: agentId,
+    runId,
+    configurable: {
+      thread_id: memory?.thread ?? runId ?? `${agentId}-${Date.now()}`,
+      resource_id: memory?.resource,
+    },
+  };
+}
+
+async function* toLangGraphStreamChunks(events: AsyncIterable<unknown>): AsyncIterable<LangGraphStreamChunk> {
+  const toolNamesByRunId = new Map<string, string>();
+  for await (const event of events) {
+    const record = event as Record<string, unknown>;
+    const eventName = typeof record.event === 'string' ? record.event : '';
+    const data = record.data as Record<string, unknown> | undefined;
+    const runId = typeof record.run_id === 'string' ? record.run_id : randomId();
+
+    if (eventName === 'on_chat_model_stream') {
+      const chunk = data?.chunk;
+      const text = textFromMessageChunk(chunk);
+      if (text) yield { type: 'text-delta', payload: { text } };
+      for (const toolCall of toolCallChunksFromMessage(chunk)) {
+        yield { type: 'tool-call-delta', payload: toolCall };
+      }
+      continue;
+    }
+
+    if (eventName === 'on_tool_start') {
+      const toolName = typeof record.name === 'string' ? record.name : 'tool';
+      toolNamesByRunId.set(runId, toolName);
+      yield { type: 'tool-call', payload: { toolCallId: runId, toolName, args: data?.input } };
+      continue;
+    }
+
+    if (eventName === 'on_tool_end') {
+      const toolName = toolNamesByRunId.get(runId) ?? (typeof record.name === 'string' ? record.name : 'tool');
+      yield { type: 'tool-result', payload: { toolCallId: runId, toolName, result: sanitizeToolResult(data?.output) } };
+    }
+  }
+}
+
+function textFromMessageChunk(chunk: unknown): string {
+  if (chunk instanceof AIMessageChunk || chunk instanceof AIMessage) return textFromContent(chunk.content);
+  if (chunk && typeof chunk === 'object' && 'content' in chunk) return textFromContent((chunk as { content?: unknown }).content);
+  return '';
+}
+
+function textFromMessages(messages: BaseMessage[]): string {
+  const lastAi = messages.slice().reverse().find((message) => message instanceof AIMessage || message.getType?.() === 'ai');
+  return lastAi ? textFromContent(lastAi.content) : '';
+}
+
+function textFromContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part && typeof part === 'object' && 'text' in part && typeof (part as { text?: unknown }).text === 'string') {
+      return (part as { text: string }).text;
+    }
+    return '';
+  }).join('');
+}
+
+function toolCallChunksFromMessage(chunk: unknown): Array<{ toolCallId: string; toolName: string; argsTextDelta: string }> {
+  if (!chunk || typeof chunk !== 'object') return [];
+  const chunks = (chunk as { tool_call_chunks?: unknown }).tool_call_chunks;
+  if (!Array.isArray(chunks)) return [];
+  return chunks.map((item, index) => {
+    const record = item as Record<string, unknown>;
+    return {
+      toolCallId: typeof record.id === 'string' ? record.id : `tool_${index + 1}`,
+      toolName: typeof record.name === 'string' ? record.name : 'tool',
+      argsTextDelta: typeof record.args === 'string' ? record.args : '',
+    };
+  });
+}
+
+function sanitizeToolResult(output: unknown): unknown {
+  if (output && typeof output === 'object' && 'content' in output) {
+    return sanitizeToolOutputValue((output as { content?: unknown }).content).output;
+  }
+  return sanitizeToolOutputValue(output).output;
 }

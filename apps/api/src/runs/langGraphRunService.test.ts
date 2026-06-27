@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StreamEvent } from '@viwork/shared';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
-import { createMastraRunService, __mastraRunServiceTest } from './mastraRunService';
+import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
 import { createRunBus, type RunBus } from './runBus';
+
+vi.setConfig({ testTimeout: 15_000 });
 
 let root: string;
 let store: WorkspaceStore;
@@ -16,15 +18,18 @@ let originalFetch: typeof fetch;
 let originalBaseUrl: string | undefined;
 let originalApiKey: string | undefined;
 let originalImageModel: string | undefined;
+let originalDatabaseUrl: string | undefined;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-mastra-run-service-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viwork-LangGraph-run-service-'));
   store = createWorkspaceStore(root);
   bus = createRunBus();
   originalFetch = globalThis.fetch;
   originalBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL;
   originalApiKey = process.env.VIWORK_AIGC_HUB_API_KEY;
   originalImageModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL;
+  originalDatabaseUrl = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
 });
 
 afterEach(async () => {
@@ -32,17 +37,18 @@ afterEach(async () => {
   restoreEnv('VIWORK_AIGC_HUB_BASE_URL', originalBaseUrl);
   restoreEnv('VIWORK_AIGC_HUB_API_KEY', originalApiKey);
   restoreEnv('VIWORK_AIGC_HUB_IMAGE_MODEL', originalImageModel);
+  restoreEnv('DATABASE_URL', originalDatabaseUrl);
   await rm(root, { recursive: true, force: true });
 });
 
-describe('mastra run service', () => {
+describe('langgraph run service', () => {
   it('streams text, tool lifecycle events, and workspace file changes through RunBus', async () => {
-    const project = await store.createProject({ name: 'Mastra Writers' });
+    const project = await store.createProject({ name: 'LangGraph Writers' });
     let capturedPrompt = '';
     let capturedThread: unknown = null;
-    let writeTool: ReturnType<typeof __mastraRunServiceTest.createWorkspaceTools>['write_workspace_file'] | null = null;
+    let writeTool: ReturnType<typeof __langGraphRunServiceTest.createWorkspaceTools>['write_workspace_file'] | null = null;
 
-    const { run } = await createMastraRunService(store, bus, {
+    const { run } = await createLangGraphRunService(store, bus, {
       createAgent({ tools }) {
         writeTool = tools.write_workspace_file;
         return {
@@ -118,7 +124,7 @@ describe('mastra run service', () => {
     let mainAgentTools: Record<string, unknown> | null = null;
     const specialistCalls: string[] = [];
 
-    const { run } = await createMastraRunService(store, bus, {
+    const { run } = await createLangGraphRunService(store, bus, {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
@@ -161,7 +167,7 @@ describe('mastra run service', () => {
     let delegateTool: { execute?: (input: { agentId: string; task: string; context?: string }, options: never) => Promise<unknown> } | null = null;
     const specialistCalls: string[] = [];
 
-    const { run } = await createMastraRunService(store, bus, {
+    const { run } = await createLangGraphRunService(store, bus, {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
@@ -225,6 +231,39 @@ describe('mastra run service', () => {
     expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
   });
 
+  it('stores working and semantic project memory through LangGraph Store tools', async () => {
+    const project = await store.createProject({ name: 'Memory Tools' });
+    const tools = __langGraphRunServiceTest.createWorkspaceTools(
+      store,
+      project.id,
+      () => {},
+      'run_memory_tools',
+      () => '2026-06-04T00:00:00.000Z',
+    );
+
+    await tools.update_project_memory.execute?.({
+      content: '# 项目记忆\n\n- 主角叫小程。',
+      reason: '用户确认主角名称',
+    }, {} as never);
+    const working = await tools.read_project_memory.execute?.({}, {} as never) as { memory: string };
+
+    const remembered = await tools.remember_project_memory.execute?.({
+      memory: '用户偏好：主角小程要保持冷幽默，不要热血口号。',
+      category: 'user_preference',
+      reason: '后续角色对白需要遵守',
+    }, {} as never) as { remembered: boolean; messageId: string };
+    const recalled = await tools.recall_project_memory.execute?.({
+      query: '小程的对白风格偏好',
+      topK: 3,
+    }, {} as never) as { matches: Array<{ content: string }> };
+
+    expect(working.memory).toContain('主角叫小程');
+    expect(remembered).toMatchObject({ remembered: true, messageId: expect.stringMatching(/^memory-/) });
+    expect(recalled.matches).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('冷幽默') }),
+    ]));
+  });
+
   it('exposes image generation as an agent workspace tool', async () => {
     process.env.VIWORK_AIGC_HUB_BASE_URL = 'http://127.0.0.1:8000/v1';
     process.env.VIWORK_AIGC_HUB_API_KEY = 'hub_test_key';
@@ -235,7 +274,7 @@ describe('mastra run service', () => {
 
     const project = await store.createProject({ name: 'Image Tool Project' });
     const events: StreamEvent[] = [];
-    const tools = __mastraRunServiceTest.createWorkspaceTools(
+    const tools = __langGraphRunServiceTest.createWorkspaceTools(
       store,
       project.id,
       (event) => events.push(event),

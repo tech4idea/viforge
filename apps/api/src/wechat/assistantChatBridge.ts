@@ -6,7 +6,7 @@ import type { WechatStore } from './wechatStore';
 import type { WechatIlinkClient } from './wechatIlinkClient';
 
 export type AssistantChatBridge = {
-  /** Creates or picks a chat session for the user, appends a user message, starts a Mastra run, and returns the session id. */
+  /** Creates or picks a chat session for the user, appends a user message, starts a LangGraph run, and returns the session id. */
   handleCreationRequest(input: {
     runInput: CreateRunInput;
     externalUserId: string;
@@ -68,7 +68,7 @@ export function createAssistantChatBridge(
         events: [],
       });
 
-      // 3. Start Mastra run with source: 'wechat'
+      // 3. Start LangGraph run with source: 'wechat'
       let replyText = '';
       try {
         const contextToken = await wechatStore.getIlinkContextToken(externalUserId);
