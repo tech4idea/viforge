@@ -13,7 +13,7 @@ API 服务由 [apps/api/src/app.ts](../../apps/api/src/app.ts) 装配：
 ```ts
 app.route('/api', createProjectsRoutes(workspaceStore));
 app.route('/api', createChatSessionRoutes(createChatSessionStore(...)));
-app.route('/api', createRunsRoutes(createMastraRunService(workspaceStore, runBus), runBus));
+app.route('/api', createRunsRoutes(createLangGraphRunService(workspaceStore, runBus), runBus));
 app.route('/api', createRunEventsRoutes(runBus));
 app.route('/api', createSkillsRoutes(createSkillStore(...)));
 app.route('/api', createWechatRoutes(createWechatStore(...)));
@@ -28,14 +28,14 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 - `Project`：当前产品项目元信息。
 - `WorkspaceEntry` / `WorkspaceFile`：文件树条目和文本文件内容。
 - `ReferencedFile`：创作助手引用文件。
-- `AgentRun`：一次 Codex agent 运行。
+- `AgentRun`：一次 LangGraph agent 运行。
 - `ChatSession` / `ChatMessage`：后端持久化会话和消息。
 - `RunEvent`：兼容一次性 run 返回的事件格式。
 - `StreamEvent`：当前 SSE 流式事件格式，包含文本、思考、工具调用、文件变更和结束事件。
-- `TheaterSkill`：全局 `Agent 配置/skills` 下的 Codex skill 条目。
+- `TheaterSkill`：全局 `Agent 配置/skills` 下的 agent skill 条目。
 - `WechatStatus` / `WechatSetupSession`：微信接入状态。
 
-产品 profile 装配入口位于 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts)，当前支持 `novel-adaptation` 和 `sitcom` 两个 id。基础元数据拆到 `packages/shared/src/product-profiles/<product>/profile.json`，默认 system agent 和 agent skill prompt 放在同目录的 `prompts/*.md`。profile 统一描述产品名、页面标题、默认项目文案、工作区分组、默认目录/文件、默认 agent skill、agent label、Mastra prompt 标题和正式产物路径。API 通过 `GET /api/product-profile` 暴露当前 active profile。
+产品 profile 装配入口位于 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts)，当前支持 `novel-adaptation` 和 `sitcom` 两个 id。基础元数据拆到 `packages/shared/src/product-profiles/<product>/profile.json`，默认 system agent 和 agent skill prompt 放在同目录的 `prompts/*.md`。profile 统一描述产品名、页面标题、默认项目文案、工作区分组、默认目录/文件、默认 agent skill、agent label、agent prompt 标题和正式产物路径。API 通过 `GET /api/product-profile` 暴露当前 active profile。
 
 后续增加前后端共享数据结构时，应优先加到 `packages/shared/src/contracts.ts`，再在 `apps/web/src/api.ts` 和 API 路由中使用同一类型。
 

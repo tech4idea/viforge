@@ -6,7 +6,7 @@
 
 - 切换到指定项目目录。
 - 切换到草稿区，也就是临时会话工作目录。
-- 发送改编、创作、润色、续写等指令，并由后端启动当前 Mastra 创作 run。
+- 发送改编、创作、润色、续写等指令，并由后端启动当前 LangGraph 创作 run。
 - 收发图片和文件，把微信素材保存进工作区，也能把工作区产物回传到微信。
 
 当前代码里的微信实现仍是本地模拟接口，不是真实微信开放平台 OAuth，也不是企业微信。后续真实接入建议参考 cc-connect 的个人微信通道，使用腾讯 ilink 机器人 HTTP 网关：`getUpdates` 长轮询接收消息，`sendMessage` 下发回复。
@@ -77,7 +77,7 @@ remote-wechat/<ISO 时间>.md
 - 没有 ilink token、`base_url`、`cdn_base_url`、`account_id`、`allow_from`、`context_token`、轮询游标等配置。
 - 没有长轮询 worker，无法主动从微信拉取消息。
 - 只保存纯文本笔记，没有命令解析和会话状态。
-- 没有调用 `RunService.createRun()`，微信指令不会触发 Mastra 创作。
+- 没有调用 `RunService.createRun()`，微信指令不会触发 LangGraph 创作。
 - 没有保存图片/文件到 workspace asset，也没有出站文件能力。
 - 没有项目/草稿区选择状态，无法在微信里切换工作目录。
 - 没有把微信消息写入 `ChatSessionStore`，Web 端无法看到同一条远程会话历史。
@@ -91,7 +91,7 @@ remote-wechat/<ISO 时间>.md
 3. `WechatRouterAgent` / `WechatCommandService`：负责理解微信消息，既支持显式命令，也支持自然语言路由，例如“切到爱情公寓项目”“接着昨天那个草稿聊”“把第 2 集剧本发我”。它只输出结构化路由动作，不直接创作。
 4. `AssistantChatBridge`：复用 Web 创作助手的后端流程，负责创建/选择 `ChatSession`、append 用户消息、调用 `RunService.createRun()`、订阅 `RunBus`、更新 assistant 消息和 stream events。
 
-这样后续维护 agent、会话、Mastra run、stream 事件、文件变更、聊天历史时，只需要维护 `AssistantChatBridge` 和现有创作助手链路。微信、未来 QQ、飞书或其它外部入口都只实现自己的 platform adapter 和 command parser。
+这样后续维护 agent、会话、LangGraph run、stream 事件、文件变更、聊天历史时，只需要维护 `AssistantChatBridge` 和现有创作助手链路。微信、未来 QQ、飞书或其它外部入口都只实现自己的 platform adapter 和 command parser。
 
 API 装配层仍在 [apps/api/src/app.ts](../../apps/api/src/app.ts)，但 `createWechatRoutes` 需要注入更多依赖：
 
@@ -285,7 +285,7 @@ export type WechatInboundAttachment = {
 - `/在哪`：返回当前目标是项目还是草稿区，以及 projectId/sessionId。
 - `/文件`：列出当前目标的顶层文件。
 - `/发送 03 剧本/第1集/剧本.md`：读取当前目标文件并通过微信文件消息发回。
-- 其它文本：作为创作指令，在当前目标启动 Mastra run。
+- 其它文本：作为创作指令，在当前目标启动 LangGraph run。
 
 没有选择目标时，默认策略建议是：
 
@@ -379,7 +379,7 @@ export type WechatIlinkClient = {
 
 - 扩展 `WechatStore` 数据结构，保存 route state、微信会话映射和附件元数据。
 - 抽出 `WechatCommandService`，让模拟 `POST /api/wechat/inbound` 支持 `/项目`、`/草稿`、普通创作指令和附件保存。
-- 注入 `ChatSessionStore`、`RunService`、`RunBus`，微信普通文本能启动 `source: 'wechat'` 的 Mastra run。
+- 注入 `ChatSessionStore`、`RunService`、`RunBus`，微信普通文本能启动 `source: 'wechat'` 的 LangGraph run。
 - API 测试覆盖：项目切换、草稿新建、幂等、附件保存、run 创建。
 
 第二阶段：ilink 接入

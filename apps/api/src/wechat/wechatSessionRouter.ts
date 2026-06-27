@@ -1,7 +1,5 @@
-import { Agent } from '@mastra/core/agent';
-
-import { accumulateStreamText } from '../runs/mastraRunService';
-import { buildModelConfig } from '../runs/mastraAgents';
+import { buildAigcHubHeaders } from '../aigcHubHeaders';
+import { buildModelConfig } from '../runs/langGraphAgents';
 import type { ChatSessionStore } from '../chat/chatSessionStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 
@@ -123,20 +121,23 @@ async function classifyAndRoute(
 
   let classificationText = '';
   try {
-    const agent = new Agent({
-      id: 'wechat-session-router',
-      name: '微信会话路由',
-      instructions: '你是微信会话路由器。只分析用户意图并分类，不执行任何创作。回复必须是一行 JSON。',
-      model: modelConfig,
+    const response = await fetch(`${modelConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: buildAigcHubHeaders({ apiKey: modelConfig.apiKey, contentType: 'application/json' }),
+      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({
+        model: modelConfig.model,
+        messages: [
+          { role: 'system', content: '你是微信会话路由器。只分析用户意图并分类，不执行任何创作。回复必须是一行 JSON。' },
+          { role: 'user', content: classificationPrompt },
+        ],
+        temperature: 0,
+        max_tokens: 1024,
+      }),
     });
-
-    const streamed = await agent.stream(classificationPrompt, {
-      maxSteps: 1,
-    });
-
-    classificationText = await accumulateStreamText(
-      streamed.fullStream as import('../runs/mastraAgents').MastraStreamOutput['fullStream'],
-    );
+    if (!response.ok) return { type: 'continue' };
+    const body = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    classificationText = body.choices?.[0]?.message?.content ?? '';
   } catch {
     return { type: 'continue' };
   }
