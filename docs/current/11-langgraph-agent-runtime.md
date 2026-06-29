@@ -9,6 +9,8 @@ API 侧核心依赖：
 - `@langchain/langgraph`
 - `@langchain/core`
 - `@langchain/openai`
+- `@opentelemetry/api`
+- `@opentelemetry/exporter-trace-otlp-http`
 - `pg`
 
 模型调用仍走 AIGC Hub 的 OpenAI-compatible `/v1/chat/completions` 接口。默认配置优先级：
@@ -157,7 +159,23 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 
 前端聊天会话 JSON 只负责 UI 历史展示，不再手动拼接进 prompt；多轮上下文由 LangGraph checkpointer 依据 `thread_id` 自动恢复。
 
-### 5. 前端事件
+### 5. Phoenix 观测接入
+
+API 支持通过 OpenTelemetry OTLP/HTTP 向 Phoenix 上报 LangGraph 和 LangChain traces/spans。配置：
+
+```bash
+PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
+PHOENIX_PROJECT_NAME=viwork
+PHOENIX_SERVICE_NAME=viwork-api
+```
+
+开启后，API 启动时初始化 `NodeTracerProvider`，将 spans 发送到 `${PHOENIX_COLLECTOR_ENDPOINT}/v1/traces`。上报内容包括：
+
+- run 级 span：`langgraph.<agent-id>.stream` / `langgraph.<agent-id>.generate`，包含 `runId`、`traceId`、`projectId`、`sessionId`、`productId`、`threadId` 和输入输出预览。
+- LangChain callback spans：chain、chat model/LLM、tool 的 start/end/error，保留父子关系，带 `langchain.run_id`、agent id、项目和产品 metadata。
+- error span status 和 exception 记录，便于在 Phoenix 中按 failed span 定位。
+
+### 6. 前端事件
 
 后端仍只向前端暴露统一 `StreamEvent`。前端不需要知道 LangGraph 内部事件结构，只消费已有 SSE 事件。
 

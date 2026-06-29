@@ -11,6 +11,7 @@ import type { BehaviorRule } from '../storage/behaviorRulesStore';
 import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
+import { flushPhoenixTracing, isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoenix';
 
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
@@ -64,6 +65,9 @@ export function createLangGraphRunService(
 ): RunService {
   if (LANGFUSE_PUBLIC_KEY && LANGFUSE_SECRET_KEY && LANGFUSE_BASE_URL) {
     appendJsonLog('api.log', { scope: 'langgraph-run', stage: 'observability.enabled', provider: 'langfuse' });
+  }
+  if (isPhoenixTracingEnabled()) {
+    appendJsonLog('api.log', { scope: 'langgraph-run', stage: 'observability.enabled', provider: 'phoenix' });
   }
 
   return {
@@ -205,6 +209,7 @@ async function executeLangGraphRun({
       await detectChoiceRequest(assistantText, publish, runId, emittedAt);
       publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
     }
+    void flushPhoenixTracing();
   } catch (error) {
     const modelNotFound = isModelNotFoundError(error);
     
@@ -228,6 +233,7 @@ async function executeLangGraphRun({
       status: 'error',
       errorMessage,
     });
+    void flushPhoenixTracing();
   }
 }
 
@@ -405,14 +411,7 @@ async function runSpecialistAgent({
       prompt: textLogValue(specialistPrompt),
     });
 
-    const generatePromise = agent.generate(specialistPrompt, {
-      runId,
-      traceId: input.traceId,
-      source: input.source ?? 'web',
-      productId,
-      maxSteps: 10,
-      memory: { thread: memoryThread, resource: input.projectId },
-    });
+    const generatePromise = runAgentGenerate(agent, specialistPrompt, input, productId, runId, memoryThread, 10);
 
     const timeoutMs = 180_000;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -484,18 +483,63 @@ async function runAgentStream(
   memoryThread = `${threadId}-${agent.id ?? 'agent'}`,
   signal?: AbortSignal,
 ): Promise<string> {
-  const streamed = await agent.stream(prompt, {
-    runId,
-    traceId: input.traceId,
-    source: input.source ?? 'web',
-    productId,
-    maxSteps,
-    memory: { thread: memoryThread, resource: input.projectId },
+  return withPhoenixSpan(`langgraph.${agent.id ?? 'agent'}.stream`, {
+    'viwork.run_id': runId,
+    'viwork.trace_id': input.traceId,
+    'viwork.project_id': input.projectId,
+    'viwork.session_id': input.sessionId,
+    'viwork.product_id': productId,
+    'viwork.source': input.source ?? 'web',
+    'viwork.agent_id': agent.id ?? 'agent',
+    'langgraph.thread_id': memoryThread,
+    'input.value': JSON.stringify(textLogValue(prompt)),
+  }, async (span) => {
+    const streamed = await agent.stream(prompt, {
+      runId,
+      traceId: input.traceId,
+      source: input.source ?? 'web',
+      productId,
+      maxSteps,
+      memory: { thread: memoryThread, resource: input.projectId },
+    });
+
+    const text = await consumeLangGraphStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
+    span.setAttribute('output.value', JSON.stringify(textLogValue(text)));
+    return text;
   });
+}
 
-  const text = await consumeLangGraphStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId }, signal);
-
-  return text;
+async function runAgentGenerate(
+  agent: LangGraphAgentClient,
+  prompt: string,
+  input: CreateRunInput,
+  productId: string,
+  runId: string,
+  memoryThread: string,
+  maxSteps: number,
+): Promise<{ text: string }> {
+  return withPhoenixSpan(`langgraph.${agent.id ?? 'agent'}.generate`, {
+    'viwork.run_id': runId,
+    'viwork.trace_id': input.traceId,
+    'viwork.project_id': input.projectId,
+    'viwork.session_id': input.sessionId,
+    'viwork.product_id': productId,
+    'viwork.source': input.source ?? 'web',
+    'viwork.agent_id': agent.id ?? 'agent',
+    'langgraph.thread_id': memoryThread,
+    'input.value': JSON.stringify(textLogValue(prompt)),
+  }, async (span) => {
+    const result = await agent.generate(prompt, {
+      runId,
+      traceId: input.traceId,
+      source: input.source ?? 'web',
+      productId,
+      maxSteps,
+      memory: { thread: memoryThread, resource: input.projectId },
+    });
+    span.setAttribute('output.value', JSON.stringify(textLogValue(result.text)));
+    return result;
+  });
 }
 
 function getSpecialistAgent(registry: AgentRegistry, agentId: string): LangGraphAgentClient | null {

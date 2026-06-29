@@ -1420,15 +1420,28 @@ function isLangGraphTool(value: unknown): value is StructuredToolInterface {
 
 function langGraphRunnableConfig(agentId: string, options: Record<string, unknown>) {
   const memory = options.memory as { thread?: string; resource?: string } | undefined;
-  const runId = typeof options.runId === 'string' ? options.runId : undefined;
+  const viworkRunId = typeof options.runId === 'string' ? options.runId : undefined;
+  const traceId = typeof options.traceId === 'string' ? options.traceId : viworkRunId;
+  const projectId = typeof memory?.resource === 'string' ? memory.resource : undefined;
+  const productId = typeof options.productId === 'string' ? options.productId : undefined;
+  const source = typeof options.source === 'string' ? options.source : undefined;
   const maxSteps = typeof options.maxSteps === 'number' ? options.maxSteps : 25;
+
   return {
     version: 'v2' as const,
     recursionLimit: maxSteps * 2,
     runName: agentId,
-    runId,
+    tags: [agentId, 'viwork', 'langgraph', productId, source].filter((tag): tag is string => Boolean(tag)),
+    metadata: {
+      viwork_run_id: viworkRunId,
+      viwork_trace_id: traceId,
+      viwork_agent_id: agentId,
+      viwork_project_id: projectId,
+      viwork_product_id: productId,
+      viwork_source: source,
+    },
     configurable: {
-      thread_id: memory?.thread ?? runId ?? `${agentId}-${Date.now()}`,
+      thread_id: memory?.thread ?? viworkRunId ?? `${agentId}-${Date.now()}`,
       resource_id: memory?.resource,
     },
   };

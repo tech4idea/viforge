@@ -40,6 +40,10 @@ export const QDRANT_URL = process.env.QDRANT_URL ?? '';
 
 export const EMBEDDING_MODEL = process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision';
 
+export const PHOENIX_COLLECTOR_ENDPOINT = process.env.PHOENIX_COLLECTOR_ENDPOINT ?? '';
+export const PHOENIX_PROJECT_NAME = process.env.PHOENIX_PROJECT_NAME ?? 'viwork';
+export const PHOENIX_SERVICE_NAME = process.env.PHOENIX_SERVICE_NAME ?? 'viwork-api';
+
 export const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY ?? '';
 export const LANGFUSE_SECRET_KEY = process.env.LANGFUSE_SECRET_KEY ?? '';
 export const LANGFUSE_BASE_URL = process.env.LANGFUSE_BASE_URL ?? '';
