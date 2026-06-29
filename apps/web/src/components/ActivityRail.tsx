@@ -6,7 +6,6 @@ import {
   MessageCircle,
   Moon,
   Palette,
-  Settings,
   Smartphone,
   Sun,
 } from './icons';
@@ -28,7 +27,6 @@ export function ActivityRail({
   onToggleEditor,
   onToggleChat,
   onToggleTheme,
-  onOpenSettings,
   onOpenWechat,
   onOpenGitSync,
 }: {
@@ -40,7 +38,6 @@ export function ActivityRail({
   onToggleEditor: () => void;
   onToggleChat: () => void;
   onToggleTheme: () => void;
-  onOpenSettings: () => void;
   onOpenWechat: () => void;
   onOpenGitSync: () => void;
 }): JSX.Element {
@@ -100,16 +97,6 @@ export function ActivityRail({
         title="版本管理"
       >
         <GitBranch size={20} />
-      </button>
-
-      <button
-        type="button"
-        className="rail-button"
-        onClick={onOpenSettings}
-        aria-label="Agent 设置"
-        title="Agent 设置"
-      >
-        <Settings size={20} />
       </button>
 
       <button

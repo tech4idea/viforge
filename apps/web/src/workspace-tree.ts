@@ -13,7 +13,9 @@ export const WORKSPACE_SECTIONS: WorkspaceSection[] = [
   { key: 'adaptations', title: ACTIVE_PRODUCT_PROFILE.workspaceSections.project.title, description: ACTIVE_PRODUCT_PROFILE.workspaceSections.project.description },
 ];
 
-export const GLOBAL_TREE = ACTIVE_PRODUCT_PROFILE.globalTree;
+const HIDDEN_GLOBAL_PATHS = ['Agent 配置'];
+
+export const GLOBAL_TREE = ACTIVE_PRODUCT_PROFILE.globalTree.filter((node) => !isHiddenGlobalPath(node.path));
 
 export function buildDefaultCollapsedGlobalPaths(nodes: WorkspaceTreeNode[]): string[] {
   return nodes.flatMap((node) => {
@@ -80,4 +82,15 @@ export function filterVisibleWorkspaceEntries(entries: WorkspaceEntry[], collaps
     }
     return true;
   });
+}
+
+export function filterVisibleGlobalWorkspaceEntries(entries: WorkspaceEntry[], collapsedDirectoryPaths: string[]): WorkspaceEntry[] {
+  return filterVisibleWorkspaceEntries(
+    entries.filter((entry) => !isHiddenGlobalPath(entry.path)),
+    collapsedDirectoryPaths,
+  );
+}
+
+function isHiddenGlobalPath(entryPath: string): boolean {
+  return HIDDEN_GLOBAL_PATHS.some((hiddenPath) => entryPath === hiddenPath || entryPath.startsWith(`${hiddenPath}/`));
 }

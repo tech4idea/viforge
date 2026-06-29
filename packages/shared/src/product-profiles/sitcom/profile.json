@@ -5,11 +5,11 @@
   "defaultProjectName": "办公室喜剧计划",
   "defaultProjectDescription": "围绕角色、场景和单集冲突展开的情景剧创作项目。",
   "workspaceSections": {
-    "global": { "title": "全局区域", "description": "创作规范、技能、知识库与模板库" },
+    "global": { "title": "全局资料区", "description": "统一管理知识库、素材库与模板库" },
     "project": {
-      "title": "情景剧项目区域",
-      "description": "每个项目独立管理设定、故事、剧本、分镜、视频和产物",
-      "emptyText": "暂无情景剧项目。"
+      "title": "创作项目区域",
+      "description": "统一管理小说改编、情景剧等不同类型的创作项目",
+      "emptyText": "暂无创作项目。"
     }
   },
   "promptPlaceholder": {

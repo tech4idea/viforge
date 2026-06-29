@@ -18,7 +18,6 @@ import {
   resolveApiUrl,
   type AigcHubModelMetadata,
   type AgentRun,
-  type BehaviorRule,
   type ChatMessage,
   type ChatMessageAttachment,
   type ChatSession,
@@ -30,7 +29,6 @@ import {
   type ReferencedFile,
   type RunEvent,
   type StreamEvent,
-  type TheaterSkill,
   type WechatSetupSession,
   type WechatStatus,
   type WorkspaceEntry,
@@ -41,10 +39,11 @@ import { renderEditorViewer } from './viewer-components';
 import {
   WORKSPACE_SECTIONS,
   buildCollapsedDirectoryPaths,
+  filterVisibleGlobalWorkspaceEntries,
   filterVisibleWorkspaceEntries,
   toggleCollapsedPath,
 } from './workspace-tree';
-import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
+import { ACTIVE_PRODUCT_PROFILE, SELECTABLE_PRODUCT_PROFILES } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { GitSyncPanel } from './components/GitSyncPanel';
@@ -361,6 +360,12 @@ function App() {
     onCancel: () => void;
   };
   const [confirmDialogState, setConfirmDialogState] = useState<ConfirmDialogState | null>(null);
+  const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
+  const [createProjectDraft, setCreateProjectDraft] = useState(() => ({
+    productId: ACTIVE_PRODUCT_PROFILE.id,
+    name: ACTIVE_PRODUCT_PROFILE.defaultProjectName,
+    description: ACTIVE_PRODUCT_PROFILE.defaultProjectDescription,
+  }));
 
   function showConfirm(options: { title: string; message: string; danger?: boolean; confirmLabel?: string }): Promise<boolean> {
     return new Promise((resolve) => {
@@ -397,7 +402,7 @@ function App() {
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'skills' | 'wechat' | 'settings' | 'git' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
@@ -415,18 +420,9 @@ function App() {
   const [uploadState, setUploadState] = useState<'idle' | 'uploading'>('idle');
   const [dragEntry, setDragEntry] = useState<DragEntryDraft | null>(null);
   const [dragOverTargetKey, setDragOverTargetKey] = useState<string | null>(null);
-  const [skills, setSkills] = useState<TheaterSkill[]>([]);
-  const [skillsState, setSkillsState] = useState<LoadState>('idle');
-  const [newSkill, setNewSkill] = useState({
-    title: '原著分析助手',
-    description: '根据原著片段提炼主题、人物关系和可改编场面。',
-    prompt: '请分析这段原著，提炼主题、人物关系、关键场面和改编风险。',
-  });
   const [wechatStatus, setWechatStatus] = useState<WechatStatus | null>(null);
   const [wechatSetup, setWechatSetup] = useState<WechatSetupSession | null>(null);
   const [wechatState, setWechatState] = useState<LoadState>('idle');
-  const [behaviorRules, setBehaviorRules] = useState<BehaviorRule[]>([]);
-  const [behaviorRulesState, setBehaviorRulesState] = useState<LoadState>('idle');
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -492,7 +488,7 @@ function App() {
     [collapsedDirectoriesByProject, entries, selectedProjectId],
   );
   const visibleGlobalEntries = useMemo(
-    () => filterVisibleWorkspaceEntries(globalEntries, collapsedGlobalPaths),
+    () => filterVisibleGlobalWorkspaceEntries(globalEntries, collapsedGlobalPaths),
     [collapsedGlobalPaths, globalEntries],
   );
   const temporaryChatSessions = useMemo(
@@ -757,14 +753,8 @@ function App() {
   }, [renameEntryFocusKey]);
 
   useEffect(() => {
-    if (activeToolPanel === 'skills') {
-      void loadSkills();
-    }
     if (activeToolPanel === 'wechat') {
       void loadWechatStatus();
-    }
-    if (activeToolPanel === 'settings') {
-      void loadBehaviorRules();
     }
   }, [activeToolPanel]);
 
@@ -1085,15 +1075,31 @@ function App() {
   }
 
   async function createProjectFromContext() {
-    const name = await showPrompt({ title: `新建${WORKSPACE_SECTIONS[1].title.replace(/区域$/, '')}`, placeholder: DEFAULT_PROJECT_NAME, initialValue: DEFAULT_PROJECT_NAME, confirmLabel: '创建' });
-    if (!name?.trim()) return;
-    const description = await showPrompt({ title: '项目描述', message: '一句话描述题材', placeholder: DEFAULT_PROJECT_DESCRIPTION, initialValue: DEFAULT_PROJECT_DESCRIPTION, confirmLabel: '确认' }) ?? '';
+    setCreateProjectDraft({
+      productId: ACTIVE_PRODUCT_PROFILE.id,
+      name: ACTIVE_PRODUCT_PROFILE.defaultProjectName,
+      description: ACTIVE_PRODUCT_PROFILE.defaultProjectDescription,
+    });
+    setCreateProjectError(null);
+    setCreateProjectDialogOpen(true);
+  }
+
+  async function submitCreateProjectDialog() {
+    const selectedProfile = SELECTABLE_PRODUCT_PROFILES.find((profile) => profile.id === createProjectDraft.productId) ?? ACTIVE_PRODUCT_PROFILE;
+    const name = createProjectDraft.name.trim();
+    if (!name) return;
+
     setIsCreatingProject(true);
     setCreateProjectError(null);
     try {
-      const project = await apiClient.createProject({ name: name.trim(), description: description.trim() });
+      const project = await apiClient.createProject({
+        name,
+        description: createProjectDraft.description.trim(),
+        productId: selectedProfile.id,
+      });
       setProjects((currentProjects) => [project, ...currentProjects.filter((item) => item.id !== project.id)]);
       setSelectedProjectId(project.id);
+      setCreateProjectDialogOpen(false);
     } catch (error) {
       setCreateProjectError(errorToMessage(error));
     } finally {
@@ -1535,29 +1541,6 @@ function App() {
     }
   }
 
-  async function loadSkills() {
-    setSkillsState('loading');
-    try {
-      setSkills(await apiClient.listSkills());
-      setSkillsState('idle');
-    } catch {
-      setSkillsState('error');
-    }
-  }
-
-  async function toggleSkill(skill: TheaterSkill) {
-    if (skill.mutable === false) {
-      return;
-    }
-    const updated = await apiClient.updateSkill(skill.slug, { enabled: !skill.enabled });
-    setSkills((current) => current.map((item) => item.slug === updated.slug ? updated : item));
-  }
-
-  async function createSkill() {
-    const created = await apiClient.createSkill(newSkill);
-    setSkills((current) => [...current, created]);
-  }
-
   async function loadWechatStatus() {
     setWechatState('loading');
     try {
@@ -1584,41 +1567,6 @@ function App() {
     });
     setWechatStatus(status);
     setWechatSetup(status.setupSession);
-  }
-
-  async function loadBehaviorRules() {
-    setBehaviorRulesState('loading');
-    try {
-      setBehaviorRules(await apiClient.getBehaviorRules());
-      setBehaviorRulesState('idle');
-    } catch {
-      setBehaviorRulesState('error');
-    }
-  }
-
-  async function saveBehaviorRules() {
-    setBehaviorRulesState('loading');
-    try {
-      setBehaviorRules(await apiClient.saveBehaviorRules(behaviorRules));
-      setBehaviorRulesState('idle');
-    } catch {
-      setBehaviorRulesState('error');
-    }
-  }
-
-  function addBehaviorRule() {
-    setBehaviorRules((current) => [
-      ...current,
-      { id: `custom-${Date.now()}`, label: '自定义规则', content: '', enabled: true, builtIn: false },
-    ]);
-  }
-
-  function removeBehaviorRule(id: string) {
-    setBehaviorRules((current) => current.filter((r) => r.id !== id));
-  }
-
-  function updateBehaviorRule(id: string, patch: Partial<BehaviorRule>) {
-    setBehaviorRules((current) => current.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
   function closeReferenceMenu() {
@@ -1848,6 +1796,7 @@ function App() {
     try {
       const response = await apiClient.createImageGeneration({
         sessionId: session.id,
+        productId: ACTIVE_PRODUCT_PROFILE.id,
         prompt: messageText,
         model: imageModel || undefined,
         aspectRatio: imageAspectRatio,
@@ -1903,7 +1852,7 @@ function App() {
     try {
       const session = chatScope === 'project' && selectedProjectId
         ? await apiClient.createChatSession(selectedProjectId)
-        : await apiClient.createTemporaryChatSession();
+        : await apiClient.createTemporaryChatSession({ productId: ACTIVE_PRODUCT_PROFILE.id });
 
       if (chatScope === 'temporary') {
         setTemporaryProjectId(session.projectId);
@@ -2615,7 +2564,7 @@ function App() {
       session = await createAndActivateChatSession(selectedProjectId);
     } else {
       try {
-        const created = await apiClient.createTemporaryChatSession();
+        const created = await apiClient.createTemporaryChatSession({ productId: ACTIVE_PRODUCT_PROFILE.id });
         session = created;
         setChatSessions((currentSessions) => [created, ...currentSessions.filter((current) => current.id !== created.id)]);
         setActiveChatSessionId(created.id);
@@ -2962,7 +2911,6 @@ function App() {
         onToggleEditor={() => setEditorPanelOpen((v) => !v)}
         onToggleChat={() => setChatPanelOpen((v) => !v)}
         onToggleTheme={() => setThemeMode(nextThemeMode(themeMode))}
-        onOpenSettings={() => setActiveToolPanel('settings')}
         onOpenWechat={() => setActiveToolPanel('wechat')}
         onOpenGitSync={() => setActiveToolPanel('git')}
       />
@@ -3745,46 +3693,14 @@ function App() {
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">
-                  {activeToolPanel === 'skills' ? 'Agent Skills' : activeToolPanel === 'settings' ? 'Agent Settings' : activeToolPanel === 'git' ? 'Version Control' : 'Remote WeChat'}
+                  {activeToolPanel === 'git' ? 'Version Control' : 'Remote WeChat'}
                 </p>
                 <h2>
-                  {activeToolPanel === 'skills' ? 'Agent 技能' : activeToolPanel === 'settings' ? 'Agent 行为规则' : activeToolPanel === 'git' ? '版本管理与安全备份' : '远程微信接入'}
+                  {activeToolPanel === 'git' ? '版本管理与安全备份' : '远程微信接入'}
                 </h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
             </div>
-
-            {activeToolPanel === 'skills' ? (
-              <div className="skills-plaza">
-                {skillsState === 'loading' ? <p className="muted">正在加载技能...</p> : null}
-                {skillsState === 'error' ? <p className="inline-error">技能加载失败</p> : null}
-                <div className="skill-grid">
-                  {skills.map((skill) => (
-                    <article key={skill.slug} className="skill-card">
-                      <div>
-                        <strong>{skill.title}</strong>
-                        <span>{skill.scope === 'system' ? '系统' : '自定义'}</span>
-                      </div>
-                      <p>{skill.description}</p>
-                      {skill.location ? <p className="muted">{skill.location}</p> : null}
-                      {skill.mutable === false ? (
-                        <span className="status-pill success">文件技能</span>
-                      ) : (
-                        <button type="button" onClick={() => void toggleSkill(skill)}>
-                          {skill.enabled ? '已启用' : '已停用'}
-                        </button>
-                      )}
-                    </article>
-                  ))}
-                </div>
-                <div className="create-skill-form">
-                  <input value={newSkill.title} onChange={(event) => setNewSkill({ ...newSkill, title: event.target.value })} />
-                  <input value={newSkill.description} onChange={(event) => setNewSkill({ ...newSkill, description: event.target.value })} />
-                  <textarea value={newSkill.prompt} onChange={(event) => setNewSkill({ ...newSkill, prompt: event.target.value })} />
-                  <button type="button" onClick={() => void createSkill()}>创建创作技能</button>
-                </div>
-              </div>
-            ) : null}
 
             {activeToolPanel === 'wechat' ? (
               <div className="wechat-panel">
@@ -3800,57 +3716,6 @@ function App() {
               </div>
             ) : null}
 
-            {activeToolPanel === 'settings' ? (
-              <div className="settings-panel">
-                {behaviorRulesState === 'loading' && behaviorRules.length === 0 ? (
-                  <p className="muted">正在加载行为规则...</p>
-                ) : null}
-                {behaviorRulesState === 'error' ? <p className="inline-error">规则加载失败</p> : null}
-                <p className="muted">以下规则会在每次对话时注入 Agent 指令。修改后立即生效，无需重启。</p>
-                <div className="behavior-rules-list">
-                  {behaviorRules.map((rule) => (
-                    <div key={rule.id} className="behavior-rule-card">
-                      <div className="rule-header">
-                        <label className="rule-toggle">
-                          <input
-                            type="checkbox"
-                            checked={rule.enabled}
-                            onChange={(event) => updateBehaviorRule(rule.id, { enabled: event.target.checked })}
-                          />
-                          <span>{rule.enabled ? '已启用' : '已停用'}</span>
-                        </label>
-                        <input
-                          className="rule-label-input"
-                          value={rule.label}
-                          onChange={(event) => updateBehaviorRule(rule.id, { label: event.target.value })}
-                        />
-                        {rule.builtIn ? (
-                          <span className="status-pill success">内置</span>
-                        ) : (
-                          <button type="button" className="rule-remove-btn" onClick={() => removeBehaviorRule(rule.id)}>
-                            删除
-                          </button>
-                        )}
-                      </div>
-                      <textarea
-                        className="rule-content-input"
-                        rows={4}
-                        value={rule.content}
-                        onChange={(event) => updateBehaviorRule(rule.id, { content: event.target.value })}
-                        placeholder="输入规则内容，会在注入到 Agent 的系统指令中..."
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="settings-actions">
-                  <button type="button" onClick={addBehaviorRule}>+ 添加自定义规则</button>
-                  <button type="button" onClick={() => void saveBehaviorRules()}>
-                    {behaviorRulesState === 'loading' ? '保存中...' : '保存规则'}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
             {activeToolPanel === 'git' ? (
               <GitSyncPanel
                 apiClient={apiClient}
@@ -3858,6 +3723,76 @@ function App() {
                 selectedProjectId={selectedProjectId}
               />
             ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {createProjectDialogOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !isCreatingProject && setCreateProjectDialogOpen(false)}>
+          <section className="create-project-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="create-project-dialog__heading">
+              <div>
+                <p className="eyebrow">New Workspace</p>
+                <h2 id="create-project-title">新建项目</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setCreateProjectDialogOpen(false)} disabled={isCreatingProject} aria-label="关闭" title="关闭">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="create-project-dialog__field">
+              <span>项目类型</span>
+              <div className="product-type-grid">
+                {SELECTABLE_PRODUCT_PROFILES.map((profile) => (
+                  <button
+                    key={profile.id}
+                    type="button"
+                    className={`product-type-option${createProjectDraft.productId === profile.id ? ' is-selected' : ''}`}
+                    onClick={() => setCreateProjectDraft({
+                      productId: profile.id,
+                      name: profile.defaultProjectName,
+                      description: profile.defaultProjectDescription,
+                    })}
+                  >
+                    <strong>{productTypeLabel(profile.id)}</strong>
+                    <small>{profile.defaultProjectDescription}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="create-project-dialog__field">
+              <span>项目名称</span>
+              <input
+                value={createProjectDraft.name}
+                onChange={(event) => setCreateProjectDraft((draft) => ({ ...draft, name: event.target.value }))}
+                placeholder="输入项目名称"
+                autoFocus
+              />
+            </label>
+
+            <label className="create-project-dialog__field">
+              <span>项目描述</span>
+              <textarea
+                value={createProjectDraft.description}
+                onChange={(event) => setCreateProjectDraft((draft) => ({ ...draft, description: event.target.value }))}
+                placeholder="一句话描述题材"
+              />
+            </label>
+
+            {createProjectError ? <p className="inline-error">{createProjectError}</p> : null}
+
+            <div className="create-project-dialog__actions">
+              <button type="button" className="confirm-dialog__btn" onClick={() => setCreateProjectDialogOpen(false)} disabled={isCreatingProject}>取消</button>
+              <button
+                type="button"
+                className="confirm-dialog__btn confirm-dialog__btn--primary"
+                onClick={() => void submitCreateProjectDialog()}
+                disabled={isCreatingProject || !createProjectDraft.name.trim()}
+              >
+                {isCreatingProject ? '创建中...' : '创建'}
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
@@ -4490,6 +4425,12 @@ function getSessionKind(session: ChatSession): ChatMode {
 
 function isTemporaryProjectId(projectId: string): boolean {
   return projectId.startsWith('temp-');
+}
+
+function productTypeLabel(productId: string): string {
+  if (productId === 'novel-adaptation') return '剧本改编';
+  if (productId === 'sitcom') return '情景剧创作';
+  return '创作项目';
 }
 
 function readStoredTemporaryChatSession(): { projectId: string; sessionId: string | null } | null {

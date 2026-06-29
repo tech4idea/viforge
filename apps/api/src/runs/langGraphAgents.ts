@@ -11,15 +11,16 @@ import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store';
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { z } from 'zod';
 
-import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
+import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MODEL } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MODEL, PRODUCT_PROFILE } from '../env';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import type { WechatSendContext } from './runService';
 import { getPromptText } from './langfusePromptStore';
+import { readProductSkillPrompt } from '../productProfilePrompts';
 
 type LangGraphMemoryBackend = {
   checkpointer: BaseCheckpointSaver;
@@ -1240,10 +1241,6 @@ function sanitizeToolOutputValue(output: unknown): { changed: boolean; output: u
   return { changed: false, output };
 }
 
-export function createLangGraphObservability(): null {
-  return null;
-}
-
 export async function createAgentRegistry(
   store: WorkspaceStore,
   options: {
@@ -1252,17 +1249,23 @@ export async function createAgentRegistry(
     apiKey?: string;
     connectionString?: string;
     traceId?: string;
-    observabilityLangGraph?: null;
+    productProfile?: ProductProfile;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
   const modelConfig = buildModelConfig(options);
   const { checkpointer, store: memoryStore } = await getLangGraphMemoryBackend();
+  const enabledAgentIds = new Set(options.productProfile?.defaultAgentSkillNames ?? AGENT_DEFS.map((def) => def.id));
 
   const createAgentWithSkill = async (def: AgentDef): Promise<LangGraphAgentClient | null> => {
-    const fallbackInstructions = await loadSkillInstructions(store, def.id);
+    if (!enabledAgentIds.has(def.id)) return null;
+
+    const fallbackInstructions = await loadSkillInstructions(store, def.id, options.productProfile);
+    const skillPromptName = options.productProfile && options.productProfile.id !== PRODUCT_PROFILE.id
+      ? `${options.productProfile.id}-${def.id}-skill`
+      : `${def.id}-skill`;
     const [instructions] = await Promise.all([
-      getPromptText(`${def.id}-skill`, fallbackInstructions),
+      getPromptText(skillPromptName, fallbackInstructions),
       getPromptText(`${def.id}-working-memory`, def.workingMemoryTemplate),
     ]);
     if (!instructions) return null;
@@ -1299,12 +1302,25 @@ export async function createAgentRegistry(
   return { brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
 }
 
-async function loadSkillInstructions(store: WorkspaceStore, agentId: string): Promise<string> {
+async function loadSkillInstructions(store: WorkspaceStore, agentId: string, productProfile?: ProductProfile): Promise<string> {
+  if (productProfile && productProfile.id !== PRODUCT_PROFILE.id) {
+    try {
+      return stripYamlFrontmatter(await readProductSkillPrompt(productProfile, agentId));
+    } catch {
+      // Fall back to the global agent config below for custom or legacy setups.
+    }
+  }
+
   try {
     const raw = (await store.readGlobalWorkspaceFile(`Agent 配置/skills/${agentId}/SKILL.md`)).content;
     return stripYamlFrontmatter(raw);
   } catch {
-    return '';
+    if (!productProfile) return '';
+    try {
+      return stripYamlFrontmatter(await readProductSkillPrompt(productProfile, agentId));
+    } catch {
+      return '';
+    }
   }
 }
 
@@ -1388,7 +1404,7 @@ function createLangGraphAgentClient(input: {
     name: input.name,
     async stream(prompt, options) {
       const config = langGraphRunnableConfig(input.id, options);
-      return { fullStream: toLangGraphStreamChunks(runnable.streamEvents({ messages: [new HumanMessage(prompt)] }, config)) };
+      return { fullStream: toLangGraphStreamChunks(runnable.streamEvents({ messages: [new HumanMessage(prompt)] }, config), input.id) };
     },
     async generate(prompt, options) {
       const config = langGraphRunnableConfig(input.id, options);
@@ -1418,7 +1434,7 @@ function langGraphRunnableConfig(agentId: string, options: Record<string, unknow
   };
 }
 
-async function* toLangGraphStreamChunks(events: AsyncIterable<unknown>): AsyncIterable<LangGraphStreamChunk> {
+async function* toLangGraphStreamChunks(events: AsyncIterable<unknown>, agentId: string): AsyncIterable<LangGraphStreamChunk> {
   const toolNamesByRunId = new Map<string, string>();
   for await (const event of events) {
     const record = event as Record<string, unknown>;
@@ -1427,6 +1443,7 @@ async function* toLangGraphStreamChunks(events: AsyncIterable<unknown>): AsyncIt
     const runId = typeof record.run_id === 'string' ? record.run_id : randomId();
 
     if (eventName === 'on_chat_model_stream') {
+      if (!isOwnAgentStreamEvent(record, agentId)) continue;
       const chunk = data?.chunk;
       const text = textFromMessageChunk(chunk);
       if (text) yield { type: 'text-delta', payload: { text } };
@@ -1448,6 +1465,22 @@ async function* toLangGraphStreamChunks(events: AsyncIterable<unknown>): AsyncIt
       yield { type: 'tool-result', payload: { toolCallId: runId, toolName, result: sanitizeToolResult(data?.output) } };
     }
   }
+}
+
+function isOwnAgentStreamEvent(record: Record<string, unknown>, agentId: string): boolean {
+  const metadata = isRecord(record.metadata) ? record.metadata : undefined;
+  const langgraphNode = typeof metadata?.langgraph_node === 'string' ? metadata.langgraph_node : undefined;
+  if (langgraphNode && langgraphNode !== agentId && langgraphNode !== 'agent') return false;
+
+  const tags = Array.isArray(record.tags) ? record.tags.filter((tag): tag is string => typeof tag === 'string') : [];
+  const hasDifferentAgentTag = tags.some((tag) => tag.endsWith('-agent') && tag !== agentId);
+  if (hasDifferentAgentTag) return false;
+
+  return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function textFromMessageChunk(chunk: unknown): string {

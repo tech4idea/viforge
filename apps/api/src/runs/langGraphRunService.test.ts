@@ -119,6 +119,53 @@ describe('langgraph run service', () => {
     expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
   });
 
+  it('uses the project product profile for prompts and specialist registry setup', async () => {
+    const project = await store.createProject({ name: 'Studio Sitcom', productId: 'sitcom' });
+    let capturedPrompt = '';
+    let capturedInstructions = '';
+    let capturedProfileId = '';
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      async createAgentRegistry(_tools, context) {
+        capturedProfileId = context.productProfile?.id ?? '';
+        return {
+          brainstorm: null,
+          character: null,
+          continuity: null,
+          story: null,
+          sourceAnalyst: null,
+          adaptationPlanner: null,
+          screenwriter: null,
+          reviewer: null,
+          async systemAgent(instructions) {
+            capturedInstructions = instructions;
+            return {
+              id: 'viwork-system-agent',
+              async stream(prompt) {
+                capturedPrompt = prompt;
+                return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '情景剧处理完成。' } }]) };
+              },
+              async generate() {
+                return { text: '情景剧处理完成。' };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-sitcom',
+      prompt: '写一个职场误会单集故事',
+    });
+
+    await collectUntilEnd(bus, run.id);
+
+    expect(capturedProfileId).toBe('sitcom');
+    expect(capturedPrompt).toContain('# 情景剧创作请求');
+    expect(capturedInstructions).toContain('情景剧');
+    expect(capturedInstructions).not.toContain('小说改编剧本创作的全流程');
+  });
+
   it('lets the main agent answer simple requests without specialist delegation', async () => {
     const project = await store.createProject({ name: 'Casual Chat' });
     let mainAgentTools: Record<string, unknown> | null = null;

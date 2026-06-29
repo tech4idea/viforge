@@ -35,7 +35,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 - `TheaterSkill`：全局 `Agent 配置/skills` 下的 agent skill 条目。
 - `WechatStatus` / `WechatSetupSession`：微信接入状态。
 
-产品 profile 装配入口位于 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts)，当前支持 `novel-adaptation` 和 `sitcom` 两个 id。基础元数据拆到 `packages/shared/src/product-profiles/<product>/profile.json`，默认 system agent 和 agent skill prompt 放在同目录的 `prompts/*.md`。profile 统一描述产品名、页面标题、默认项目文案、工作区分组、默认目录/文件、默认 agent skill、agent label、agent prompt 标题和正式产物路径。API 通过 `GET /api/product-profile` 暴露当前 active profile。
+产品 profile 装配入口位于 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts)，当前支持 `novel-adaptation` 和 `sitcom` 两个 id。基础元数据拆到 `packages/shared/src/product-profiles/<product>/profile.json`，默认 system agent 和 agent skill prompt 放在同目录的 `prompts/*.md`，API 通过 [apps/api/src/productProfilePrompts.ts](../../apps/api/src/productProfilePrompts.ts) 按 profile 读取这些 prompt 文件。profile 统一描述产品名、页面标题、默认项目文案、工作区分组、默认目录/文件、默认 agent skill、agent label、agent prompt 标题和正式产物路径。API 通过 `GET /api/product-profile` 暴露默认 active profile；具体项目的 agent 运行按项目 `project.json` 里的 `productId` 自动选择 profile。
 
 后续增加前后端共享数据结构时，应优先加到 `packages/shared/src/contracts.ts`，再在 `apps/web/src/api.ts` 和 API 路由中使用同一类型。
 
@@ -59,7 +59,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 - `02 改编方案`
 - `03 剧本`
 
-创建项目时由 `createDefaultWorkspaceFilesForProfile(profile, topic)` 生成项目文档。初始化全局区时，API 先从 profile 生成默认文件列表，再由 [apps/api/src/productProfileDefaults.ts](../../apps/api/src/productProfileDefaults.ts) 读取 `product-profiles/<product>/prompts/*.md` 覆盖 `Agent 配置/AGENTS.md` 和 `Agent 配置/skills/*/SKILL.md`。`createWorkspaceStore(root, { productProfile })` 支持测试或部署显式注入 profile；未注入时读取 `VIWORK_PRODUCT` 解析出的 active profile。
+创建项目时由 `createDefaultWorkspaceFilesForProfile(profile, topic)` 生成项目文档，并把 `productId` 写入项目 metadata。初始化全局区时，API 会按默认 profile 补齐 `Agent 配置/AGENTS.md` 和 `Agent 配置/skills/*/SKILL.md`。`createWorkspaceStore(root, { productProfile })` 支持测试或部署显式注入默认 profile；未注入时读取 `VIWORK_PRODUCT` 解析默认 profile。正式项目和临时会话都可以在创建时传入 `productId`，后续 `getProjectProductProfile(projectId)` 会根据 metadata 解析 profile，旧项目缺少 `productId` 时回退到当前默认 profile。
 
 ## API Client
 

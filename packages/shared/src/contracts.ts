@@ -1,5 +1,6 @@
 export type Project = {
   id: string;
+  productId?: string;
   name: string;
   description: string;
   createdAt: string;
@@ -118,6 +119,7 @@ export type ImageGenerationReferenceImage = {
 
 export type ImageGenerationRequest = {
   sessionId?: string;
+  productId?: string;
   prompt: string;
   model?: string;
   aspectRatio: GeminiImageAspectRatio;

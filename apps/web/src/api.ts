@@ -91,7 +91,7 @@ export type ApiClient = {
   listChatSessions(projectId: string, options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   listTemporaryChatSessions(options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   createChatSession(projectId: string, input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
-  createTemporaryChatSession(input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
+  createTemporaryChatSession(input?: { kind?: ChatSession['kind']; title?: string; productId?: string }): Promise<ChatSession>;
   updateChatSession(sessionId: string, input: { title?: string; modelConfig?: ChatSessionModelConfig }): Promise<ChatSession>;
   archiveChatSession(sessionId: string): Promise<ChatSession>;
   restoreChatSession(sessionId: string): Promise<ChatSession>;
@@ -126,6 +126,7 @@ export type ApiClient = {
 export type CreateProjectInput = {
   name: string;
   description?: string;
+  productId?: string;
 };
 
 export type UpdateProjectInput = {

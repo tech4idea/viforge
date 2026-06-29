@@ -15,7 +15,7 @@ import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
-import { createAgentRegistry, createLangGraphObservability, createTool, createWorkspaceTools, type AgentRegistry, type LangGraphAgentClient, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
+import { createAgentRegistry, createTool, createWorkspaceTools, type AgentRegistry, type LangGraphAgentClient, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
 import { getPromptText } from './langfusePromptStore';
 
 type LangGraphRunOptions = {
@@ -25,7 +25,7 @@ type LangGraphRunOptions = {
   }) => LangGraphAgentClient;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string },
+    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string; productProfile?: ProductProfile },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
@@ -129,9 +129,7 @@ async function executeLangGraphRun({
   const signal = bus.getAbortSignal(runId);
 
   try {
-    const productProfile = options.productProfile ?? PRODUCT_PROFILE;
-
-    const observabilityLangGraph = createLangGraphObservability();
+    const productProfile = options.productProfile ?? await store.getProjectProductProfile(input.projectId) ?? PRODUCT_PROFILE;
 
     // Build tools
     const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
@@ -146,7 +144,7 @@ async function executeLangGraphRun({
       ...options,
       model: input.model ?? options.model,
       traceId: input.traceId,
-      observabilityLangGraph,
+      productProfile,
     };
     const registry = options.createAgentRegistry
       ? await options.createAgentRegistry(tools, registryOptions)
@@ -163,7 +161,7 @@ async function executeLangGraphRun({
       // Backward compat: single agent mode
       const instructions = buildSystemInstructions(productProfile);
       const singleAgentTools = registry
-        ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input }) }
+        ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input, productId: productProfile.id }) }
         : tools;
       const agent = options.createAgent({ instructions, tools: singleAgentTools });
 
@@ -178,6 +176,9 @@ async function executeLangGraphRun({
 
       const streamed = await agent.stream(prompt, {
         runId,
+        traceId: input.traceId,
+        source: input.source ?? 'web',
+        productId: productProfile.id,
         maxSteps: 25,
         memory: { thread: threadId, resource: input.projectId },
       });
@@ -271,6 +272,7 @@ async function executeMultiAgentWorkflow({
       runId,
       threadId,
       input,
+      productId: productProfile.id,
     }),
   };
   const systemInstructions = buildSystemInstructions(productProfile);
@@ -288,7 +290,7 @@ async function executeMultiAgentWorkflow({
     prompt: textLogValue(prompt),
   });
 
-  return runAgentStream(mainAgent, prompt, publish, emittedAt, runId, threadId, input, 40, threadId, signal);
+  return runAgentStream(mainAgent, prompt, publish, emittedAt, runId, threadId, input, productProfile.id, 40, threadId, signal);
 }
 
 function createSpecialistDelegationTool({
@@ -298,6 +300,7 @@ function createSpecialistDelegationTool({
   runId,
   threadId,
   input,
+  productId,
 }: {
   registry: AgentRegistry;
   publish: (event: StreamEvent) => void;
@@ -305,6 +308,7 @@ function createSpecialistDelegationTool({
   runId: string;
   threadId: string;
   input: CreateRunInput;
+  productId: string;
 }) {
   return createTool({
     id: 'delegate_to_specialist_agent',
@@ -337,6 +341,7 @@ function createSpecialistDelegationTool({
       runId,
       threadId,
       input,
+      productId,
     }),
   });
 }
@@ -351,6 +356,7 @@ async function runSpecialistAgent({
   runId,
   threadId,
   input,
+  productId,
 }: {
   registry: AgentRegistry;
   agentId: string;
@@ -361,6 +367,7 @@ async function runSpecialistAgent({
   runId: string;
   threadId: string;
   input: CreateRunInput;
+  productId: string;
 }): Promise<{ agentId: string; output: string; summary: string }> {
   const agent = getSpecialistAgent(registry, agentId);
   if (!agent) {
@@ -400,6 +407,9 @@ async function runSpecialistAgent({
 
     const generatePromise = agent.generate(specialistPrompt, {
       runId,
+      traceId: input.traceId,
+      source: input.source ?? 'web',
+      productId,
       maxSteps: 10,
       memory: { thread: memoryThread, resource: input.projectId },
     });
@@ -469,12 +479,16 @@ async function runAgentStream(
   runId: string,
   threadId: string,
   input: CreateRunInput,
+  productId: string,
   maxSteps: number,
   memoryThread = `${threadId}-${agent.id ?? 'agent'}`,
   signal?: AbortSignal,
 ): Promise<string> {
   const streamed = await agent.stream(prompt, {
     runId,
+    traceId: input.traceId,
+    source: input.source ?? 'web',
+    productId,
     maxSteps,
     memory: { thread: memoryThread, resource: input.projectId },
   });

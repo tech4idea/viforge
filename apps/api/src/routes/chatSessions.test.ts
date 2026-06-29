@@ -8,19 +8,23 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createChatSessionStore } from '../chat/chatSessionStore';
 import { createWorkspaceStore } from '../storage/workspaceStore';
 import { createChatSessionRoutes } from './chatSessions';
+import { createProjectsRoutes } from './projects';
 
 let root: string;
 let app: Hono;
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'viwork-chat-sessions-'));
-  app = new Hono().route(
-    '/api',
-    createChatSessionRoutes(
-      createChatSessionStore(path.join(root, 'chat-sessions.json')),
-      createWorkspaceStore(path.join(root, 'workspaces')),
-    ),
-  );
+  const workspaceStore = createWorkspaceStore(path.join(root, 'workspaces'));
+  app = new Hono()
+    .route('/api', createProjectsRoutes(workspaceStore))
+    .route(
+      '/api',
+      createChatSessionRoutes(
+        createChatSessionStore(path.join(root, 'chat-sessions.json')),
+        workspaceStore,
+      ),
+    );
 });
 
 afterEach(async () => {
@@ -38,6 +42,25 @@ describe('chat session routes', () => {
 
     const listResponse = await app.request(`/api/projects/${session.projectId}/chat-sessions`);
     await expect(listResponse.json()).resolves.toEqual([expect.objectContaining({ projectId: session.projectId })]);
+  });
+
+  it('creates temporary sessions with an explicit product profile', async () => {
+    const response = await app.request('/api/temporary-chat-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ productId: 'sitcom' }),
+    });
+
+    expect(response.status).toBe(201);
+    const session = await response.json() as { projectId: string };
+
+    const projectResponse = await app.request(`/api/projects/${session.projectId}`);
+    expect(projectResponse.status).toBe(200);
+    await expect(projectResponse.json()).resolves.toMatchObject({
+      id: session.projectId,
+      productId: 'sitcom',
+      temporary: true,
+    });
   });
 
   it('lists temporary workspace chat sessions across hidden temporary projects', async () => {

@@ -42,7 +42,7 @@ VIWORK_AIGC_HUB_IMAGE_MODEL=
 
 其中：
 
-- `VIWORK_PRODUCT` 当前可选 `novel-adaptation` 和 `sitcom`。
+- `VIWORK_PRODUCT` 当前可选 `novel-adaptation` 和 `sitcom`，只作为默认产品 profile 和默认数据目录选择；单个项目和临时会话会把创建时的 `productId` 写入项目 metadata，后续 agent 运行会按项目自动切换到对应产品 profile。
 - `VITE_API_BASE_URL` 在 compose 部署中应保持为空；只有前端需要直连外部 API 时才覆盖。
 - `DATABASE_URL` 和 `QDRANT_URL` 由 `docker-compose.yml` 注入到 `api` 容器，默认分别指向 `postgres:5432` 和 `qdrant:6333`。
 - `VIWORK_AIGC_HUB_*` 是当前 compose 默认注入到 `api` 容器的关键运行时环境变量。
@@ -89,7 +89,7 @@ VIWORK_WEB_PORT=8080 VIWORK_API_PORT=3001 docker compose up -d --build
 - LangGraph 短期状态和长期记忆：通过 `DATABASE_URL` 使用 PostgreSQL/pgvector；checkpoint schema 为 `langgraph`，Store schema 为 `langgraph_store`。
 - API 日志：`logs/api.log`、`logs/api.error.log` 和 agent 提交链路诊断 `logs/api-runs.jsonl`，compose 中覆盖为 `/data/logs`。
 
-`VIWORK_PRODUCT` 同时选择后端和前端产品 profile，默认 `novel-adaptation`。Vite 已允许读取该非 `VITE_` 前缀变量，启动前后端时使用同一个值即可。`WORKSPACES_ROOT`、`LOGS_ROOT` 和 `DATABASE_URL` 可通过环境变量覆盖；实现入口在 [apps/api/src/env.ts](../../apps/api/src/env.ts)。
+`VIWORK_PRODUCT` 选择默认产品 profile，默认 `novel-adaptation`。新项目和临时会话可以携带 `productId`，API 会把该值保存到 `project.json`，之后 LangGraph agent 运行时按项目 metadata 自动选择 `novel-adaptation`、`sitcom` 或未来新增产品 profile 的 system prompt、specialist skills 和工作区模板。Vite 已允许读取该非 `VITE_` 前缀变量，启动前后端时使用同一个值即可。`WORKSPACES_ROOT`、`LOGS_ROOT` 和 `DATABASE_URL` 可通过环境变量覆盖；实现入口在 [apps/api/src/env.ts](../../apps/api/src/env.ts)。
 
 ## 功能文档
 

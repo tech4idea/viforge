@@ -2649,6 +2649,127 @@ body.is-resizing-panels .panel-resizer::after {
   background: var(--danger-color, #ef4444);
 }
 
+.create-project-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 22px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-xl);
+  animation: dialog-pop 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.create-project-dialog__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.create-project-dialog__heading h2 {
+  margin: 2px 0 0;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+
+.create-project-dialog__field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.create-project-dialog__field > span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.create-project-dialog__field input,
+.create-project-dialog__field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font: inherit;
+  outline: none;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+}
+
+.create-project-dialog__field input {
+  height: 38px;
+  padding: 0 12px;
+}
+
+.create-project-dialog__field textarea {
+  min-height: 82px;
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.create-project-dialog__field input:focus,
+.create-project-dialog__field textarea:focus {
+  border-color: var(--accent);
+  background: var(--surface-solid);
+  box-shadow: 0 0 0 3px var(--glow-accent);
+}
+
+.product-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.product-type-option {
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+}
+
+.product-type-option strong,
+.product-type-option small {
+  display: block;
+}
+
+.product-type-option strong {
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+}
+
+.product-type-option small {
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.product-type-option:hover,
+.product-type-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  box-shadow: 0 0 0 3px var(--glow-accent);
+}
+
+.create-project-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@media (max-width: 620px) {
+  .product-type-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @keyframes dialog-pop {
   from { opacity: 0; transform: scale(0.92); }
   to { opacity: 1; transform: scale(1); }
