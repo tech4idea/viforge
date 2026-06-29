@@ -38,6 +38,7 @@ VIWORK_AIGC_HUB_BASE_URL=
 VIWORK_AIGC_HUB_API_KEY=
 VIWORK_AIGC_HUB_CHAT_MODEL=
 VIWORK_AIGC_HUB_IMAGE_MODEL=
+PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
 ```
 
 其中：
@@ -47,6 +48,7 @@ VIWORK_AIGC_HUB_IMAGE_MODEL=
 - `DATABASE_URL` 和 `QDRANT_URL` 由 `docker-compose.yml` 注入到 `api` 容器，默认分别指向 `postgres:5432` 和 `qdrant:6333`。
 - `VIWORK_AIGC_HUB_*` 是当前 compose 默认注入到 `api` 容器的关键运行时环境变量。
 - `VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS` 控制 LangGraph Store pgvector 索引维度，默认 `1024`，应与 `VIWORK_AIGC_HUB_EMBEDDING_MODEL` 的输出维度一致。
+- `PHOENIX_COLLECTOR_ENDPOINT` 开启 LangGraph/LangChain OpenTelemetry trace 上报，默认指向 `http://192.168.43.167:6006`，API 会向 `${PHOENIX_COLLECTOR_ENDPOINT}/v1/traces` 发送 spans。
 - `VIWORK_API_PORT`、`VIWORK_WEB_PORT`、`VIWORK_POSTGRES_PORT` 和 `VIWORK_QDRANT_PORT` 只控制宿主机端口映射。
 
 启动命令：

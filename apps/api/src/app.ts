@@ -30,8 +30,11 @@ import type { PendingSessionAction } from './wechat/wechatStore';
 import type { WechatIlinkClient } from './wechat/wechatIlinkClient';
 import type { WechatPoller } from './wechat/wechatPoller';
 import { WORKSPACES_ROOT } from './env';
+import { initializePhoenixTracing } from './observability/phoenix';
 
 export function createApp(): Hono {
+  initializePhoenixTracing();
+
   const app = new Hono();
   const chatSessionStore = createChatSessionStore(path.join(WORKSPACES_ROOT, '..', 'chat-sessions.json'));
 
