@@ -22,7 +22,7 @@ export function initializePhoenixTracing(): boolean {
       projectName: PHOENIX_PROJECT_NAME,
       url: PHOENIX_COLLECTOR_ENDPOINT,
       headers: { 'project-name': PHOENIX_PROJECT_NAME },
-      batch: false,
+      batch: true,
       global: true,
     }) as NodeTracerProvider;
 
@@ -86,14 +86,6 @@ export async function withPhoenixSpan<T>(
     ...options,
     attributes: enabled ? sanitizeAttributes(projectAttributes(attributes)) : undefined,
   });
-  appendJsonLog('api.log', {
-    scope: 'phoenix',
-    stage: 'span.start',
-    name,
-    traceId: span.spanContext().traceId,
-    spanId: span.spanContext().spanId,
-    projectName: PHOENIX_PROJECT_NAME,
-  });
 
   try {
     return await fn(span);
@@ -102,14 +94,6 @@ export async function withPhoenixSpan<T>(
     throw error;
   } finally {
     span.end();
-    appendJsonLog('api.log', {
-      scope: 'phoenix',
-      stage: 'span.end',
-      name,
-      traceId: span.spanContext().traceId,
-      spanId: span.spanContext().spanId,
-      projectName: PHOENIX_PROJECT_NAME,
-    });
   }
 }
 

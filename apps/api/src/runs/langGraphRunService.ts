@@ -11,7 +11,7 @@ import type { BehaviorRule } from '../storage/behaviorRulesStore';
 import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
-import { flushPhoenixTracing, isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoenix';
+import { isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoenix';
 
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
@@ -209,7 +209,6 @@ async function executeLangGraphRun({
       await detectChoiceRequest(assistantText, publish, runId, emittedAt);
       publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
     }
-    void flushPhoenixTracing();
   } catch (error) {
     const modelNotFound = isModelNotFoundError(error);
     
@@ -233,7 +232,6 @@ async function executeLangGraphRun({
       status: 'error',
       errorMessage,
     });
-    void flushPhoenixTracing();
   }
 }
 
