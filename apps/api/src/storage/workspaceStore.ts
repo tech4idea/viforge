@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   createDefaultGlobalWorkspaceFilesForProfile,
   createDefaultWorkspaceFilesForProfile,
+  PRODUCT_PROFILES,
   resolveProductProfile,
   type ProductProfile,
   type Project,
@@ -13,6 +14,7 @@ import {
 } from '@viwork/shared';
 
 import { PRODUCT_PROFILE, WORKSPACES_ROOT } from '../env';
+import { readProductSkillPrompt, readProductSystemAgentPrompt } from '../productProfilePrompts';
 
 const METADATA_FILE = 'project.json';
 const GLOBAL_ROOT_NAME = '_global';
@@ -21,6 +23,7 @@ const GLOBAL_AGENT_CONFIG_DIR = 'Agent 配置';
 export type CreateProjectInput = {
   name: string;
   description?: string;
+  productId?: string;
 };
 
 export type ListWorkspaceOptions = {
@@ -35,7 +38,7 @@ export type UpdateProjectInput = {
 
 export type WorkspaceStore = {
   createProject(input: CreateProjectInput): Promise<Project>;
-  createTemporaryProject(): Promise<Project>;
+  createTemporaryProject(input?: { productId?: string }): Promise<Project>;
   deleteProject(projectId: string): Promise<{ deleted: true }>;
   listProjects(): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
@@ -43,6 +46,7 @@ export type WorkspaceStore = {
   updateProjectGitConfig(id: string, git: Project['git']): Promise<Project>;
   getProjectRoot(projectId: string): string;
   getGlobalRoot(): string;
+  getProjectProductProfile(projectId: string): Promise<ProductProfile | undefined>;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
   readGlobalWorkspaceFile(filePath: string): Promise<WorkspaceFile>;
   readGlobalWorkspaceFileBytes(filePath: string): Promise<{ path: string; bytes: Buffer; mimeType: string }>;
@@ -66,6 +70,15 @@ export type WorkspaceStore = {
 export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productProfile?: ProductProfile } = {}): WorkspaceStore {
   const workspacesRoot = path.resolve(root);
   const productProfile = options.productProfile ?? PRODUCT_PROFILE ?? resolveProductProfile();
+  const productProfiles = PRODUCT_PROFILES;
+
+  function resolveProfile(productId?: string | null): ProductProfile {
+    const requestedProfile = Object.values(productProfiles).find((profile) => profile.id === productId);
+    if (requestedProfile) {
+      return requestedProfile;
+    }
+    return productProfile;
+  }
 
   function projectRoot(projectId: string): string {
     const rootPath = path.resolve(workspacesRoot, projectId);
@@ -124,7 +137,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
 
   async function readProject(projectId: string): Promise<Project | undefined> {
     try {
-      return JSON.parse(await readFile(metadataPath(projectId), 'utf8')) as Project;
+      return normalizeProject(JSON.parse(await readFile(metadataPath(projectId), 'utf8')), productProfile.id);
     } catch (error) {
       if (isNotFoundError(error)) {
         return undefined;
@@ -141,6 +154,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
     await Promise.all(productProfile.globalDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
     await removeLegacyDefaultAgentSkills(rootPath);
     await ensureViworkAgentConfig(rootPath);
+    await ensureProductAgentPrompts(rootPath);
     await Promise.all(
       defaultGlobalFiles.map(async (file) => {
         const { absolutePath } = assertSafeGlobalWorkspacePath(file.path);
@@ -217,6 +231,30 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
       await mkdir(path.dirname(configPath), { recursive: true });
       await writeFile(configPath, defaultConfig, 'utf8');
     }
+  }
+
+  async function ensureProductAgentPrompts(rootPath: string): Promise<void> {
+    await ensureFileIfMissing(
+      path.join(rootPath, GLOBAL_AGENT_CONFIG_DIR, 'AGENTS.md'),
+      () => readProductSystemAgentPrompt(productProfile),
+    );
+    await Promise.all(productProfile.defaultAgentSkillNames.map((agentId) => ensureFileIfMissing(
+      path.join(rootPath, GLOBAL_AGENT_CONFIG_DIR, 'skills', agentId, 'SKILL.md'),
+      () => readProductSkillPrompt(productProfile, agentId),
+    )));
+  }
+
+  async function ensureFileIfMissing(filePath: string, readContent: () => Promise<string>): Promise<void> {
+    try {
+      await stat(filePath);
+      return;
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, await readContent(), 'utf8');
   }
 
   async function migrateGlobalEntry(rootPath: string, sourcePath: string, targetPath: string): Promise<void> {
@@ -344,8 +382,10 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
   return {
     async createProject(input) {
       const now = new Date().toISOString();
+      const projectProductProfile = resolveProfile(input.productId);
       const project: Project = {
         id: randomUUID(),
+        productId: projectProductProfile.id,
         name: input.name,
         description: input.description ?? '',
         createdAt: now,
@@ -354,9 +394,9 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
 
       const rootPath = projectRoot(project.id);
       await mkdir(rootPath, { recursive: true });
-      await Promise.all(productProfile.projectDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
+      await Promise.all(projectProductProfile.projectDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
       await Promise.all(
-        createDefaultWorkspaceFilesForProfile(productProfile, input.name).map(async (file) => {
+        createDefaultWorkspaceFilesForProfile(projectProductProfile, input.name).map(async (file) => {
           const { absolutePath } = assertSafeWorkspacePath(project.id, file.path);
           await writeTextFile(absolutePath, file.content);
         }),
@@ -366,10 +406,12 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
       return project;
     },
 
-    async createTemporaryProject() {
+    async createTemporaryProject(input = {}) {
       const now = new Date().toISOString();
+      const projectProductProfile = resolveProfile(input.productId);
       const project: Project = {
         id: `temp-${randomUUID()}`,
+        productId: projectProductProfile.id,
         name: '临时对话工作区',
         description: '未绑定项目的创作助手临时工作目录。',
         createdAt: now,
@@ -443,6 +485,11 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
 
     getProject(projectId) {
       return readProject(projectId);
+    },
+
+    async getProjectProductProfile(projectId) {
+      const project = await readProject(projectId);
+      return project ? resolveProfile(project.productId) : undefined;
     },
 
     getProjectRoot(projectId) {
@@ -634,6 +681,14 @@ function inferMimeType(filePath: string): string {
 
 function isNotFoundError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+function normalizeProject(value: unknown, defaultProductId: ProductProfile['id']): Project {
+  const project = value as Project;
+  return {
+    ...project,
+    productId: project.productId ?? defaultProductId,
+  };
 }
 
 export const workspaceStore = createWorkspaceStore();

@@ -57,6 +57,7 @@ const updateSessionSchema = z.object({
 const createSessionSchema = z.object({
   kind: chatSessionKindSchema.optional(),
   title: z.string().trim().min(1).optional(),
+  productId: z.string().trim().min(1).optional(),
 }).default({});
 
 export function createChatSessionRoutes(
@@ -100,7 +101,7 @@ export function createChatSessionRoutes(
       return context.json({ error: 'Invalid chat session' }, 400);
     }
 
-    const project = await workspaceStore.createTemporaryProject();
+    const project = await workspaceStore.createTemporaryProject({ productId: parsed.data.productId });
     return context.json(await store.createSession(project.id, parsed.data), 201);
   });
 

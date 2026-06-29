@@ -30,7 +30,7 @@ describe('projects routes', () => {
       documentTitle: 'viwork 小说改编剧本工作台',
       defaultProjectName: '长夜改编计划',
       workspaceSections: {
-        project: expect.objectContaining({ title: '改编项目区域' }),
+        project: expect.objectContaining({ title: '创作项目区域' }),
       },
       defaultAgentSkillNames: expect.arrayContaining(['brainstorm-agent', 'reviewer-agent']),
       artifactPaths: expect.objectContaining({ script: '03 剧本/01 第一集/剧本.md' }),
@@ -66,6 +66,7 @@ describe('projects routes', () => {
     const created = await createResponse.json();
     expect(created).toMatchObject({
       id: expect.any(String),
+      productId: 'novel-adaptation',
       name: 'Office Misfits',
       description: 'A workplace comedy',
       createdAt: expect.any(String),
@@ -76,6 +77,28 @@ describe('projects routes', () => {
 
     expect(listResponse.status).toBe(200);
     await expect(listResponse.json()).resolves.toEqual([created]);
+  });
+
+  it('creates projects with the selected product profile', async () => {
+    const createResponse = await app.request('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Studio Sitcom', productId: 'sitcom' }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+    expect(created).toMatchObject({ productId: 'sitcom' });
+
+    const filesResponse = await app.request(`/api/projects/${created.id}/files`);
+    const files = await filesResponse.json();
+    expect(files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '01 基本设定/项目简介.md' }),
+      expect.objectContaining({ path: '02 故事/01 第一集/单集大纲.md' }),
+    ]));
+    expect(files).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '01 原著资料/项目简介.md' }),
+    ]));
   });
 
   it('deletes a project and its workspace', async () => {

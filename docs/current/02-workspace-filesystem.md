@@ -8,7 +8,7 @@
 
 - 默认：`~/.viwork/data/<productId>/workspaces`（解析 `process.env.HOME` 和 `VIWORK_PRODUCT` 后拼出 `${HOME}/.viwork/data/<productId>/workspaces`）
 - 环境变量覆盖：`WORKSPACES_ROOT`
-- 产品选择：`VIWORK_PRODUCT`，默认 `novel-adaptation`
+- 默认产品选择：`VIWORK_PRODUCT`，默认 `novel-adaptation`。项目和临时会话创建后会在各自 `project.json` 写入 `productId`，后续 agent 运行按项目自动选择产品 profile。
 
 默认根目录故意落在 viwork 源码树之外，并按 product id 隔离。Codex CLI 启动时会从 `--cd` 指定的目录向上递归查找 `AGENTS.md` 并把它注入 system prompt；如果根目录在 `apps/api/data/workspaces` 里，向上回溯就会命中 `/home/wbo/project/viwork/AGENTS.md`，把 viwork 仓库的编码规范混进创作 system agent 的提示词。落到 `~/.viwork/data/<productId>/workspaces` 之后，CWD 与 `<CODEX_HOME>/AGENTS.md` 都不在源码树里，那份仓库根 `AGENTS.md` 不会再上溯。仍想用旧路径（`apps/api/data/workspaces`）的开发者只要显式 `export WORKSPACES_ROOT=...` 即可。
 
@@ -119,6 +119,8 @@
 - `collapsedDirectoriesByTemporaryProject`
 
 工作区树包含全局区域、正式项目和临时会话工作目录。分组标题和说明来自 active product profile。临时会话工作目录位于项目区域下方，始终可见但默认折叠；展开后每个临时会话对应一个 `temp-*` workspace 节点，临时会话节点也默认折叠。展开节点后复用项目文件 API 完成预览、编辑、上传、重命名、删除和同目录内拖拽移动。
+
+临时会话目录本质上也是带 `temporary: true` 的项目目录。创建临时聊天会话或图片会话时可传入 `productId`，API 会调用 `createTemporaryProject({ productId })` 并把该产品类型写入临时项目 metadata；未传入时使用 `VIWORK_PRODUCT` 对应的默认 profile。这样未绑定正式项目的会话也能在后续 agent 执行时自动切换到小说改编、情景剧或未来新增的工作类型。
 
 工作区树可右键新建、上传、重命名、删除，也支持拖拽移动。拖拽移动入口：
 

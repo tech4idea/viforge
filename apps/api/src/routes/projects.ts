@@ -8,6 +8,7 @@ import { PRODUCT_PROFILE } from '../env';
 const createProjectSchema = z.object({
   name: z.string().transform((name) => name.trim()).pipe(z.string().min(1)),
   description: z.string().optional(),
+  productId: z.string().trim().min(1).optional(),
 });
 
 const updateProjectSchema = z

@@ -5,11 +5,11 @@
   "defaultProjectName": "长夜改编计划",
   "defaultProjectDescription": "围绕一部小说展开的剧本改编项目。",
   "workspaceSections": {
-    "global": { "title": "全局区域", "description": "创作规范、技能、知识库与模板库" },
+    "global": { "title": "全局资料区", "description": "统一管理知识库、素材库与模板库" },
     "project": {
-      "title": "改编项目区域",
-      "description": "每个项目独立管理原著资料、改编方案和剧本",
-      "emptyText": "暂无改编项目。"
+      "title": "创作项目区域",
+      "description": "统一管理小说改编、情景剧等不同类型的创作项目",
+      "emptyText": "暂无创作项目。"
     }
   },
   "promptPlaceholder": {

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { DEFAULT_DIRECTORIES, DEFAULT_GLOBAL_FILES, DEFAULT_GLOBAL_DIRECTORIES, DEFAULT_SITCOM_FILES } from '@viwork/shared';
+import { DEFAULT_DIRECTORIES, DEFAULT_GLOBAL_DIRECTORIES, DEFAULT_SITCOM_FILES, createDefaultGlobalWorkspaceFilesForProfile, resolveProductProfile } from '@viwork/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createWorkspaceStore } from './workspaceStore';
@@ -27,6 +27,7 @@ describe('workspaceStore', () => {
     });
 
     expect(project.id).toEqual(expect.any(String));
+    expect(project.productId).toBe('novel-adaptation');
     expect(project.name).toBe('Office Misfits');
     expect(project.description).toBe('A short workplace comedy');
     expect(project.createdAt).toEqual(expect.any(String));
@@ -34,7 +35,7 @@ describe('workspaceStore', () => {
 
     await expect(store.getProject(project.id)).resolves.toEqual(project);
 
-    const entries = await store.listWorkspaceEntries(project.id);
+    const entries = await store.listWorkspaceEntries(project.id, { query: '' });
     expect(entries.map((entry) => entry.path).sort()).toEqual(
       [...DEFAULT_DIRECTORIES, ...DEFAULT_SITCOM_FILES.map((file) => file.path)].sort(),
     );
@@ -53,6 +54,26 @@ describe('workspaceStore', () => {
       path: '01 原著资料/项目简介.md',
       content: expect.stringContaining('Office Misfits'),
     });
+  });
+
+  it('creates projects and temporary workspaces with the requested product profile', async () => {
+    const store = createWorkspaceStore(root);
+
+    const project = await store.createProject({ name: 'Studio Sitcom', productId: 'sitcom' });
+    const temporaryProject = await store.createTemporaryProject({ productId: 'sitcom' });
+
+    expect(project.productId).toBe('sitcom');
+    expect(temporaryProject.productId).toBe('sitcom');
+    await expect(store.getProjectProductProfile(project.id)).resolves.toEqual(resolveProductProfile('sitcom'));
+
+    const entries = await store.listWorkspaceEntries(project.id, { query: '' });
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '01 基本设定/项目简介.md' }),
+      expect.objectContaining({ path: '02 故事/01 第一集/单集大纲.md' }),
+    ]));
+    expect(entries).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '01 原著资料/项目简介.md' }),
+    ]));
   });
 
   it('lists projects sorted by metadata creation time and id', async () => {
@@ -95,10 +116,11 @@ describe('workspaceStore', () => {
     const store = createWorkspaceStore(root);
 
     const entries = await store.listGlobalWorkspaceEntries();
+    const defaultGlobalFiles = createDefaultGlobalWorkspaceFilesForProfile(resolveProductProfile('novel-adaptation'));
 
-    expect(entries.map((entry) => entry.path).sort()).toEqual(
-      [...DEFAULT_GLOBAL_DIRECTORIES, ...DEFAULT_GLOBAL_FILES.map((file) => file.path)].sort(),
-    );
+    expect(entries.map((entry) => entry.path).sort()).toEqual(expect.arrayContaining(
+      [...DEFAULT_GLOBAL_DIRECTORIES, ...defaultGlobalFiles.map((file) => file.path)].sort(),
+    ));
 
     const globalFile = await store.readGlobalWorkspaceFile('Agent 配置/config.toml');
     expect(globalFile).toEqual({
@@ -168,7 +190,7 @@ describe('workspaceStore', () => {
     expect(written).toEqual({ path: 'episodes/episode-1.md', content: 'Cold open' });
     await expect(store.readWorkspaceFile(project.id, 'episodes/episode-1.md')).resolves.toEqual(written);
 
-    const entries = await store.listWorkspaceEntries(project.id);
+    const entries = await store.listWorkspaceEntries(project.id, { query: '' });
     expect(entries).toContainEqual({ path: 'episodes', name: 'episodes', type: 'directory' });
     expect(entries).toContainEqual(
       expect.objectContaining({

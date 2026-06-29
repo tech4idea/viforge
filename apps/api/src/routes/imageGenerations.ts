@@ -30,6 +30,7 @@ const referenceImageSchema = z.object({
 
 const imageGenerationSchema = z.object({
   sessionId: z.string().min(1).optional(),
+  productId: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(1),
   model: z.string().trim().min(1).optional(),
   aspectRatio: z.enum(aspectRatios),
@@ -106,6 +107,7 @@ async function generateImages(input: {
   chatStore: ChatSessionStore;
   workspaceStore: WorkspaceStore;
   sessionId?: string;
+  productId?: string;
   prompt: string;
   model?: string;
   aspectRatio: GeminiImageAspectRatio;
@@ -116,7 +118,7 @@ async function generateImages(input: {
   const now = new Date().toISOString();
   const session = input.sessionId
     ? await input.chatStore.getSession(input.sessionId)
-    : await createImageSession(input.chatStore, input.workspaceStore);
+    : await createImageSession(input.chatStore, input.workspaceStore, input.productId);
 
   if (!session) {
     throw new Error('图片会话不存在');
@@ -206,8 +208,8 @@ async function generateImages(input: {
   return { session: updatedSession, userMessage, assistantMessage, gatewayTraceId };
 }
 
-async function createImageSession(chatStore: ChatSessionStore, workspaceStore: WorkspaceStore) {
-  const project = await workspaceStore.createTemporaryProject();
+async function createImageSession(chatStore: ChatSessionStore, workspaceStore: WorkspaceStore, productId?: string) {
+  const project = await workspaceStore.createTemporaryProject({ productId });
   return chatStore.createSession(project.id, { kind: 'image', title: '图片生成' });
 }
 
