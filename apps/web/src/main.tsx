@@ -47,6 +47,7 @@ import { ACTIVE_PRODUCT_PROFILE, SELECTABLE_PRODUCT_PROFILES } from './product-p
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { GitSyncPanel } from './components/GitSyncPanel';
+import { HarnessPanel } from './components/HarnessPanel';
 import {
   ArrowDown,
   Braces,
@@ -402,7 +403,7 @@ function App() {
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
@@ -2913,6 +2914,7 @@ function App() {
         onToggleTheme={() => setThemeMode(nextThemeMode(themeMode))}
         onOpenWechat={() => setActiveToolPanel('wechat')}
         onOpenGitSync={() => setActiveToolPanel('git')}
+        onOpenHarness={() => setActiveToolPanel('harness')}
       />
 
       <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
@@ -3693,10 +3695,10 @@ function App() {
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">
-                  {activeToolPanel === 'git' ? 'Version Control' : 'Remote WeChat'}
+                  {activeToolPanel === 'git' ? 'Version Control' : activeToolPanel === 'harness' ? 'Agent Harness' : 'Remote WeChat'}
                 </p>
                 <h2>
-                  {activeToolPanel === 'git' ? '版本管理与安全备份' : '远程微信接入'}
+                  {activeToolPanel === 'git' ? '版本管理与安全备份' : activeToolPanel === 'harness' ? 'Agent 优化闭环' : '远程微信接入'}
                 </h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
@@ -3722,6 +3724,10 @@ function App() {
                 projects={projects}
                 selectedProjectId={selectedProjectId}
               />
+            ) : null}
+
+            {activeToolPanel === 'harness' ? (
+              <HarnessPanel apiClient={apiClient} />
             ) : null}
           </section>
         </div>
@@ -4579,10 +4585,20 @@ function eventSummary(event: RunEvent): string {
       return event.text;
     case 'tool.use':
       return `${event.name}${event.input ? ` ${JSON.stringify(event.input)}` : ''}`;
+    case 'tool.input':
+      return `${event.name} ${event.inputText}`;
     case 'tool.result':
       return `${event.name}${event.output ? ` ${JSON.stringify(event.output)}` : ''}`;
     case 'file.changed':
       return `${event.path} ${event.change}`;
+    case 'memory.read':
+      return `读取项目记忆 ${event.bytes} bytes`;
+    case 'memory.write':
+      return `写入项目记忆 ${event.memoryType}: ${event.content.slice(0, 80)}`;
+    case 'memory.recall':
+      return `召回项目记忆 ${event.matches.length} 条：${event.query}`;
+    case 'knowledge.retrieve':
+      return `检索知识卡 ${event.matches.length} 条：${event.query}`;
     case 'agent.step.start':
       return `${event.phase} ${event.agentId} 第 ${event.iteration} 轮开始`;
     case 'agent.step.end':

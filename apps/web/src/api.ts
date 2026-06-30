@@ -1,8 +1,14 @@
 import type {
   AigcHubModelListResponse,
   AigcHubModelMetadata,
+  AgentLayerConfig,
   AgentRun,
   AgentTraceEvent,
+  AgentSpec,
+  AgentSpecReleaseAuditCategory,
+  AgentSpecReleaseForceReason,
+  AgentSpecReleaseGate,
+  AgentSpecReleaseRecord,
   BehaviorRule,
   ChatMessage,
   ChatMessageAttachment,
@@ -13,6 +19,9 @@ import type {
   GlobalGitConfig,
   GitLogEntry,
   GitSyncResult,
+  HarnessSummary,
+  HarnessVersionDiff,
+  HumanReview,
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
@@ -20,14 +29,22 @@ import type {
   Project,
   ProjectGitConfig,
   ProjectGitStatus,
+  KnowledgeBaseEntry,
+  MemoryPolicy,
+  PromptBlock,
   ReferencedChatSnippet,
   ReferencedFile,
+  RetrievalPolicy,
+  EvalFixture,
+  EvalRun,
+  SkillSnapshot,
   RunEvent,
   StreamEvent,
   TheaterSkill,
   WechatSetupSession,
   WechatStatus,
   ChatSessionModelConfig,
+  WorkspaceManifest,
   WorkspaceEntry,
   WorkspaceFile,
 } from '@viwork/shared';
@@ -35,8 +52,12 @@ import type {
 export type {
   AigcHubModelListResponse,
   AigcHubModelMetadata,
+  AgentLayerConfig,
   AgentRun,
   AgentTraceEvent,
+  AgentSpec,
+  AgentSpecReleaseGate,
+  AgentSpecReleaseRecord,
   BehaviorRule,
   ChatMessage,
   ChatMessageAttachment,
@@ -47,6 +68,9 @@ export type {
   GlobalGitConfig,
   GitLogEntry,
   GitSyncResult,
+  HarnessSummary,
+  HarnessVersionDiff,
+  HumanReview,
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
@@ -54,8 +78,15 @@ export type {
   Project,
   ProjectGitConfig,
   ProjectGitStatus,
+  KnowledgeBaseEntry,
+  MemoryPolicy,
+  PromptBlock,
   ReferencedChatSnippet,
   ReferencedFile,
+  RetrievalPolicy,
+  EvalFixture,
+  EvalRun,
+  SkillSnapshot,
   RunEvent,
   StreamEvent,
   TheaterSkill,
@@ -108,6 +139,32 @@ export type ApiClient = {
   updateSkill(slug: string, input: { enabled: boolean }): Promise<TheaterSkill>;
   getBehaviorRules(): Promise<BehaviorRule[]>;
   saveBehaviorRules(rules: BehaviorRule[]): Promise<BehaviorRule[]>;
+  getHarnessSummary(): Promise<HarnessSummary>;
+  createAgentLayerConfig(input: CreateAgentLayerConfigInput): Promise<AgentLayerConfig>;
+  createAgentSpec(input: CreateAgentSpecInput): Promise<AgentSpec>;
+  getAgentSpecReleaseGate(agentSpecId: string): Promise<AgentSpecReleaseGate>;
+  listReleaseRecords(input?: ListReleaseRecordsInput): Promise<AgentSpecReleaseRecord[]>;
+  updateAgentSpecStatus(agentSpecId: string, status: 'candidate' | 'active' | 'archived', options?: UpdateAgentSpecStatusOptions): Promise<AgentSpec>;
+  deleteAgentSpec(agentSpecId: string): Promise<{ deleted: true }>;
+  rollbackAgentSpec(agentSpecId: string, input?: RollbackAgentSpecInput): Promise<AgentSpec>;
+  createMemoryPolicy(input: CreateMemoryPolicyInput): Promise<MemoryPolicy>;
+  createKnowledgeBaseEntry(input: CreateKnowledgeBaseEntryInput): Promise<KnowledgeBaseEntry>;
+  createRetrievalPolicy(input: CreateRetrievalPolicyInput): Promise<RetrievalPolicy>;
+  createPromptBlock(input: CreatePromptBlockInput): Promise<PromptBlock>;
+  createPromptBlockVersion(promptBlockId: string, input: CreatePromptBlockVersionInput): Promise<PromptBlock>;
+  getPromptBlockDiff(promptBlockId: string, input?: GetVersionDiffInput): Promise<HarnessVersionDiff>;
+  updatePromptBlockStatus(promptBlockId: string, input: UpdateVersionedRecordStatusInput): Promise<PromptBlock>;
+  createSkillSnapshot(input: CreateSkillSnapshotInput): Promise<SkillSnapshot>;
+  createSkillSnapshotVersion(skillSnapshotId: string, input: CreateSkillSnapshotVersionInput): Promise<SkillSnapshot>;
+  getSkillSnapshotDiff(skillSnapshotId: string, input?: GetVersionDiffInput): Promise<HarnessVersionDiff>;
+  updateSkillSnapshotStatus(skillSnapshotId: string, input: UpdateVersionedRecordStatusInput): Promise<SkillSnapshot>;
+  createWorkspaceManifest(input: CreateWorkspaceManifestInput): Promise<WorkspaceManifest>;
+  createEvalFixture(input: CreateEvalFixtureInput): Promise<EvalFixture>;
+  createEvalFixtureFromRunArtifact(runId: string, input: CreateEvalFixtureFromRunArtifactInput): Promise<EvalFixture>;
+  updateEvalFixture(fixtureId: string, input: UpdateEvalFixtureInput): Promise<EvalFixture>;
+  createEvalRun(input: CreateEvalRunInput): Promise<EvalRun>;
+  addHumanReview(evalRunId: string, input: CreateHumanReviewInput): Promise<EvalRun>;
+  addBatchHumanReview(input: CreateBatchHumanReviewInput): Promise<EvalRun[]>;
   getWechatStatus(): Promise<WechatStatus>;
   createWechatSetupSession(): Promise<WechatSetupSession>;
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
@@ -169,6 +226,91 @@ export type CreateSkillInput = {
   title: string;
   description: string;
   prompt: string;
+};
+
+export type CreateAgentSpecInput = {
+  productId: string;
+  agentId: string;
+  status?: AgentSpec['status'];
+  layerConfigRef?: string;
+  promptBlockRefs?: string[];
+  skillRefs?: AgentSpec['skillRefs'];
+  memoryPolicyRef?: string;
+  retrievalPolicyRef?: string;
+  toolPolicyRef?: string;
+  modelPolicyRef?: string;
+  changelog?: string;
+};
+
+export type CreateAgentLayerConfigInput = Omit<AgentLayerConfig, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number };
+
+export type CreateMemoryPolicyInput = Omit<MemoryPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number };
+
+export type CreateKnowledgeBaseEntryInput = Omit<KnowledgeBaseEntry, 'updatedAt'> & { updatedAt?: string };
+
+export type CreateRetrievalPolicyInput = Omit<RetrievalPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number };
+
+export type CreatePromptBlockInput = Omit<PromptBlock, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
+
+export type CreatePromptBlockVersionInput = Partial<Pick<PromptBlock, 'title' | 'scope' | 'content' | 'status'>>;
+
+export type GetVersionDiffInput = { fromVersion?: number; toVersion?: number };
+
+export type UpdateVersionedRecordStatusInput = { version: number; status: PromptBlock['status'] };
+
+export type CreateSkillSnapshotInput = Omit<SkillSnapshot, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
+
+export type CreateSkillSnapshotVersionInput = Partial<Pick<SkillSnapshot, 'content' | 'status' | 'source'>>;
+
+export type CreateWorkspaceManifestInput = Omit<WorkspaceManifest, 'id' | 'createdAt' | 'updatedAt'>;
+
+export type CreateEvalFixtureInput = {
+  snapshotId: string;
+  target: string;
+  tags?: string[];
+  assertions?: Record<string, unknown>;
+};
+
+export type CreateEvalFixtureFromRunArtifactInput = Omit<CreateEvalFixtureInput, 'snapshotId'> & { snapshotId?: string };
+
+export type UpdateEvalFixtureInput = Partial<Pick<
+  EvalFixture,
+  'target' | 'inputMessages' | 'referencedSnippets' | 'memoryFixture' | 'knowledgeFixture' | 'expectedChangedFiles' | 'expectedToolEvents' | 'toolRetentionPolicy' | 'sensitiveFieldRules' | 'toolRetentionArtifacts' | 'assertions' | 'tags' | 'toolMocks'
+>>;
+
+export type CreateEvalRunInput = {
+  fixtureId: string;
+  agentSpecId: string;
+  runMode?: EvalRun['runMode'];
+};
+
+export type CreateHumanReviewInput = Omit<HumanReview, 'evalRunId' | 'createdAt'>;
+
+export type CreateBatchHumanReviewInput = CreateHumanReviewInput & { evalRunIds: string[] };
+
+export type UpdateAgentSpecStatusOptions = {
+  force?: boolean;
+  forceReason?: AgentSpecReleaseForceReason;
+  auditCategory?: AgentSpecReleaseAuditCategory;
+  reviewer?: string;
+  notes?: string;
+};
+
+export type ListReleaseRecordsInput = {
+  productId?: string;
+  agentId?: string;
+  action?: AgentSpecReleaseRecord['action'];
+  auditCategory?: AgentSpecReleaseAuditCategory;
+  force?: boolean;
+  limit?: number;
+};
+
+export type RollbackAgentSpecInput = {
+  forceReason?: AgentSpecReleaseForceReason;
+  auditCategory?: AgentSpecReleaseAuditCategory;
+  reviewer?: string;
+  sourceReleaseRecordId?: string;
+  notes?: string;
 };
 
 type ApiClientOptions = {
@@ -388,6 +530,129 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'PUT',
         body: JSON.stringify({ rules }),
       }).then((res) => res.rules),
+    getHarnessSummary: () => request<HarnessSummary>(fetcher, baseUrl, '/api/harness'),
+    createAgentLayerConfig: (input) =>
+      request<AgentLayerConfig>(fetcher, baseUrl, '/api/harness/agent-layer-configs', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createAgentSpec: (input) =>
+      request<AgentSpec>(fetcher, baseUrl, '/api/harness/agent-specs', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    getAgentSpecReleaseGate: (agentSpecId) =>
+      request<AgentSpecReleaseGate>(fetcher, baseUrl, `/api/harness/agent-specs/${encodePathSegment(agentSpecId)}/release-gate`),
+    listReleaseRecords: (input = {}) => request<AgentSpecReleaseRecord[]>(fetcher, baseUrl, withQuery('/api/harness/release-records', {
+      productId: input.productId,
+      agentId: input.agentId,
+      action: input.action,
+      auditCategory: input.auditCategory,
+      force: input.force === undefined ? undefined : String(input.force),
+      limit: input.limit === undefined ? undefined : String(input.limit),
+    })),
+    updateAgentSpecStatus: (agentSpecId, status, options = {}) =>
+      request<AgentSpec>(fetcher, baseUrl, `/api/harness/agent-specs/${encodePathSegment(agentSpecId)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, ...options }),
+      }),
+    deleteAgentSpec: (agentSpecId) =>
+      request<{ deleted: true }>(fetcher, baseUrl, `/api/harness/agent-specs/${encodePathSegment(agentSpecId)}`, {
+        method: 'DELETE',
+      }),
+    rollbackAgentSpec: (agentSpecId, input = {}) =>
+      request<AgentSpec>(fetcher, baseUrl, `/api/harness/agent-specs/${encodePathSegment(agentSpecId)}/rollback`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createMemoryPolicy: (input) =>
+      request<MemoryPolicy>(fetcher, baseUrl, '/api/harness/memory-policies', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createKnowledgeBaseEntry: (input) =>
+      request<KnowledgeBaseEntry>(fetcher, baseUrl, '/api/harness/knowledge-base-entries', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createRetrievalPolicy: (input) =>
+      request<RetrievalPolicy>(fetcher, baseUrl, '/api/harness/retrieval-policies', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createPromptBlock: (input) =>
+      request<PromptBlock>(fetcher, baseUrl, '/api/harness/prompt-blocks', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createPromptBlockVersion: (promptBlockId, input) =>
+      request<PromptBlock>(fetcher, baseUrl, `/api/harness/prompt-blocks/${encodePathSegment(promptBlockId)}/versions`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    getPromptBlockDiff: (promptBlockId, input = {}) => {
+      const query = versionDiffQuery(input);
+      return request<HarnessVersionDiff>(fetcher, baseUrl, `/api/harness/prompt-blocks/${encodePathSegment(promptBlockId)}/diff${query}`);
+    },
+    updatePromptBlockStatus: (promptBlockId, input) =>
+      request<PromptBlock>(fetcher, baseUrl, `/api/harness/prompt-blocks/${encodePathSegment(promptBlockId)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    createSkillSnapshot: (input) =>
+      request<SkillSnapshot>(fetcher, baseUrl, '/api/harness/skill-snapshots', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createSkillSnapshotVersion: (skillSnapshotId, input) =>
+      request<SkillSnapshot>(fetcher, baseUrl, `/api/harness/skill-snapshots/${encodePathSegment(skillSnapshotId)}/versions`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    getSkillSnapshotDiff: (skillSnapshotId, input = {}) => {
+      const query = versionDiffQuery(input);
+      return request<HarnessVersionDiff>(fetcher, baseUrl, `/api/harness/skill-snapshots/${encodePathSegment(skillSnapshotId)}/diff${query}`);
+    },
+    updateSkillSnapshotStatus: (skillSnapshotId, input) =>
+      request<SkillSnapshot>(fetcher, baseUrl, `/api/harness/skill-snapshots/${encodePathSegment(skillSnapshotId)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    createWorkspaceManifest: (input) =>
+      request<WorkspaceManifest>(fetcher, baseUrl, '/api/harness/workspace-manifests', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createEvalFixture: (input) =>
+      request<EvalFixture>(fetcher, baseUrl, '/api/harness/eval-fixtures', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createEvalFixtureFromRunArtifact: (runId, input) =>
+      request<EvalFixture>(fetcher, baseUrl, `/api/harness/run-artifacts/${encodePathSegment(runId)}/eval-fixtures`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    updateEvalFixture: (fixtureId, input) =>
+      request<EvalFixture>(fetcher, baseUrl, `/api/harness/eval-fixtures/${encodePathSegment(fixtureId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    createEvalRun: (input) =>
+      request<EvalRun>(fetcher, baseUrl, '/api/harness/eval-runs', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    addHumanReview: (evalRunId, input) =>
+      request<EvalRun>(fetcher, baseUrl, `/api/harness/eval-runs/${encodePathSegment(evalRunId)}/human-review`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    addBatchHumanReview: (input) =>
+      request<EvalRun[]>(fetcher, baseUrl, '/api/harness/human-reviews/batch', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
     getWechatStatus: () => request<WechatStatus>(fetcher, baseUrl, '/api/wechat/status'),
     createWechatSetupSession: () =>
       request<WechatSetupSession>(fetcher, baseUrl, '/api/wechat/setup-sessions', {
@@ -501,6 +766,14 @@ function withQuery(path: string, query: Record<string, string | undefined>): str
   });
   const queryString = params.toString();
   return queryString ? `${path}?${queryString}` : path;
+}
+
+function versionDiffQuery(input: GetVersionDiffInput): string {
+  const params = new URLSearchParams();
+  if (input.fromVersion !== undefined) params.set('fromVersion', String(input.fromVersion));
+  if (input.toVersion !== undefined) params.set('toVersion', String(input.toVersion));
+  const query = params.toString();
+  return query ? `?${query}` : '';
 }
 
 function trimTrailingSlashes(value: string): string {

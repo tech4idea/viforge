@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>viwork Agent Harness Data Model</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      padding: 2rem;
+      background: #020617;
+      color: white;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .container { max-width: 1320px; margin: 0 auto; }
+    .header { margin-bottom: 1.5rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; }
+    .pulse-dot { width: 12px; height: 12px; border-radius: 50%; background: #34d399; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    h1 { font-size: 1.45rem; font-weight: 700; letter-spacing: 0; }
+    .subtitle { margin: .5rem 0 0 1.75rem; color: #94a3b8; font-size: .82rem; line-height: 1.6; }
+    .diagram-container {
+      overflow-x: auto;
+      padding: 1.25rem;
+      border: 1px solid #1e293b;
+      border-radius: 1rem;
+      background: rgba(15, 23, 42, .5);
+    }
+    svg { width: 100%; min-width: 1180px; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+    .card { border: 1px solid #1e293b; border-radius: .75rem; padding: 1rem; background: rgba(15, 23, 42, .5); }
+    .card-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .cyan { background: #22d3ee; } .emerald { background: #34d399; } .violet { background: #a78bfa; }
+    .card h3 { font-size: .86rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: .73rem; line-height: 1.55; }
+    .footer { margin-top: 1.25rem; text-align: center; color: #475569; font-size: .72rem; }
+    .toolbar { display: flex; gap: .5rem; margin-left: auto; align-items: center; }
+    .toolbar-toggle { background: transparent; border: 0; color: #64748b; cursor: pointer; font-size: 1.25rem; padding: .25rem .5rem; border-radius: .375rem; }
+    .toolbar-toggle:hover { color: #cbd5e1; background: rgba(30, 41, 59, .55); }
+    .toolbar-actions { display: none; gap: .5rem; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button { background: rgba(30, 41, 59, .8); border: 1px solid #334155; color: #cbd5e1; padding: .35rem .7rem; border-radius: .375rem; font-family: inherit; font-size: .72rem; cursor: pointer; }
+    .toolbar-actions button:hover { background: rgba(51, 65, 85, .85); color: #fff; }
+    @media (max-width: 900px) { body { padding: 1rem; } .cards { grid-template-columns: 1fr; } }
+    @media print { body { background: #020617; padding: 1rem; } .toolbar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>viwork Agent Harness Data Model</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">Copy</button>
+            <button onclick="downloadPNG(this)">PNG</button>
+            <button onclick="downloadPDF(this)">PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">...</button>
+        </div>
+      </div>
+      <p class="subtitle">短期核心对象关系：变更对象、agent 分层配置、记忆策略、知识检索、输入快照、评估案例、人工评分和发布状态。</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1180 900" role="img" aria-label="viwork agent harness data model diagram">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b" /></marker>
+          <marker id="arrowhead-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#34d399" /></marker>
+          <marker id="arrowhead-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" /></marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+        </defs>
+        <rect width="1180" height="900" fill="url(#grid)" />
+
+        <!-- arrows behind nodes -->
+        <path d="M 240 130 H 365" stroke="#34d399" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-emerald)"/>
+        <path d="M 155 202 V 265" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 120 202 C 100 270, 112 335, 135 390" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 205 202 C 318 258, 440 270, 620 265" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 240 180 C 315 245, 365 300, 440 365" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 560 130 H 705" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 870 130 H 995" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 780 190 C 720 260, 650 320, 560 380" stroke="#a78bfa" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-violet)"/>
+        <path d="M 290 420 H 440" stroke="#a78bfa" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-violet)"/>
+        <path d="M 805 310 C 760 355, 690 385, 595 425" stroke="#a78bfa" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-violet)"/>
+        <path d="M 210 440 H 440" stroke="#a78bfa" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-violet)"/>
+        <path d="M 560 440 H 685" stroke="#34d399" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-emerald)"/>
+        <path d="M 850 440 H 980" stroke="#34d399" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-emerald)"/>
+        <path d="M 750 500 C 715 570, 665 605, 610 640" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 790 500 C 830 570, 885 605, 955 640" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 500 680 H 365" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)"/>
+        <path d="M 1020 640 C 1060 525, 1080 375, 1060 210" stroke="#34d399" stroke-width="1.5" fill="none" marker-end="url(#arrowhead-emerald)"/>
+
+        <!-- boundary groups -->
+        <rect x="30" y="45" width="1120" height="300" rx="12" fill="rgba(6, 78, 59, 0.07)" stroke="#34d399" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="45" y="66" fill="#34d399" font-size="10" font-weight="600">Runtime Source Objects</text>
+        <rect x="30" y="370" width="1120" height="205" rx="12" fill="rgba(76, 29, 149, 0.08)" stroke="#a78bfa" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="45" y="392" fill="#a78bfa" font-size="10" font-weight="600">Evaluation Objects</text>
+        <rect x="360" y="640" width="760" height="135" rx="12" fill="rgba(120, 53, 15, 0.08)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="375" y="662" fill="#fbbf24" font-size="10" font-weight="600">Review And Release</text>
+
+        <!-- node helper pattern manually repeated -->
+        <rect x="70" y="92" width="170" height="110" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="155" y="117" fill="white" font-size="12" font-weight="700" text-anchor="middle">AgentSpec</text>
+        <text x="90" y="142" fill="#94a3b8" font-size="8.5">id, productId, agentId</text>
+        <text x="90" y="158" fill="#94a3b8" font-size="8.5">version, status</text>
+        <text x="90" y="174" fill="#94a3b8" font-size="8.5">prompt / skill refs</text>
+        <text x="90" y="190" fill="#34d399" font-size="8">draft → candidate → active</text>
+
+        <rect x="70" y="265" width="170" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="155" y="290" fill="white" font-size="11" font-weight="700" text-anchor="middle">AgentLayerConfig</text>
+        <text x="90" y="312" fill="#94a3b8" font-size="8.5">system + specialists</text>
+        <text x="90" y="328" fill="#94a3b8" font-size="8.5">resolved into run metadata</text>
+
+        <rect x="365" y="92" width="195" height="110" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="462" y="117" fill="white" font-size="12" font-weight="700" text-anchor="middle">Normal Run</text>
+        <text x="385" y="142" fill="#94a3b8" font-size="8.5">session messages</text>
+        <text x="385" y="158" fill="#94a3b8" font-size="8.5">referenced snippets</text>
+        <text x="385" y="174" fill="#94a3b8" font-size="8.5">trace id / run id</text>
+        <text x="385" y="190" fill="#94a3b8" font-size="8.5">tool events / file diff</text>
+
+        <rect x="705" y="82" width="165" height="130" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="788" y="107" fill="white" font-size="12" font-weight="700" text-anchor="middle">RunInputSnapshot</text>
+        <text x="725" y="132" fill="#94a3b8" font-size="8.5">snapshotMode: full_project</text>
+        <text x="725" y="148" fill="#94a3b8" font-size="8.5">workspace root</text>
+        <text x="725" y="164" fill="#94a3b8" font-size="8.5">fileManifest/hash</text>
+        <text x="725" y="180" fill="#94a3b8" font-size="8.5">gitCommit / dirty</text>
+        <text x="725" y="196" fill="#a78bfa" font-size="8">primary repro anchor</text>
+
+        <rect x="995" y="92" width="135" height="110" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="1062" y="117" fill="white" font-size="12" font-weight="700" text-anchor="middle">Project Git</text>
+        <text x="1015" y="142" fill="#94a3b8" font-size="8.5">commit hash</text>
+        <text x="1015" y="158" fill="#94a3b8" font-size="8.5">remote backup</text>
+        <text x="1015" y="174" fill="#94a3b8" font-size="8.5">project history</text>
+        <text x="1015" y="190" fill="#fbbf24" font-size="8">not fixture source</text>
+
+        <rect x="345" y="255" width="165" height="80" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="428" y="280" fill="white" font-size="11" font-weight="700" text-anchor="middle">MemoryPolicy</text>
+        <text x="365" y="304" fill="#94a3b8" font-size="8.5">namespace / recall order</text>
+        <text x="365" y="320" fill="#94a3b8" font-size="8.5">write rules / tombstone</text>
+
+        <rect x="620" y="255" width="170" height="80" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="705" y="280" fill="white" font-size="11" font-weight="700" text-anchor="middle">KnowledgeBase</text>
+        <text x="640" y="304" fill="#94a3b8" font-size="8.5">cards / index / tags</text>
+        <text x="640" y="320" fill="#94a3b8" font-size="8.5">retrieval policy + hits</text>
+
+        <rect x="60" y="410" width="150" height="110" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="135" y="435" fill="white" font-size="12" font-weight="700" text-anchor="middle">WorkspaceManifest</text>
+        <text x="80" y="460" fill="#94a3b8" font-size="8.5">artifactTypes</text>
+        <text x="80" y="476" fill="#94a3b8" font-size="8.5">canonical paths</text>
+        <text x="80" y="492" fill="#94a3b8" font-size="8.5">required sections</text>
+        <text x="80" y="508" fill="#a78bfa" font-size="8">suggest assertions</text>
+
+        <rect x="215" y="410" width="105" height="110" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="267" y="435" fill="white" font-size="11" font-weight="700" text-anchor="middle">MemoryRecord</text>
+        <text x="232" y="460" fill="#94a3b8" font-size="8">namespace</text>
+        <text x="232" y="476" fill="#94a3b8" font-size="8">evidence</text>
+        <text x="232" y="492" fill="#94a3b8" font-size="8">authority</text>
+        <text x="232" y="508" fill="#a78bfa" font-size="8">fixture target</text>
+
+        <rect x="440" y="410" width="155" height="140" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="518" y="435" fill="white" font-size="12" font-weight="700" text-anchor="middle">EvalFixture</text>
+        <text x="460" y="460" fill="#94a3b8" font-size="8.5">sourceRunId</text>
+        <text x="460" y="476" fill="#94a3b8" font-size="8.5">sourceSnapshotId</text>
+        <text x="460" y="492" fill="#94a3b8" font-size="8.5">workspace snapshot</text>
+        <text x="460" y="508" fill="#94a3b8" font-size="8.5">memory + knowledge fixture</text>
+        <text x="460" y="524" fill="#94a3b8" font-size="8.5">tool mocks + assertions</text>
+
+        <rect x="685" y="410" width="165" height="140" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="768" y="435" fill="white" font-size="12" font-weight="700" text-anchor="middle">EvalRun</text>
+        <text x="705" y="460" fill="#94a3b8" font-size="8.5">fixtureId</text>
+        <text x="705" y="476" fill="#94a3b8" font-size="8.5">agentSpecId</text>
+        <text x="705" y="492" fill="#94a3b8" font-size="8.5">resolvedAgentConfig</text>
+        <text x="705" y="508" fill="#94a3b8" font-size="8.5">toolEvents + fileDiff</text>
+        <text x="705" y="524" fill="#34d399" font-size="8">the answer sheet</text>
+
+        <rect x="980" y="430" width="135" height="110" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="1048" y="455" fill="white" font-size="12" font-weight="700" text-anchor="middle">AssertionResults</text>
+        <text x="1000" y="480" fill="#94a3b8" font-size="8.5">files changed</text>
+        <text x="1000" y="496" fill="#94a3b8" font-size="8.5">sections present</text>
+        <text x="1000" y="512" fill="#94a3b8" font-size="8.5">tool sequence</text>
+        <text x="1000" y="528" fill="#34d399" font-size="8">hard checks only</text>
+
+        <rect x="500" y="680" width="150" height="80" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="575" y="705" fill="white" font-size="12" font-weight="700" text-anchor="middle">HumanReview</text>
+        <text x="520" y="730" fill="#94a3b8" font-size="8.5">scores + subScores</text>
+        <text x="520" y="746" fill="#94a3b8" font-size="8.5">decision + notes</text>
+
+        <rect x="940" y="680" width="155" height="80" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="1018" y="705" fill="white" font-size="12" font-weight="700" text-anchor="middle">HumanReviewRubric</text>
+        <text x="960" y="730" fill="#94a3b8" font-size="8.5">causality, comedy</text>
+        <text x="960" y="746" fill="#94a3b8" font-size="8.5">originality, performability</text>
+
+        <rect x="175" y="680" width="135" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="242" y="705" fill="white" font-size="12" font-weight="700" text-anchor="middle">Skill</text>
+        <text x="195" y="730" fill="#94a3b8" font-size="8.5">enabled global</text>
+        <text x="195" y="746" fill="#94a3b8" font-size="8.5">version / hash</text>
+
+        <rect x="28" y="830" width="1124" height="45" rx="8" fill="rgba(15, 23, 42, .8)" stroke="#1e293b"/>
+        <text x="50" y="849" fill="#94a3b8" font-size="8.5">Rule: AgentSpec is the change object. RunInputSnapshot is the reproducibility anchor. EvalFixture is the test case. EvalRun is the answer sheet.</text>
+        <text x="50" y="866" fill="#475569" font-size="8">AgentLayerConfig, MemoryPolicy/Record, and KnowledgeBase/RetrievalPolicy are first-class run inputs, not prompt-only implementation details.</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="card-header"><div class="card-dot emerald"></div><h3>Change Object</h3></div><ul><li>• AgentSpec carries prompt, skill, memory, retrieval, tool and model refs</li><li>• AgentLayerConfig records system/specialist boundaries</li><li>• Active status is controlled by release decisions</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>Repro Objects</h3></div><ul><li>• RunInputSnapshot captures full project lightweight state</li><li>• EvalFixture fixes memory records and knowledge hits</li><li>• WorkspaceManifest suggests structural assertions</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot cyan"></div><h3>Evaluation Objects</h3></div><ul><li>• EvalRun stores tool events, output and file diff</li><li>• Assertions cover hard program checks</li><li>• HumanReviewRubric covers creative quality</li></ul></div>
+    </div>
+
+    <div class="footer">viwork agent harness · data model diagram · generated from docs/todo.md discussion</div>
+  </div>
+  <script>
+    async function captureNode() {
+      const node = document.getElementById('report-container');
+      const rect = node.getBoundingClientRect();
+      return html2canvas(document.body, {
+        x: rect.left + window.scrollX - 32,
+        y: rect.top + window.scrollY - 32,
+        width: rect.width + 64,
+        height: rect.height + 64,
+        scale: 2,
+        backgroundColor: '#020617',
+        ignoreElements: (el) => el.classList && el.classList.contains('toolbar')
+      });
+    }
+    async function copyAsImage() {
+      const canvas = await captureNode();
+      canvas.toBlob(async (blob) => {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      });
+    }
+    async function downloadPNG() {
+      const canvas = await captureNode();
+      const link = document.createElement('a');
+      link.download = 'viwork-agent-harness-data-model.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+    async function downloadPDF() {
+      const canvas = await captureNode();
+      const img = canvas.toDataURL('image/png');
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
+      pdf.addImage(img, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save('viwork-agent-harness-data-model.pdf');
+    }
+  </script>
+</body>
+</html>

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
-import type { ProductProfile, StreamEvent } from '@viwork/shared';
+import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viwork/shared';
 import { z } from 'zod';
 
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
@@ -11,6 +13,7 @@ import type { BehaviorRule } from '../storage/behaviorRulesStore';
 import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
+import type { EvalRunExecutorInput, EvalRunExecutorResult, HarnessStore } from '../harness/harnessStore';
 import { isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoenix';
 
 import type { RunBus } from './runBus';
@@ -26,7 +29,7 @@ type LangGraphRunOptions = {
   }) => LangGraphAgentClient;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string; productProfile?: ProductProfile },
+    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string; productProfile?: ProductProfile; layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
@@ -35,6 +38,7 @@ type LangGraphRunOptions = {
   productProfile?: ProductProfile;
   gitService?: GitService;
   gitConfigStore?: GitConfigStore;
+  harnessStore?: HarnessStore;
 };
 
 type ToolState = {
@@ -47,6 +51,12 @@ type ToolState = {
   toolSequence: number;
 };
 
+type IsolatedWorkspaceStoreOptions = {
+  workspaceRoot: string;
+  productProfile: ProductProfile;
+  delegate: WorkspaceStore;
+};
+
 const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'brainstorm-agent': '脑暴',
   'character-agent': '人物设定',
@@ -57,6 +67,8 @@ const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'screenwriter-agent': '编剧',
   'reviewer-agent': '审稿',
 };
+
+const EVAL_PROJECT_ID = 'eval-project';
 
 export function createLangGraphRunService(
   store: WorkspaceStore,
@@ -78,10 +90,11 @@ export function createLangGraphRunService(
       }
 
       const timestamp = new Date().toISOString();
-      const runId = `run_${randomUUID()}`;
+      const runId = input.runId ?? `run_${randomUUID()}`;
       const traceId = input.traceId ?? runId;
       const run = {
         id: runId,
+        inputSnapshotId: input.inputSnapshotId,
         projectId: input.projectId,
         sessionId: input.sessionId,
         prompt: input.prompt,
@@ -99,6 +112,98 @@ export function createLangGraphRunService(
 
       return { run };
     },
+  };
+}
+
+export function createLangGraphEvalRunExecutor(
+  store: WorkspaceStore,
+  options: LangGraphRunOptions = {},
+): (input: EvalRunExecutorInput) => Promise<EvalRunExecutorResult> {
+  return async (input) => {
+    const productProfile = input.agentSpec.productId
+      ? resolveEvalProductProfile(input.agentSpec.productId, options.productProfile)
+      : options.productProfile ?? PRODUCT_PROFILE;
+    const isolatedStore = createIsolatedWorkspaceStore({
+      workspaceRoot: input.workspaceRoot,
+      productProfile,
+      delegate: store,
+    });
+    const runId = input.evalRunId;
+    const traceId = `eval:${input.evalRunId}`;
+    const startedAt = new Date();
+    const toolEvents: StreamEvent[] = [];
+    const publish = (event: StreamEvent) => {
+      toolEvents.push(event);
+    };
+    const emittedAt = () => new Date().toISOString();
+    const prompt = buildEvalRunPrompt(input);
+    const runInput: CreateRunInput = {
+      runId,
+      projectId: EVAL_PROJECT_ID,
+      prompt,
+      source: 'web',
+      traceId,
+      referencedSnippets: input.fixture.referencedSnippets,
+    };
+    const registryOptions = {
+      ...options,
+      model: resolveEvalModel(input, options.model),
+      traceId,
+      productProfile,
+      layerConfig: input.resolvedAgentConfig?.layerConfig,
+    };
+    const tools = createWorkspaceTools(isolatedStore, runInput.projectId, publish, runId, emittedAt, {
+      traceId,
+      gitService: options.gitService,
+      gitConfigStore: options.gitConfigStore,
+      memoryFixture: input.runMode === 'repro' ? input.fixture.memoryFixture : undefined,
+      mockMemoryWrites: true,
+      knowledgeFixture: input.runMode === 'repro' ? input.fixture.knowledgeFixture : undefined,
+    });
+    const registry = options.createAgentRegistry
+      ? await options.createAgentRegistry(tools, registryOptions)
+      : options.createAgent
+        ? null
+        : await createAgentRegistry(isolatedStore, registryOptions, tools);
+
+    let outputMessage = '';
+    if (options.createAgent) {
+      const instructions = buildSystemInstructions(productProfile, input.resolvedAgentConfig?.layerConfig);
+      const singleAgentTools = registry
+        ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId: runId, input: runInput, productId: productProfile.id }) }
+        : tools;
+      const agent = options.createAgent({ instructions, tools: singleAgentTools });
+      const streamed = await agent.stream(prompt, {
+        runId,
+        traceId,
+        source: 'web',
+        productId: productProfile.id,
+        maxSteps: 25,
+        memory: { thread: runId, resource: runInput.projectId },
+      });
+      outputMessage = await consumeLangGraphStreamAndAccumulate(streamed.fullStream, { emittedAt, publish, runId });
+    } else {
+      outputMessage = await executeMultiAgentWorkflow({
+        registry: registry!,
+        store: isolatedStore,
+        input: runInput,
+        productProfile,
+        prompt,
+        publish,
+        emittedAt,
+        runId,
+        threadId: runId,
+        options,
+      });
+    }
+
+    toolEvents.push({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
+    return {
+      executionMode: 'langgraph_isolated',
+      status: 'passed',
+      outputMessage: outputMessage || `LangGraph isolated EvalRun completed in ${Date.now() - startedAt.getTime()}ms.`,
+      toolEvents,
+    };
   };
 }
 
@@ -122,6 +227,19 @@ async function executeLangGraphRun({
       stage: 'stream.publish',
       runId,
       projectId: input.projectId,
+      event,
+    });
+    void options.harnessStore?.recordRunArtifactEvent({
+      runId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      inputSnapshotId: input.inputSnapshotId,
+      traceId: input.traceId,
+      model: input.model,
+      modelParams: resolveRunModelParams(input.model),
+      prompt: input.prompt,
+      referencedFiles: input.referencedFiles,
+      referencedSnippets: input.referencedSnippets,
       event,
     });
     bus.publish(event);
@@ -233,6 +351,15 @@ async function executeLangGraphRun({
       errorMessage,
     });
   }
+}
+
+function resolveRunModelParams(model: string | undefined): RunArtifact['modelParams'] {
+  return {
+    model,
+    temperature: undefined,
+    maxSteps: 25,
+    source: model ? 'run_input' : 'runtime_default',
+  };
 }
 
 async function executeMultiAgentWorkflow({
@@ -744,7 +871,10 @@ function buildLangGraphPrompt(input: CreateRunInput, productProfile: ProductProf
   ].filter(Boolean).join('\n\n');
 }
 
-function buildSystemInstructions(productProfile: ProductProfile): string {
+function buildSystemInstructions(productProfile: ProductProfile, layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig']): string {
+  if (layerConfig?.systemAgent.instructionOverride?.trim()) {
+    return layerConfig.systemAgent.instructionOverride.trim();
+  }
   const protocol = readSystemAgentProtocol(productProfile);
   return [
     ...productProfile.mastra.systemIntro,
@@ -914,6 +1044,262 @@ function textLogValue(text: string, limit = 50_000): { text: string; length: num
     length: text.length,
     truncated: text.length > limit,
   };
+}
+
+function buildEvalRunPrompt(input: EvalRunExecutorInput): string {
+  const messages = input.fixture.inputMessages.length > 0
+    ? input.fixture.inputMessages.map((message) => `## ${message.role}\n${message.content}`).join('\n\n')
+    : '## user\n请基于此评估用例完成任务。';
+  const memory = input.fixture.memoryFixture.length > 0
+    ? input.fixture.memoryFixture.map((record) => `- [${record.scope}/${record.memoryType}/${record.authority}] ${record.content}`).join('\n')
+    : '无固定记忆 fixture。';
+  const knowledge = input.fixture.knowledgeFixture.length > 0
+    ? input.fixture.knowledgeFixture.map((entry) => `- [${entry.type}/${entry.rightsRisk}] ${entry.title} (${entry.path})`).join('\n')
+    : '无固定知识 fixture。';
+  const assertions = JSON.stringify(input.fixture.assertions ?? {}, null, 2);
+  const resolvedConfig = formatResolvedEvalConfig(input);
+
+  return [
+    '# Agent Harness EvalRun',
+    `目标：${input.fixture.target}`,
+    `运行模式：${input.runMode}`,
+    '',
+    '# Resolved Agent Config',
+    resolvedConfig,
+    '',
+    '# 原始输入消息',
+    messages,
+    '',
+    '# 固定 Memory Fixture',
+    memory,
+    '',
+    '# 固定 Knowledge Fixture',
+    knowledge,
+    '',
+    '# 程序检查项',
+    '下面 JSON 是本次评估的程序检查项。你不需要复述它，但你的文件写入和工具调用应该满足这些约束。',
+    '```json',
+    assertions,
+    '```',
+  ].join('\n');
+}
+
+function formatResolvedEvalConfig(input: EvalRunExecutorInput): string {
+  const config = input.resolvedAgentConfig;
+  const layer = config?.layerConfig;
+  const specialists = layer?.specialists
+    .filter((specialist) => specialist.defaultEnabled)
+    .map((specialist) => `- ${specialist.agentId}: skill=${specialist.skillRef ?? 'none'}, tools=${(specialist.allowedTools ?? []).join(',') || 'default'}, prompts=${specialist.promptBlockRefs.join(',') || 'none'}`)
+    .join('\n') || '- none';
+  const manifest = config?.workspaceManifest;
+  const manifestArtifacts = manifest
+    ? Object.entries(manifest.artifactTypes).map(([artifactType, artifact]) => `- ${artifactType}: ${artifact.canonicalPath}; sections=${artifact.requiredSections.join(',') || 'none'}`).join('\n')
+    : '- none';
+  return [
+    `agentSpec: ${input.agentSpec.id} (${input.agentSpec.productId}/${input.agentSpec.agentId} v${input.agentSpec.version})`,
+    `modelPolicyRef: ${config?.modelPolicyRef ?? input.agentSpec.modelPolicyRef ?? 'runtime-default'}`,
+    `toolPolicyRef: ${config?.toolPolicyRef ?? input.agentSpec.toolPolicyRef ?? 'runtime-default'}`,
+    `memoryPolicy: ${config?.memoryPolicy ? `${config.memoryPolicy.id}@${config.memoryPolicy.version}` : 'none'}`,
+    `retrievalPolicy: ${config?.retrievalPolicy ? `${config.retrievalPolicy.id}@${config.retrievalPolicy.version}` : 'none'}`,
+    `promptBlocks: ${(config?.promptBlockRefs ?? input.agentSpec.promptBlockRefs).join(',') || 'none'}`,
+    `skillRefs: ${(config?.skillRefs ?? input.agentSpec.skillRefs).map((skill) => `${skill.skillId}${skill.version ? `@${skill.version}` : ''}${skill.contentHash ? `#${skill.contentHash}` : ''}`).join(',') || 'none'}`,
+    '',
+    'systemAgent:',
+    `- ${layer?.systemAgent.agentId ?? 'system'}: tools=${layer?.systemAgent.allowedTools.join(',') || 'default'}, prompts=${layer?.systemAgent.promptBlockRefs.join(',') || 'none'}`,
+    '',
+    'specialists:',
+    specialists,
+    '',
+    'workspaceManifest:',
+    manifest ? `product=${manifest.productId}, template=${manifest.templateVersion}, requiredDirectories=${manifest.requiredDirectories.join(',') || 'none'}` : 'none',
+    manifestArtifacts,
+  ].join('\n');
+}
+
+function resolveEvalProductProfile(productId: string, fallback?: ProductProfile): ProductProfile {
+  try {
+    return resolveProductProfile(productId);
+  } catch {
+    return fallback ?? PRODUCT_PROFILE;
+  }
+}
+
+function resolveEvalModel(input: EvalRunExecutorInput, fallback?: string): string | undefined {
+  const modelPolicy = input.resolvedAgentConfig?.modelPolicyRef ?? input.agentSpec.modelPolicyRef ?? input.resolvedAgentConfig?.agentSpec?.modelPolicyRef;
+  if (modelPolicy && !modelPolicy.includes('@')) return modelPolicy;
+  return fallback;
+}
+
+function createIsolatedWorkspaceStore({ workspaceRoot, productProfile, delegate }: IsolatedWorkspaceStoreOptions): WorkspaceStore {
+  const now = new Date().toISOString();
+  const project: Project = {
+    id: EVAL_PROJECT_ID,
+    productId: productProfile.id,
+    name: 'Agent Harness Eval Workspace',
+    description: 'Isolated workspace for Agent Harness EvalRun.',
+    createdAt: now,
+    updatedAt: now,
+    temporary: true,
+  };
+
+  function assertProject(id: string): void {
+    if (id !== EVAL_PROJECT_ID) throw new Error('EvalRun isolated workspace only exposes the fixture project');
+  }
+
+  function safePath(filePath: string): { relativePath: string; absolutePath: string } {
+    if (path.isAbsolute(filePath)) throw new Error('Invalid workspace path');
+    const relativePath = normalizeEvalWorkspacePath(filePath);
+    if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw new Error('Invalid workspace path');
+    }
+    const absolutePath = path.resolve(workspaceRoot, relativePath);
+    const relativeToRoot = path.relative(workspaceRoot, absolutePath);
+    if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) throw new Error('Invalid workspace path');
+    return { relativePath, absolutePath };
+  }
+
+  return {
+    async createProject() { throw new Error('EvalRun isolated workspace cannot create projects'); },
+    async createTemporaryProject() { return project; },
+    async deleteProject(id) { assertProject(id); throw new Error('EvalRun isolated workspace cannot delete projects'); },
+    async listProjects() { return [project]; },
+    async getProject(id) { return id === EVAL_PROJECT_ID ? project : undefined; },
+    async updateProject(id) { assertProject(id); return project; },
+    async updateProjectGitConfig(id) { assertProject(id); return project; },
+    getProjectRoot(id) { assertProject(id); return workspaceRoot; },
+    getGlobalRoot: () => delegate.getGlobalRoot(),
+    async getProjectProductProfile(id) { assertProject(id); return productProfile; },
+    listGlobalWorkspaceEntries: () => delegate.listGlobalWorkspaceEntries(),
+    readGlobalWorkspaceFile: (filePath) => delegate.readGlobalWorkspaceFile(filePath),
+    readGlobalWorkspaceFileBytes: (filePath) => delegate.readGlobalWorkspaceFileBytes(filePath),
+    async writeGlobalWorkspaceFile() { throw new Error('EvalRun isolated workspace cannot write global workspace files'); },
+    async createGlobalWorkspaceFolder() { throw new Error('EvalRun isolated workspace cannot create global workspace folders'); },
+    async createGlobalWorkspaceFile() { throw new Error('EvalRun isolated workspace cannot create global workspace files'); },
+    async createGlobalWorkspaceAsset() { throw new Error('EvalRun isolated workspace cannot create global workspace assets'); },
+    async moveGlobalWorkspaceEntry() { throw new Error('EvalRun isolated workspace cannot move global workspace entries'); },
+    async deleteGlobalWorkspaceEntry() { throw new Error('EvalRun isolated workspace cannot delete global workspace entries'); },
+    async listWorkspaceEntries(id, options) {
+      assertProject(id);
+      if (options?.query) return listEvalEntriesSearch(workspaceRoot, options.query);
+      return listEvalEntriesShallow(workspaceRoot, options?.path, safePath);
+    },
+    async readWorkspaceFile(id, filePath) {
+      assertProject(id);
+      const { relativePath, absolutePath } = safePath(filePath);
+      return { path: relativePath, content: await readFile(absolutePath, 'utf8') };
+    },
+    async readWorkspaceFileBytes(id, filePath) {
+      assertProject(id);
+      const { relativePath, absolutePath } = safePath(filePath);
+      return { path: relativePath, bytes: await readFile(absolutePath), mimeType: inferEvalMimeType(relativePath) };
+    },
+    async writeWorkspaceFile(id, filePath, content) {
+      assertProject(id);
+      const { relativePath, absolutePath } = safePath(filePath);
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, content, 'utf8');
+      return { path: relativePath, content };
+    },
+    async createWorkspaceFolder(id, folderPath) {
+      assertProject(id);
+      const { relativePath, absolutePath } = safePath(folderPath);
+      await mkdir(absolutePath, { recursive: true });
+      return { path: relativePath, name: path.posix.basename(relativePath), type: 'directory' };
+    },
+    async createWorkspaceFile(id, filePath, content) { return this.writeWorkspaceFile(id, filePath, content); },
+    async createWorkspaceAsset(id, filePath, bytes, mimeType) {
+      assertProject(id);
+      const { relativePath, absolutePath } = safePath(filePath);
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, bytes);
+      const fileStat = await stat(absolutePath);
+      return { path: relativePath, name: path.posix.basename(relativePath), type: 'file', size: fileStat.size, updatedAt: fileStat.mtime.toISOString(), mimeType: mimeType ?? inferEvalMimeType(relativePath) };
+    },
+    async moveWorkspaceEntry(id, sourcePath, targetPath) {
+      assertProject(id);
+      const source = safePath(sourcePath);
+      const target = safePath(targetPath);
+      await mkdir(path.dirname(target.absolutePath), { recursive: true });
+      await rename(source.absolutePath, target.absolutePath);
+      const movedStat = await stat(target.absolutePath);
+      return {
+        path: target.relativePath,
+        name: path.posix.basename(target.relativePath),
+        type: movedStat.isDirectory() ? 'directory' : 'file',
+        ...(movedStat.isFile() ? { size: movedStat.size, updatedAt: movedStat.mtime.toISOString(), mimeType: inferEvalMimeType(target.relativePath) } : {}),
+      };
+    },
+    async deleteWorkspaceEntry(id, entryPath) {
+      assertProject(id);
+      const { absolutePath } = safePath(entryPath);
+      await rm(absolutePath, { recursive: true, force: false });
+      return { deleted: true };
+    },
+  };
+}
+
+async function listEvalEntriesShallow(
+  root: string,
+  subPath: string | undefined,
+  safePath: (filePath: string) => { absolutePath: string },
+): Promise<WorkspaceEntry[]> {
+  const targetDir = subPath ? safePath(subPath).absolutePath : root;
+  const entries: WorkspaceEntry[] = [];
+  const directoryEntries = await readdir(targetDir, { withFileTypes: true });
+  for (const entry of directoryEntries) {
+    if (targetDir === root && entry.name === 'project.json') continue;
+    if (entry.name === '.git') continue;
+    const absolutePath = path.join(targetDir, entry.name);
+    const relativePath = normalizeEvalWorkspacePath(path.relative(root, absolutePath));
+    if (entry.isDirectory()) {
+      entries.push({ path: relativePath, name: entry.name, type: 'directory' });
+    } else if (entry.isFile()) {
+      const fileStat = await stat(absolutePath);
+      entries.push({ path: relativePath, name: entry.name, type: 'file', size: fileStat.size, updatedAt: fileStat.mtime.toISOString(), mimeType: inferEvalMimeType(relativePath) });
+    }
+  }
+  return entries.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function listEvalEntriesSearch(root: string, query: string): Promise<WorkspaceEntry[]> {
+  const entries: WorkspaceEntry[] = [];
+  const normalizedQuery = query.toLowerCase();
+  async function walk(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === '.git') continue;
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = normalizeEvalWorkspacePath(path.relative(root, absolutePath));
+      if (entry.isDirectory()) {
+        await walk(absolutePath);
+      } else if (entry.isFile() && (entry.name.toLowerCase().includes(normalizedQuery) || relativePath.toLowerCase().includes(normalizedQuery))) {
+        const fileStat = await stat(absolutePath);
+        entries.push({ path: relativePath, name: entry.name, type: 'file', size: fileStat.size, updatedAt: fileStat.mtime.toISOString(), mimeType: inferEvalMimeType(relativePath) });
+      }
+    }
+  }
+  await walk(root);
+  return entries.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function normalizeEvalWorkspacePath(filePath: string): string {
+  return path.normalize(filePath).replaceAll(path.sep, '/');
+}
+
+function inferEvalMimeType(filePath: string): string {
+  if (/\.md$/i.test(filePath)) return 'text/markdown; charset=utf-8';
+  if (/\.txt$/i.test(filePath)) return 'text/plain; charset=utf-8';
+  if (/\.toml$/i.test(filePath)) return 'text/plain; charset=utf-8';
+  if (/\.json$/i.test(filePath)) return 'application/json; charset=utf-8';
+  if (/\.csv$/i.test(filePath)) return 'text/csv; charset=utf-8';
+  if (/\.ya?ml$/i.test(filePath)) return 'application/yaml; charset=utf-8';
+  if (/\.html?$/i.test(filePath)) return 'text/html; charset=utf-8';
+  if (/\.pdf$/i.test(filePath)) return 'application/pdf';
+  if (/\.png$/i.test(filePath)) return 'image/png';
+  if (/\.jpe?g$/i.test(filePath)) return 'image/jpeg';
+  if (/\.gif$/i.test(filePath)) return 'image/gif';
+  if (/\.webp$/i.test(filePath)) return 'image/webp';
+  if (/\.svg$/i.test(filePath)) return 'image/svg+xml';
+  return 'application/octet-stream';
 }
 
 function isModelNotFoundError(error: unknown): boolean {
