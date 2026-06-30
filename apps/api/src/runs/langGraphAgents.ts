@@ -11,7 +11,7 @@ import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store';
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { z } from 'zod';
 
-import type { AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
+import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MODEL, PRODUCT_PROFILE } from '../env';
@@ -332,7 +332,16 @@ export function createWorkspaceTools(
   publish: (event: StreamEvent) => void,
   runId: string,
   emittedAt: () => string,
-  options: { imageGeneration?: RunImageGenerationOptions; traceId?: string; wechat?: WechatSendContext; gitService?: GitService; gitConfigStore?: GitConfigStore } = {},
+  options: {
+    imageGeneration?: RunImageGenerationOptions;
+    traceId?: string;
+    wechat?: WechatSendContext;
+    gitService?: GitService;
+    gitConfigStore?: GitConfigStore;
+    memoryFixture?: MemoryRecord[];
+    mockMemoryWrites?: boolean;
+    knowledgeFixture?: KnowledgeBaseEntry[];
+  } = {},
 ) {
   const projectMemory = getLangGraphMemoryBackend().then(({ store }) => createProjectMemoryStore(store));
   const resource = projectId;
@@ -507,7 +516,13 @@ export function createWorkspaceTools(
       ].join('\n'),
       inputSchema: z.object({}),
       execute: async () => {
+        if (options.memoryFixture) {
+          const workingMemory = options.memoryFixture.map(formatFixtureMemoryRecord).join('\n\n');
+          publish({ type: 'memory.read', runId, emittedAt: emittedAt(), scope: 'workspace', bytes: Buffer.byteLength(workingMemory, 'utf8') });
+          return { memory: workingMemory, usage: { store: 'fixture', count: options.memoryFixture.length } };
+        }
         const workingMemory = await (await projectMemory).getWorkingMemory({ resourceId: resource });
+        publish({ type: 'memory.read', runId, emittedAt: emittedAt(), scope: 'workspace', bytes: Buffer.byteLength(workingMemory, 'utf8') });
         return { memory: workingMemory ?? '' };
       },
     }),
@@ -524,7 +539,32 @@ export function createWorkspaceTools(
         reason: z.string().min(1).describe('本次更新的原因，便于审计和追踪'),
       }),
       execute: async ({ content, reason }) => {
+        if (options.memoryFixture || options.mockMemoryWrites) {
+          publish({
+            type: 'memory.write',
+            runId,
+            emittedAt: emittedAt(),
+            scope: 'workspace',
+            authority: 'agent_inferred',
+            memoryType: 'summary',
+            updateMode: 'summarize',
+            content,
+            mocked: true,
+            persisted: false,
+          });
+          return { updated: true, reason, bytes: Buffer.byteLength(content, 'utf8'), usage: { store: options.memoryFixture ? 'fixture' : 'eval-mock', mocked: true, persisted: false } };
+        }
         await (await projectMemory).updateWorkingMemory({ resourceId: resource, content });
+        publish({
+          type: 'memory.write',
+          runId,
+          emittedAt: emittedAt(),
+          scope: 'workspace',
+          authority: 'agent_inferred',
+          memoryType: 'summary',
+          updateMode: 'summarize',
+          content,
+        });
         return { updated: true, reason, bytes: Buffer.byteLength(content, 'utf8') };
       },
     }),
@@ -540,7 +580,22 @@ export function createWorkspaceTools(
         topK: z.number().int().min(1).max(12).default(6),
       }),
       execute: async ({ query, topK }) => {
+        if (options.memoryFixture) {
+          const matches = selectMemoryFixture(options.memoryFixture, query, topK);
+          publish({ type: 'memory.recall', runId, emittedAt: emittedAt(), query, matches, topK, scope: 'workspace', source: 'fixture' });
+          return { query, matches: matches.map(memoryRecordToFixtureMessage), usage: { store: 'fixture', query } };
+        }
         const result = await (await projectMemory).recall({ resourceId: resource, query, topK, traceId: options.traceId });
+        publish({
+          type: 'memory.recall',
+          runId,
+          emittedAt: emittedAt(),
+          query,
+          matches: result.messages.map((message) => projectMemoryMessageToRecord(message, projectId)),
+          topK,
+          scope: 'workspace',
+          source: 'live',
+        });
         return {
           query,
           matches: result.messages.map(formatMemoryMessage),
@@ -561,6 +616,21 @@ export function createWorkspaceTools(
         reason: z.string().min(1).describe('为什么这条信息值得长期记住'),
       }),
       execute: async ({ memory: memoryText, category, reason }) => {
+        if (options.memoryFixture || options.mockMemoryWrites) {
+          publish({
+            type: 'memory.write',
+            runId,
+            emittedAt: emittedAt(),
+            scope: 'workspace',
+            authority: 'agent_inferred',
+            memoryType: categoryToMemoryType(category),
+            updateMode: 'append',
+            content: memoryText,
+            mocked: true,
+            persisted: false,
+          });
+          return { remembered: true, category, messageId: `mock-memory-${Date.now()}`, usage: { store: options.memoryFixture ? 'fixture' : 'eval-mock', mocked: true, persisted: false }, reason };
+        }
         const content = [
           '# 精选长期记忆',
           `- category: ${category}`,
@@ -569,7 +639,40 @@ export function createWorkspaceTools(
           memoryText,
         ].join('\n');
         const result = await (await projectMemory).saveMemory({ resourceId: resource, content, traceId: options.traceId });
+        publish({
+          type: 'memory.write',
+          runId,
+          emittedAt: emittedAt(),
+          scope: 'workspace',
+          authority: 'agent_inferred',
+          memoryType: categoryToMemoryType(category),
+          updateMode: 'append',
+          content: memoryText,
+        });
         return { remembered: true, category, messageId: result.messageId, usage: result.usage };
+      },
+    }),
+    retrieve_knowledge_cards: createTool({
+      id: 'retrieve_knowledge_cards',
+      description: [
+        '从全局知识库索引中检索可复用的创作机制卡、观点卡或笑点模式卡。',
+        '检索结果只用于启发，不要复制具体台词、完整桥段、人物身份或受版权保护的表达。',
+        '知识库索引优先读取 知识库/index.yaml；如果没有索引，会退化为扫描 知识库 下的 Markdown 文件。',
+      ].join('\n'),
+      inputSchema: z.object({
+        query: z.string().min(1).describe('检索意图，例如“业主群误会升级机制”'),
+        tags: z.array(z.string()).default([]).describe('可选标签过滤'),
+        topK: z.number().int().min(1).max(12).default(5),
+      }),
+      execute: async ({ query, tags, topK }) => {
+        if (options.knowledgeFixture) {
+          const matches = selectKnowledgeFixture(options.knowledgeFixture, query, tags, topK);
+          publish({ type: 'knowledge.retrieve', runId, emittedAt: emittedAt(), query, matches, tags, topK, source: 'fixture' });
+          return { query, matches, usage: { store: 'fixture' } };
+        }
+        const matches = await retrieveKnowledgeCards(store, query, tags, topK);
+        publish({ type: 'knowledge.retrieve', runId, emittedAt: emittedAt(), query, matches, tags, topK, source: 'live' });
+        return { query, matches };
       },
     }),
     generate_project_image: createTool({
@@ -1175,6 +1278,198 @@ function formatMemoryMessage(message: { id: string; role?: string; threadId?: st
   };
 }
 
+function formatFixtureMemoryRecord(record: MemoryRecord): string {
+  return [
+    `## ${record.memoryType} / ${record.scope}`,
+    `- id: ${record.id}`,
+    `- authority: ${record.authority}`,
+    `- updateMode: ${record.updateMode}`,
+    record.key ? `- key: ${record.key}` : '',
+    '',
+    record.content,
+  ].filter(Boolean).join('\n');
+}
+
+function memoryRecordToFixtureMessage(record: MemoryRecord) {
+  return {
+    id: record.id,
+    role: record.createdByAgent ?? 'fixture',
+    threadId: record.namespace.join('/'),
+    createdAt: record.createdAt,
+    text: record.content.length > 2000 ? `${record.content.slice(0, 2000)}...` : record.content,
+  };
+}
+
+function selectMemoryFixture(records: MemoryRecord[], query: string, topK: number): MemoryRecord[] {
+  const normalizedQuery = normalizeSearchText(query);
+  return records
+    .filter((record) => !record.tombstonedAt)
+    .map((record) => ({ record, score: memoryFixtureScore(record, normalizedQuery) }))
+    .filter(({ score }) => score > 0 || normalizedQuery.length === 0)
+    .sort((left, right) => right.score - left.score || left.record.updatedAt.localeCompare(right.record.updatedAt))
+    .slice(0, topK)
+    .map(({ record }) => record);
+}
+
+function memoryFixtureScore(record: MemoryRecord, query: string): number {
+  const haystack = normalizeSearchText([
+    record.content,
+    record.key ?? '',
+    record.scope,
+    record.memoryType,
+    record.authority,
+  ].join(' '));
+  return query.split(/\s+/).filter(Boolean).reduce((score, token) => score + (haystack.includes(token) ? 2 : 0), 0);
+}
+
+function selectKnowledgeFixture(entries: KnowledgeBaseEntry[], query: string, tags: string[], topK: number): KnowledgeBaseEntry[] {
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedTags = tags.map(normalizeSearchText).filter(Boolean);
+  return entries
+    .map((entry) => ({ entry, score: knowledgeScore(entry, normalizedQuery, normalizedTags) }))
+    .filter(({ score }) => score > 0 || normalizedQuery.length === 0)
+    .sort((left, right) => right.score - left.score || left.entry.title.localeCompare(right.entry.title))
+    .slice(0, topK)
+    .map(({ entry }) => entry);
+}
+
+function projectMemoryMessageToRecord(message: ProjectMemoryMessage, projectId: string): MemoryRecord {
+  return {
+    id: message.id,
+    namespace: ['viwork', PRODUCT_PROFILE.id, 'workspaces', projectId, 'memories'],
+    scope: 'workspace',
+    memoryType: 'summary',
+    authority: 'agent_inferred',
+    updateMode: 'append',
+    content: message.content,
+    evidenceRefs: [],
+    confidence: message.score,
+    createdByAgent: message.role,
+    createdAt: message.createdAt,
+    updatedAt: message.createdAt,
+    tombstonedAt: null,
+  };
+}
+
+function categoryToMemoryType(category: string): MemoryRecord['memoryType'] {
+  switch (category) {
+    case 'user_preference':
+      return 'profile';
+    case 'project_fact':
+    case 'character':
+    case 'continuity':
+    case 'plot_thread':
+      return 'constraint';
+    case 'rejected_option':
+    case 'quality_standard':
+      return 'decision';
+    default:
+      return 'summary';
+  }
+}
+
+async function retrieveKnowledgeCards(store: WorkspaceStore, query: string, tags: string[], topK: number): Promise<KnowledgeBaseEntry[]> {
+  const indexed = await readKnowledgeIndex(store);
+  const entries = indexed.length > 0 ? indexed : await scanKnowledgeMarkdown(store);
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedTags = tags.map(normalizeSearchText).filter(Boolean);
+  return entries
+    .map((entry) => ({ entry, score: knowledgeScore(entry, normalizedQuery, normalizedTags) }))
+    .filter(({ score }) => score > 0 || normalizedQuery.length === 0)
+    .sort((left, right) => right.score - left.score || left.entry.title.localeCompare(right.entry.title))
+    .slice(0, topK)
+    .map(({ entry }) => entry);
+}
+
+async function readKnowledgeIndex(store: WorkspaceStore): Promise<KnowledgeBaseEntry[]> {
+  try {
+    const file = await store.readGlobalWorkspaceFile('知识库/index.yaml');
+    return parseKnowledgeIndex(file.content);
+  } catch {
+    return [];
+  }
+}
+
+async function scanKnowledgeMarkdown(store: WorkspaceStore): Promise<KnowledgeBaseEntry[]> {
+  try {
+    const entries = await store.listGlobalWorkspaceEntries();
+    return entries
+      .filter((entry) => entry.type === 'file' && entry.path.startsWith('知识库/') && /\.md$/i.test(entry.path))
+      .filter((entry) => !entry.path.endsWith('/README.md'))
+      .map((entry) => ({
+        id: `kb-${entry.path.replace(/^知识库\//, '').replace(/\.md$/i, '').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]+/g, '-')}`,
+        title: entry.name.replace(/\.md$/i, ''),
+        path: entry.path.replace(/^知识库\//, ''),
+        type: entry.path.includes('/inbox/') ? 'inbox' : entry.path.includes('/viewpoints/') ? 'viewpoint' : entry.path.includes('/jokes/') ? 'joke_pattern' : 'mechanism',
+        tags: [],
+        rightsRisk: 'medium',
+        contentHash: entry.size !== undefined ? `size:${entry.size}` : undefined,
+        updatedAt: entry.updatedAt ?? new Date(0).toISOString(),
+      } satisfies KnowledgeBaseEntry));
+  } catch {
+    return [];
+  }
+}
+
+function parseKnowledgeIndex(content: string): KnowledgeBaseEntry[] {
+  const entriesBlock = content.split(/\nentries\s*:\s*\n/)[1] ?? '';
+  const blocks = entriesBlock.split(/\n\s*-\s+/).map((block) => block.trim()).filter(Boolean);
+  return blocks.map((block) => parseKnowledgeIndexBlock(block)).filter((entry): entry is KnowledgeBaseEntry => Boolean(entry));
+}
+
+function parseKnowledgeIndexBlock(block: string): KnowledgeBaseEntry | null {
+  const normalized = block.replace(/^[- ]+/, '');
+  const value = (key: string) => {
+    const match = normalized.match(new RegExp(`(?:^|\\n)\\s*${key}:\\s*(.+)`));
+    return match?.[1]?.trim().replace(/^['"]|['"]$/g, '');
+  };
+  const id = value('id');
+  const title = value('title');
+  const cardPath = value('path');
+  if (!id || !title || !cardPath) return null;
+  const type = parseKnowledgeType(value('type'));
+  const rightsRisk = parseRightsRisk(value('rightsRisk'));
+  return {
+    id,
+    title,
+    path: cardPath,
+    type,
+    tags: parseInlineList(value('tags')),
+    rightsRisk,
+    source: value('source'),
+    contentHash: value('contentHash'),
+    updatedAt: value('updatedAt') ?? new Date(0).toISOString(),
+  };
+}
+
+function parseInlineList(value: string | undefined): string[] {
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return [trimmed].filter(Boolean);
+  return trimmed.slice(1, -1).split(',').map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+}
+
+function parseKnowledgeType(value: string | undefined): KnowledgeBaseEntry['type'] {
+  if (value === 'viewpoint' || value === 'joke_pattern' || value === 'source_note' || value === 'inbox') return value;
+  return 'mechanism';
+}
+
+function parseRightsRisk(value: string | undefined): KnowledgeBaseEntry['rightsRisk'] {
+  if (value === 'low' || value === 'high') return value;
+  return 'medium';
+}
+
+function knowledgeScore(entry: KnowledgeBaseEntry, query: string, tags: string[]): number {
+  const haystack = normalizeSearchText([entry.title, entry.path, entry.type, ...entry.tags].join(' '));
+  const queryScore = query.split(/\s+/).filter(Boolean).reduce((score, token) => score + (haystack.includes(token) ? 2 : 0), 0);
+  const tagScore = tags.reduce((score, tag) => score + (entry.tags.some((entryTag) => normalizeSearchText(entryTag).includes(tag)) ? 3 : 0), 0);
+  return queryScore + tagScore;
+}
+
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').trim();
+}
+
 async function workspaceFileExists(store: WorkspaceStore, projectId: string, filePath: string): Promise<boolean> {
   try {
     await store.readWorkspaceFile(projectId, filePath);
@@ -1250,17 +1545,25 @@ export async function createAgentRegistry(
     connectionString?: string;
     traceId?: string;
     productProfile?: ProductProfile;
+    layerConfig?: AgentLayerConfig;
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
   const modelConfig = buildModelConfig(options);
   const { checkpointer, store: memoryStore } = await getLangGraphMemoryBackend();
-  const enabledAgentIds = new Set(options.productProfile?.defaultAgentSkillNames ?? AGENT_DEFS.map((def) => def.id));
+  const layerSpecialists = options.layerConfig?.specialists.filter((specialist) => specialist.defaultEnabled) ?? [];
+  const enabledAgentIds = new Set(
+    layerSpecialists.length > 0
+      ? layerSpecialists.map((specialist) => specialist.agentId)
+      : options.productProfile?.defaultAgentSkillNames ?? AGENT_DEFS.map((def) => def.id),
+  );
 
   const createAgentWithSkill = async (def: AgentDef): Promise<LangGraphAgentClient | null> => {
     if (!enabledAgentIds.has(def.id)) return null;
 
-    const fallbackInstructions = await loadSkillInstructions(store, def.id, options.productProfile);
+    const specialistConfig = layerSpecialists.find((specialist) => specialist.agentId === def.id);
+    const fallbackInstructions = specialistConfig?.instructionOverride?.trim()
+      || await loadSkillInstructions(store, def.id, options.productProfile);
     const skillPromptName = options.productProfile && options.productProfile.id !== PRODUCT_PROFILE.id
       ? `${options.productProfile.id}-${def.id}-skill`
       : `${def.id}-skill`;
@@ -1287,7 +1590,8 @@ export async function createAgentRegistry(
   );
 
   const createSystemAgent = async (instructions: string, toolsOverride?: LangGraphToolset): Promise<LangGraphAgentClient> => {
-    const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
+    const configuredInstructions = options.layerConfig?.systemAgent.instructionOverride?.trim() || instructions;
+    const agentInstructions = [configuredInstructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
     return createLangGraphAgentClient({
       id: 'viwork-system-agent',
       name: 'viwork 系统调度',

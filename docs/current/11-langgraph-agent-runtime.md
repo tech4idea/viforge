@@ -59,6 +59,7 @@ LangGraph run service 实现统一的 `RunService` 接口：
    - `update_project_memory`
    - `recall_project_memory`
    - `remember_project_memory`
+   - `retrieve_knowledge_cards`
    - `generate_project_image`
    - `edit_project_image`
    - 微信入口下额外提供 `send_wechat_file`
@@ -151,6 +152,20 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 
 - `read_project_memory` / `update_project_memory`：读写 `['viwork', 'projects', projectId, 'working-memory']` 命名空间下的结构化 Markdown 记忆。
 - `remember_project_memory` / `recall_project_memory`：读写 `['viwork', 'projects', projectId, 'memories']` 命名空间下的精选长期记忆，并通过 LangGraph Store 的 `search()` 检索。
+
+这些工具会额外发布 Harness 可消费的运行事件：
+
+- `memory.read`：记录读取 workspace 记忆和字节数。
+- `memory.write`：记录写入的记忆类型、authority 和内容摘要来源。
+- `memory.recall`：记录 recall query 和结构化 `MemoryRecord` matches。
+
+这些事件用于后续从失败 run 生成 EvalFixture，避免回归案例只保存拼接后的 prompt 文本而丢失记忆来源。
+
+### 4.1 知识库检索
+
+`retrieve_knowledge_cards` 从全局工作区的 `知识库/index.yaml` 读取机制卡索引；如果索引不存在，会退化为扫描 `知识库/**/*.md`。检索结果只作为创作启发，工具说明中明确禁止复制具体台词、完整桥段、人物身份或受版权保护表达。
+
+知识库检索会发布 `knowledge.retrieve` 事件，记录 query 和返回的 `KnowledgeBaseEntry` 列表。EvalFixture 可以把这些结果保存为 `knowledgeFixture`，使 candidate 和 active spec 比较时使用同一组知识输入。
 
 语义检索配置：
 

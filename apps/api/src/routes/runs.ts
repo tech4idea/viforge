@@ -9,6 +9,7 @@ import { appendJsonLog } from '../logger';
 import { traceIdFromRequest } from '../aigcHubHeaders';
 import type { RunService } from '../runs/runService';
 import type { RunBus } from '../runs/runBus';
+import type { HarnessStore } from '../harness/harnessStore';
 
 const createRunSchema = z.object({
   projectId: z.string().transform((projectId) => projectId.trim()).pipe(z.string().min(1)),
@@ -36,7 +37,7 @@ const createRunSchema = z.object({
   ).optional().default([]),
 });
 
-export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
+export function createRunsRoutes(service: RunService, bus?: RunBus, harnessStore?: HarnessStore): Hono {
   const routes = new Hono();
 
   routes.post('/runs', async (context) => {
@@ -64,7 +65,17 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
     }
 
     try {
-      const result = await service.createRun({ ...parsed.data, source: 'web', traceId });
+      const runId = `run_${randomUUID()}`;
+      const snapshot = harnessStore
+        ? await harnessStore.createRunInputSnapshot({
+            runId,
+            projectId: parsed.data.projectId,
+            sessionId: parsed.data.sessionId,
+            referencedFiles: parsed.data.referencedFiles,
+            referencedSnippets: parsed.data.referencedSnippets,
+          })
+        : undefined;
+      const result = await service.createRun({ ...parsed.data, runId, inputSnapshotId: snapshot?.id, source: 'web', traceId });
       appendJsonLog('api-runs.jsonl', {
         scope: 'runs.route',
         stage: 'response.created',
@@ -76,6 +87,30 @@ export function createRunsRoutes(service: RunService, bus?: RunBus): Hono {
       });
       if (bus && result.events) {
         publishLegacyEvents(bus, result.events);
+      }
+      if (harnessStore && result.events) {
+        for (const [index, event] of result.events.entries()) {
+          const streamEvent = runEventToStreamEvent(event, new Date().toISOString(), index + 1);
+          if (streamEvent) {
+            await harnessStore.recordRunArtifactEvent({
+              runId: result.run.id,
+              projectId: result.run.projectId,
+              sessionId: result.run.sessionId,
+              inputSnapshotId: result.run.inputSnapshotId,
+              traceId,
+              model: result.run.model,
+              modelParams: {
+                model: result.run.model,
+                maxSteps: 1,
+                source: result.run.model ? 'run_input' : 'runtime_default',
+              },
+              prompt: result.run.prompt,
+              referencedFiles: result.run.referencedFiles,
+              referencedSnippets: result.run.referencedSnippets,
+              event: streamEvent,
+            });
+          }
+        }
       }
       context.header('traceid', traceId);
       return context.json(result, 201);
@@ -115,19 +150,29 @@ function runEventToStreamEvent(event: RunEvent, emittedAt: string, sequence: num
     case 'text.delta':
       return { type: 'text.delta', runId: event.runId, emittedAt, delta: event.text, sequence };
     case 'tool.use':
-      return { type: 'tool_use.start', runId: event.runId, emittedAt, toolCallId: `${event.runId}-tool-${sequence}`, toolName: event.name };
+      return { type: 'tool_use.start', runId: event.runId, emittedAt, toolCallId: legacyToolCallId(event.runId, event.name), toolName: event.name };
+    case 'tool.input':
+      return { type: 'tool_use.delta', runId: event.runId, emittedAt, toolCallId: legacyToolCallId(event.runId, event.name), stream: 'input', delta: event.inputText, sequence };
     case 'tool.result':
       return {
         type: 'tool_use.end',
         runId: event.runId,
         emittedAt,
-        toolCallId: `${event.runId}-tool-${sequence}`,
+        toolCallId: legacyToolCallId(event.runId, event.name),
         status: 'succeeded',
         outputText: event.output ? JSON.stringify(event.output) : null,
         errorMessage: null,
       };
     case 'file.changed':
       return { type: 'file.changed', runId: event.runId, emittedAt, path: event.path, change: event.change };
+    case 'memory.read':
+      return { ...event, emittedAt };
+    case 'memory.write':
+      return { ...event, emittedAt };
+    case 'memory.recall':
+      return { ...event, emittedAt };
+    case 'knowledge.retrieve':
+      return { ...event, emittedAt };
     case 'agent.step.start':
       return { ...event, emittedAt };
     case 'agent.step.end':
@@ -147,6 +192,10 @@ function runEventToStreamEvent(event: RunEvent, emittedAt: string, sequence: num
     case 'text.message':
       return { type: 'text.delta', runId: event.runId, emittedAt, delta: event.text, sequence };
   }
+}
+
+function legacyToolCallId(runId: string, toolName: string): string {
+  return `${runId}-tool-${toolName}`;
 }
 
 function handleKnownError(context: { json: (data: { error: string }, status: 400 | 404) => Response }, error: unknown): Response {
