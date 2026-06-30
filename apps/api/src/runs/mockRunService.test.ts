@@ -48,7 +48,6 @@ describe('mock run service', () => {
       'agent.step.start',
       'agent.step.end',
       'tool.use',
-      'tool.input',
       'file.changed',
       'agent.workflow.end',
       'run.end',

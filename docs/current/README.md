@@ -108,8 +108,6 @@ VIWORK_WEB_PORT=8080 VIWORK_API_PORT=3001 docker compose up -d --build
 - [11 LangGraph Agent 运行时](./11-langgraph-agent-runtime.md)
 - [12 双产品维护与配置化方案](./12-product-variant-config-plan.md)
 - [13 前端性能优化：重型编辑器按需加载](./13-editor-lazy-loading-plan.md)
-- [16 Agent Harness 数据模型与实现起点](./16-agent-harness-plan.md)
-- [17 Agent Harness 使用说明与流程校验](./17-agent-harness-usage.md)
 
 ## 主要代码入口
 

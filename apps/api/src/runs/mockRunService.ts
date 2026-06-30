@@ -5,16 +5,12 @@ import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunSour
 import type { WorkspaceStore } from '../storage/workspaceStore';
 
 export type CreateRunInput = {
-  runId?: string;
-  inputSnapshotId?: string;
   projectId: string;
   sessionId?: string;
   prompt: string;
-  model?: string;
   referencedFiles?: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
   source?: RunSource;
-  traceId?: string;
 };
 
 export type MockRunService = {
@@ -30,15 +26,13 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
       }
 
       const source = input.source ?? 'web';
-      const runId = input.runId ?? createDeterministicRunId(input.projectId, input.prompt, source);
+      const runId = createDeterministicRunId(input.projectId, input.prompt, source);
       const timestamp = createDeterministicTimestamp(runId);
       const run: AgentRun = {
         id: runId,
-        inputSnapshotId: input.inputSnapshotId,
         projectId: input.projectId,
         sessionId: input.sessionId,
         prompt: input.prompt,
-        model: input.model,
         source,
         referencedFiles: input.referencedFiles ?? [],
         referencedSnippets: input.referencedSnippets ?? [],
@@ -74,12 +68,6 @@ export function createMockRunService(store: WorkspaceStore): MockRunService {
           runId: run.id,
           name: 'writeWorkspaceFile',
           input: { path: outputPath, referencedFiles: run.referencedFiles },
-        },
-        {
-          type: 'tool.input',
-          runId: run.id,
-          name: 'writeWorkspaceFile',
-          inputText: JSON.stringify({ path: outputPath, content: '[content omitted for artifact summary]' }),
         },
         { type: 'file.changed', runId: run.id, path: outputPath, change: 'created' },
         { type: 'agent.workflow.end', runId: run.id, status: 'passed', outputPath },

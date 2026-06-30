@@ -29,7 +29,6 @@ export function ActivityRail({
   onToggleTheme,
   onOpenWechat,
   onOpenGitSync,
-  onOpenHarness,
 }: {
   sidebarOpen: boolean;
   editorOpen: boolean;
@@ -41,7 +40,6 @@ export function ActivityRail({
   onToggleTheme: () => void;
   onOpenWechat: () => void;
   onOpenGitSync: () => void;
-  onOpenHarness: () => void;
 }): JSX.Element {
   return (
     <nav className="activity-rail" aria-label="主导航">
@@ -99,16 +97,6 @@ export function ActivityRail({
         title="版本管理"
       >
         <GitBranch size={20} />
-      </button>
-
-      <button
-        type="button"
-        className="rail-button"
-        onClick={onOpenHarness}
-        aria-label="Harness"
-        title="Harness"
-      >
-        <Diamond size={20} />
       </button>
 
       <button

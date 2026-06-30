@@ -8,8 +8,6 @@ export type WechatSendContext = {
 };
 
 export type CreateRunInput = {
-  runId?: string;
-  inputSnapshotId?: string;
   projectId: string;
   sessionId?: string;
   prompt: string;

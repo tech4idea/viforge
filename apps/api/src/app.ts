@@ -5,7 +5,7 @@ import path from 'node:path';
 import { workspaceStore } from './storage/workspaceStore';
 import { createBehaviorRulesStore } from './storage/behaviorRulesStore';
 import { createChatSessionStore } from './chat/chatSessionStore';
-import { createLangGraphEvalRunExecutor, createLangGraphRunService } from './runs/langGraphRunService';
+import { createLangGraphRunService } from './runs/langGraphRunService';
 import { runBus } from './runs/runBus';
 import { createAigcHubRoutes } from './routes/aigcHub';
 import { createChatSessionRoutes } from './routes/chatSessions';
@@ -13,7 +13,6 @@ import { createImageGenerationRoutes } from './routes/imageGenerations';
 import { createProjectsRoutes } from './routes/projects';
 import { createRunEventsRoutes } from './routes/runEvents';
 import { createRunsRoutes } from './routes/runs';
-import { createHarnessRoutes } from './routes/harness';
 import { createBehaviorRulesRoutes } from './routes/behaviorRules';
 import { createSkillsRoutes } from './routes/skills';
 import { createWechatRoutes } from './routes/wechat';
@@ -21,7 +20,6 @@ import { createGitRoutes } from './routes/git';
 import { createGitService } from './storage/gitService';
 import { createGitConfigStore } from './storage/gitConfigStore';
 import { createSkillStore } from './skills/skillStore';
-import { createHarnessStore } from './harness/harnessStore';
 import { createWechatStore } from './wechat/wechatStore';
 import { createWechatCommandService } from './wechat/wechatCommandService';
 import { createAssistantChatBridge } from './wechat/assistantChatBridge';
@@ -57,19 +55,13 @@ export function createApp(): Hono {
 
   const gitService = createGitService();
   const gitConfigStore = createGitConfigStore(workspaceStore);
-  const harnessStore = createHarnessStore(path.join(WORKSPACES_ROOT, '..', 'harness'), workspaceStore, {
-    gitService,
-    evalRunExecutor: createLangGraphEvalRunExecutor(workspaceStore, { gitService, gitConfigStore }),
-  });
 
   const langGraphRunService = createLangGraphRunService(workspaceStore, runBus, {
     gitService,
     gitConfigStore,
-    harnessStore,
   });
-  app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore));
+  app.route('/api', createRunsRoutes(langGraphRunService, runBus));
   app.route('/api', createRunEventsRoutes(runBus));
-  app.route('/api', createHarnessRoutes(harnessStore));
 
   app.route('/api', createSkillsRoutes(createSkillStore({
     agentConfigSkillsRoot: path.join(WORKSPACES_ROOT, '_global', 'Agent 配置', 'skills'),
