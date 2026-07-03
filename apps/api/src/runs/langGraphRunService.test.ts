@@ -53,7 +53,7 @@ describe('langgraph run service', () => {
         writeTool = tools.write_workspace_file;
         return {
           async stream(prompt, options) {
-            capturedPrompt = prompt;
+            capturedPrompt = typeof prompt === "string" ? prompt : prompt.map((message) => message.content).join("\n\n");
             capturedThread = options.memory;
             const toolResult = await tools.write_workspace_file.execute?.({
               path: '02 改编方案/第1集/单集改编方案.md',
@@ -142,7 +142,7 @@ describe('langgraph run service', () => {
             return {
               id: 'viwork-system-agent',
               async stream(prompt) {
-                capturedPrompt = prompt;
+                capturedPrompt = typeof prompt === "string" ? prompt : prompt.map((message) => message.content).join("\n\n");
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '情景剧处理完成。' } }]) };
               },
               async generate() {
@@ -280,10 +280,11 @@ describe('langgraph run service', () => {
 
   it('stores working and semantic project memory through LangGraph Store tools', async () => {
     const project = await store.createProject({ name: 'Memory Tools' });
+    const events: StreamEvent[] = [];
     const tools = __langGraphRunServiceTest.createWorkspaceTools(
       store,
       project.id,
-      () => {},
+      (event) => events.push(event),
       'run_memory_tools',
       () => '2026-06-04T00:00:00.000Z',
     );
@@ -308,6 +309,52 @@ describe('langgraph run service', () => {
     expect(remembered).toMatchObject({ remembered: true, messageId: expect.stringMatching(/^memory-/) });
     expect(recalled.matches).toEqual(expect.arrayContaining([
       expect.objectContaining({ text: expect.stringContaining('冷幽默') }),
+    ]));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'memory.write', memoryType: 'summary' }),
+      expect.objectContaining({ type: 'memory.read', bytes: expect.any(Number) }),
+      expect.objectContaining({ type: 'memory.write', memoryType: 'profile', content: expect.stringContaining('冷幽默') }),
+      expect.objectContaining({ type: 'memory.recall', query: '小程的对白风格偏好' }),
+    ]));
+  });
+
+  it('retrieves knowledge cards from the global knowledge index and publishes retrieval events', async () => {
+    const project = await store.createProject({ name: 'Knowledge Tools' });
+    await store.writeGlobalWorkspaceFile('知识库/index.yaml', [
+      'version: 1',
+      'entries:',
+      '  - id: kb-mechanism-owner-group-misread',
+      '    title: 业主群误会升级',
+      '    path: mechanisms/误会升级/业主群误会升级.md',
+      '    type: mechanism',
+      '    tags: [误会, 群聊, 升级]',
+      '    rightsRisk: low',
+      '    updatedAt: "2026-06-04T00:00:00.000Z"',
+    ].join('\n'));
+    const events: StreamEvent[] = [];
+    const tools = __langGraphRunServiceTest.createWorkspaceTools(
+      store,
+      project.id,
+      (event) => events.push(event),
+      'run_knowledge_tools',
+      () => '2026-06-04T00:00:00.000Z',
+    );
+
+    const result = await tools.retrieve_knowledge_cards.execute?.({
+      query: '业主群误会',
+      tags: ['误会'],
+      topK: 3,
+    }, {} as never) as { matches: Array<{ id: string; title: string }> };
+
+    expect(result.matches).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'kb-mechanism-owner-group-misread', title: '业主群误会升级' }),
+    ]));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'knowledge.retrieve',
+        query: '业主群误会',
+        matches: expect.arrayContaining([expect.objectContaining({ id: 'kb-mechanism-owner-group-misread' })]),
+      }),
     ]));
   });
 

@@ -246,6 +246,18 @@ export function streamEventsFromRunEvents(events: RunEvent[]): StreamEvent[] {
         }
         return streamEvents;
       }
+      case 'tool.input': {
+        const toolCallId = toolIdsByName.get(event.name)?.at(-1) ?? `${event.runId}-tool-${++toolSequence}`;
+        return [{
+          type: 'tool_use.delta',
+          runId: event.runId,
+          emittedAt,
+          toolCallId,
+          stream: 'input',
+          delta: event.inputText,
+          sequence: ++toolDeltaSequence,
+        }];
+      }
       case 'tool.result': {
         const toolCallId = toolIdsByName.get(event.name)?.shift() ?? `${event.runId}-tool-${++toolSequence}`;
         return [{
@@ -260,6 +272,14 @@ export function streamEventsFromRunEvents(events: RunEvent[]): StreamEvent[] {
       }
       case 'file.changed':
         return [{ type: 'file.changed', runId: event.runId, emittedAt, path: event.path, change: event.change }];
+      case 'memory.read':
+        return [{ ...event, emittedAt }];
+      case 'memory.write':
+        return [{ ...event, emittedAt }];
+      case 'memory.recall':
+        return [{ ...event, emittedAt }];
+      case 'knowledge.retrieve':
+        return [{ ...event, emittedAt }];
       case 'run.end':
         return [{
           type: 'run.end',
