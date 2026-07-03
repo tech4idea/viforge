@@ -2262,6 +2262,43 @@ body.is-resizing-panels .panel-resizer::after {
   letter-spacing: -0.01em;
 }
 
+.harness-standalone-shell {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: auto;
+  padding: 24px clamp(18px, 3vw, 40px) 40px;
+  background: var(--app-bg);
+  color: var(--text-primary);
+}
+
+.harness-standalone-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1680px;
+  margin: 0 auto 18px;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 16px;
+}
+
+.harness-standalone-header h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.harness-standalone-header button {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: var(--text-muted);
@@ -3057,9 +3094,30 @@ body.is-resizing-panels .panel-resizer::after {
   padding: 4px 0;
 }
 
+.harness-panel--standalone {
+  max-width: 1680px;
+  max-height: none;
+  margin: 0 auto;
+  overflow: visible;
+}
+
 .harness-toolbar {
   display: flex;
+  align-items: end;
+  gap: 10px;
   justify-content: flex-end;
+}
+
+.harness-global-product {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.harness-global-product span {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
 }
 
 .harness-workflow {
@@ -3076,14 +3134,23 @@ body.is-resizing-panels .panel-resizer::after {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-solid);
+  color: inherit;
   display: grid;
   gap: 4px;
   min-width: 0;
   padding: 10px;
+  text-align: left;
+  transition: border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
 }
 
 .harness-workflow-step.active {
   border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.harness-workflow-step:hover {
+  border-color: var(--accent-soft-strong);
+  transform: translateY(-1px);
 }
 
 .harness-workflow-step span {
@@ -3204,6 +3271,94 @@ body.is-resizing-panels .panel-resizer::after {
   font-weight: 600;
 }
 
+.harness-config-node {
+  overflow: visible;
+}
+
+.harness-config-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 0.78fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.harness-config-main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.harness-config-group {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-bg);
+  padding: 12px;
+}
+
+.harness-config-group__heading {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.harness-config-group__heading span {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.harness-config-group__heading strong {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.harness-config-group__heading small {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-context-preview {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 10px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-bg);
+  padding: 12px;
+  scrollbar-gutter: stable;
+}
+
+.harness-context-preview__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 8px;
+}
+
+.harness-context-preview__header span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.harness-context-preview__header strong {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
 .harness-agent-preview {
   display: grid;
   gap: 8px;
@@ -3281,6 +3436,30 @@ body.is-resizing-panels .panel-resizer::after {
 .harness-layer-preview small {
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.harness-agent-diff {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  padding: 8px 10px;
+}
+
+.harness-agent-diff strong {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.harness-agent-diff small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.harness-agent-diff small.changed {
+  color: var(--accent);
 }
 
 .harness-prompt-preview-stack {
@@ -3421,6 +3600,26 @@ body.is-resizing-panels .panel-resizer::after {
   gap: 10px;
 }
 
+.harness-candidate-create,
+.harness-candidate-select {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.harness-candidate-create {
+  grid-template-columns: minmax(260px, 0.72fr) auto;
+  justify-content: start;
+}
+
+.harness-candidate-select {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.harness-candidate-actions {
+  align-self: end;
+}
+
 .harness-form-grid label {
   display: grid;
   gap: 5px;
@@ -3445,7 +3644,7 @@ body.is-resizing-panels .panel-resizer::after {
 .harness-advanced-editor {
   border: 1px solid var(--border-soft);
   border-radius: 6px;
-  background: var(--surface-bg);
+  background: var(--surface-solid);
   padding: 10px;
 }
 
@@ -3457,7 +3656,13 @@ body.is-resizing-panels .panel-resizer::after {
 
 .harness-advanced-editor[open] {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
   gap: 10px;
+}
+
+.harness-advanced-editor[open] > summary,
+.harness-advanced-editor[open] > .harness-action-row {
+  grid-column: 1 / -1;
 }
 
 .harness-form-row {
@@ -3520,6 +3725,43 @@ body.is-resizing-panels .panel-resizer::after {
   resize: vertical;
   font-family: var(--font-mono);
   line-height: 1.45;
+}
+
+.harness-section select option,
+.harness-section select optgroup {
+  background: var(--surface-solid);
+  color: var(--text-primary);
+}
+
+.harness-rule-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+  gap: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-bg);
+  padding: 10px;
+}
+
+.harness-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.harness-field--wide {
+  grid-column: 1 / -1;
+}
+
+.harness-field span {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.harness-rule-editor textarea,
+.harness-rule-editor .harness-action-row {
+  grid-column: 1 / -1;
 }
 
 .harness-review-form {
@@ -3590,6 +3832,189 @@ body.is-resizing-panels .panel-resizer::after {
   gap: 10px;
 }
 
+.harness-eval-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.harness-message-picker {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.harness-message-picker > strong {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.harness-message-picker label {
+  align-items: start;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+  display: grid;
+  grid-template-columns: 18px 118px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.harness-message-picker label:last-child {
+  border-bottom: 0;
+}
+
+.harness-message-picker span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.harness-message-picker small {
+  color: var(--text-secondary);
+  display: -webkit-box;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.harness-fixture-build-summary {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.harness-fixture-build-summary strong {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.harness-fixture-build-summary small {
+  color: var(--text-muted);
+}
+
+.harness-fixture-preview,
+.harness-eval-ready {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+}
+
+.harness-fixture-preview strong {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.harness-fixture-preview small,
+.harness-eval-ready small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.harness-eval-ready small.warning {
+  color: var(--warning-text);
+}
+
+.harness-eval-run-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.harness-eval-run-detail__header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.harness-eval-run-detail__header h3 {
+  color: var(--text-primary);
+  font-size: 1rem;
+  margin: 0;
+}
+
+.harness-eval-run-detail__header small {
+  color: var(--text-muted);
+}
+
+.harness-run-status {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.harness-run-status--running,
+.harness-run-status--pending {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.harness-run-status--passed {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.harness-run-status--failed,
+.harness-run-status--error {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.harness-eval-run-message,
+.harness-eval-run-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.harness-eval-run-message.error {
+  border-color: var(--danger-border);
+}
+
+.harness-eval-run-message strong,
+.harness-eval-run-card strong {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.harness-eval-run-message pre {
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.harness-eval-run-columns {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.harness-eval-run-card small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 .harness-assertion-builder {
   border: 1px solid var(--border-soft);
   border-radius: 6px;
@@ -3602,6 +4027,53 @@ body.is-resizing-panels .panel-resizer::after {
 .harness-assertion-builder strong {
   color: var(--text-secondary);
   font-size: 0.78rem;
+}
+
+.harness-assertion-list {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.harness-assertion-list__header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.harness-assertion-list__header > strong {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.harness-assertion-row {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  grid-template-columns: 18px minmax(110px, 160px) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.harness-assertion-row input {
+  margin: 0;
+}
+
+.harness-assertion-row span {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.harness-assertion-row small {
+  color: var(--text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .harness-assertion-builder-grid {
@@ -3624,35 +4096,6 @@ body.is-resizing-panels .panel-resizer::after {
 
 .harness-assertion-builder-grid label:has(select[value="max-changed"]) input {
   max-width: 240px;
-}
-
-.harness-fixture-checklist {
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--surface-bg);
-  display: grid;
-  gap: 7px;
-  padding: 10px;
-}
-
-.harness-fixture-checklist strong {
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-}
-
-.harness-fixture-checklist label {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 0.76rem;
-}
-
-.harness-fixture-checklist span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .harness-artifact-detail {
@@ -3887,53 +4330,6 @@ body.is-resizing-panels .panel-resizer::after {
   background: rgba(248, 113, 113, 0.1);
 }
 
-.harness-tool-artifacts {
-  display: grid;
-  gap: 8px;
-}
-
-.harness-tool-artifact {
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--surface-soft);
-  padding: 8px;
-}
-
-.harness-tool-artifact summary {
-  align-items: center;
-  cursor: pointer;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.harness-tool-artifact-body {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.harness-tool-artifact-text span {
-  color: var(--text-muted);
-  display: block;
-  font-size: 0.72rem;
-  margin-bottom: 4px;
-}
-
-.harness-tool-artifact-text pre {
-  background: var(--surface-solid);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  line-height: 1.45;
-  margin: 0;
-  max-height: 130px;
-  overflow: auto;
-  padding: 8px;
-  white-space: pre-wrap;
-}
-
 .harness-score-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4051,6 +4447,27 @@ body.is-resizing-panels .panel-resizer::after {
   font-size: 0.78rem;
 }
 
+.harness-list li:has(.harness-list-row) {
+  display: block;
+}
+
+.harness-list-row {
+  display: grid;
+  grid-template-columns: 80px 70px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.harness-list-row:hover {
+  color: var(--text-primary);
+}
+
 .harness-list li:last-child {
   border-bottom: 0;
 }
@@ -4112,12 +4529,43 @@ body.is-resizing-panels .panel-resizer::after {
 }
 
 @media (max-width: 720px) {
+  .harness-standalone-shell {
+    padding: 14px 12px 24px;
+  }
+
+  .harness-standalone-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .harness-config-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .harness-context-preview {
+    position: static;
+    max-height: none;
+  }
+
+  .harness-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .harness-global-product {
+    min-width: 0;
+  }
+
   .harness-metrics,
   .harness-workflow,
   .harness-workflow--pipeline,
   .harness-form-grid,
   .harness-form-row,
+  .harness-candidate-create,
+  .harness-candidate-select,
+  .harness-rule-editor,
   .harness-assertion-builder-grid,
+  .harness-eval-run-columns,
   .harness-columns,
   .harness-score-grid,
   .harness-detail-grid,

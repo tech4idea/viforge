@@ -29,7 +29,7 @@ import type {
   SkillSnapshot,
   WorkspaceManifest,
 } from '@viwork/shared';
-import { PRODUCT_PROFILES, resolveProductProfile } from '@viwork/shared';
+import { PRODUCT_PROFILES, resolveProductProfile, type ProductProfile } from '@viwork/shared';
 
 import type { GitService } from '../storage/gitService';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -56,6 +56,7 @@ export type CreateRunInputSnapshotInput = {
   runId: string;
   projectId: string;
   sessionId?: string;
+  prompt?: string;
   productId?: string;
   referencedFiles?: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
@@ -63,6 +64,7 @@ export type CreateRunInputSnapshotInput = {
 
 export type CreateEvalFixtureFromSnapshotInput = {
   snapshotId: string;
+  name?: string;
   target: string;
   inputMessages?: EvalFixture['inputMessages'];
   memoryFixture?: MemoryRecord[];
@@ -73,7 +75,7 @@ export type CreateEvalFixtureFromSnapshotInput = {
 };
 
 export type UpdateEvalFixtureInput = Partial<Pick<EvalFixture,
-  'target' | 'inputMessages' | 'referencedSnippets' | 'memoryFixture' | 'knowledgeFixture' | 'expectedChangedFiles' | 'expectedToolEvents' | 'toolRetentionPolicy' | 'sensitiveFieldRules' | 'toolRetentionArtifacts' | 'toolMocks' | 'assertions' | 'tags'
+  'name' | 'target' | 'inputMessages' | 'referencedSnippets' | 'memoryFixture' | 'knowledgeFixture' | 'expectedChangedFiles' | 'expectedToolEvents' | 'toolRetentionPolicy' | 'sensitiveFieldRules' | 'toolRetentionArtifacts' | 'toolMocks' | 'assertions' | 'tags'
 >>;
 
 export type CreateEvalRunInput = {
@@ -102,8 +104,11 @@ export type EvalRunExecutorInput = {
   workspaceRoot: string;
   fixture: EvalFixture;
   agentSpec: AgentSpec;
+  model?: string;
+  modelParams?: RunArtifact['modelParams'];
   resolvedAgentConfig: EvalRun['resolvedAgentConfig'];
   runMode: EvalRun['runMode'];
+  onEvent?: (event: EvalRun['toolEvents'][number]) => void;
 };
 
 export type EvalRunExecutorResult = {
@@ -115,6 +120,19 @@ export type EvalRunExecutorResult = {
 };
 
 type TextSnapshotByPath = Map<string, string | null>;
+
+type PendingEvalRunExecution = {
+  evalRunId: string;
+  runWorkspaceRoot: string;
+  fixture: EvalFixture;
+  agentSpec: AgentSpec;
+  model?: string;
+  modelParams?: RunArtifact['modelParams'];
+  beforeManifest: RunInputSnapshotFile[];
+  beforeTextSnapshot: TextSnapshotByPath;
+  resolvedAgentConfig: EvalRun['resolvedAgentConfig'];
+  runMode: EvalRun['runMode'];
+};
 
 export type RecordRunArtifactEventInput = {
   runId: string;
@@ -196,7 +214,7 @@ const SNAPSHOT_EXCLUDE_RULES = [
 export function createHarnessStore(
   root: string,
   workspaceStore: WorkspaceStore,
-  options: { gitService?: GitService; evalRunExecutor?: (input: EvalRunExecutorInput) => Promise<EvalRunExecutorResult> } = {},
+  options: { gitService?: GitService; evalRunExecutor?: (input: EvalRunExecutorInput) => Promise<EvalRunExecutorResult>; asyncEvalRuns?: boolean } = {},
 ): HarnessStore {
   const harnessRoot = path.resolve(root);
   const statePath = path.join(harnessRoot, STATE_FILE);
@@ -239,6 +257,89 @@ export function createHarnessStore(
     });
     writeQueue = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  async function executeEvalRunAndUpdate(input: PendingEvalRunExecution): Promise<void> {
+    const progressEvents: EvalRun['toolEvents'] = [];
+    let persistedProgressEvents = 0;
+    let lastProgressPersistedAt = 0;
+    const persistProgress = (force = false): void => {
+      if (progressEvents.length <= persistedProgressEvents) return;
+      const now = Date.now();
+      const shouldPersist = force || progressEvents.length - persistedProgressEvents >= 25 || now - lastProgressPersistedAt >= 1_000;
+      if (!shouldPersist) return;
+      const eventsToAppend = progressEvents.slice(persistedProgressEvents);
+      persistedProgressEvents = progressEvents.length;
+      lastProgressPersistedAt = now;
+      void updateState((nextState) => {
+        const evalRun = nextState.evalRuns.find((item) => item.id === input.evalRunId);
+        if (!evalRun || evalRun.status !== 'running') return undefined;
+        evalRun.toolEvents = [...evalRun.toolEvents, ...eventsToAppend];
+        evalRun.outputMessage = summarizeEvalRunProgress(evalRun.toolEvents);
+        return evalRun;
+      });
+    };
+    try {
+      const executorResult = options.evalRunExecutor
+        ? await executeCustomEvalRun(options.evalRunExecutor, {
+            evalRunId: input.evalRunId,
+            workspaceRoot: input.runWorkspaceRoot,
+            fixture: input.fixture,
+            agentSpec: input.agentSpec,
+            model: input.model,
+            modelParams: input.modelParams,
+            resolvedAgentConfig: input.resolvedAgentConfig,
+            runMode: input.runMode,
+            onEvent: (event) => {
+              progressEvents.push(event);
+              persistProgress();
+            },
+          })
+        : await replayFixtureExpectations(input.runWorkspaceRoot, input.fixture);
+      persistProgress(true);
+      const toolEvents = executorResult.toolEvents ?? [];
+      const afterManifest = await buildFileManifest(input.runWorkspaceRoot);
+      const fileDiff = diffFileManifests(input.beforeManifest, afterManifest);
+      const changedFiles = await captureEvalRunChangedFiles(input.runWorkspaceRoot, fileDiff);
+      const state = await readState();
+      const assertionResults = await evaluateAssertions(
+        input.runWorkspaceRoot,
+        input.beforeManifest,
+        afterManifest,
+        input.fixture.assertions,
+        toolEvents,
+        input.fixture.productId,
+        state.workspaceManifests,
+        input.beforeTextSnapshot,
+      );
+      const assertionStatus = assertionResults.every((result) => result.passed) ? 'passed' : 'failed';
+      const status = executorResult.status === 'error' ? 'error' : assertionStatus;
+      await updateState((nextState) => {
+        const evalRun = nextState.evalRuns.find((item) => item.id === input.evalRunId);
+        if (!evalRun) throw new Error('Eval run not found');
+        evalRun.executionMode = executorResult.executionMode ?? (options.evalRunExecutor ? 'custom_executor' : 'fixture_replay');
+        evalRun.status = status;
+        evalRun.endedAt = new Date().toISOString();
+        evalRun.outputMessage = executorResult.outputMessage ?? `EvalRun executed in isolated workspace ${normalizePath(path.relative(harnessRoot, input.runWorkspaceRoot))}.`;
+        evalRun.errorMessage = executorResult.errorMessage;
+        evalRun.toolEvents = toolEvents;
+        evalRun.fileDiff = fileDiff;
+        evalRun.changedFiles = changedFiles;
+        evalRun.assertionResults = assertionResults;
+        return evalRun;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await updateState((nextState) => {
+        const evalRun = nextState.evalRuns.find((item) => item.id === input.evalRunId);
+        if (!evalRun) return undefined;
+        evalRun.status = 'error';
+        evalRun.endedAt = new Date().toISOString();
+        evalRun.errorMessage = message;
+        evalRun.outputMessage = `EvalRun failed: ${message}`;
+        return evalRun;
+      });
+    }
   }
 
   return {
@@ -746,6 +847,7 @@ export function createHarnessStore(
         runId: input.runId,
         projectId: input.projectId,
         sessionId: input.sessionId,
+        prompt: input.prompt,
         productId: input.productId ?? project.productId,
         snapshotMode: 'full_project',
         root: normalizePath(path.relative(harnessRoot, snapshotRoot)),
@@ -786,12 +888,13 @@ export function createHarnessStore(
       const now = new Date().toISOString();
       const fixture: EvalFixture = {
         id: fixtureId,
+        name: input.name,
         productId: snapshot.productId ?? 'unknown',
         target: input.target,
         sourceRunId: snapshot.runId,
         sourceSnapshotId: snapshot.id,
         workspaceSnapshotRoot: normalizePath(path.relative(harnessRoot, fixtureWorkspaceRoot)),
-        inputMessages: input.inputMessages ?? [],
+        inputMessages: input.inputMessages ?? (snapshot.prompt ? [{ role: 'user', content: snapshot.prompt, createdAt: snapshot.createdAt }] : []),
         referencedSnippets: snapshot.referencedSnippets ?? [],
         memoryFixture: input.memoryFixture ?? [],
         knowledgeFixture: input.knowledgeFixture ?? [],
@@ -832,6 +935,7 @@ export function createHarnessStore(
       const toolRetentionPolicy = suggestToolRetentionPolicy(artifact, sensitiveFieldRules);
       const fixture: EvalFixture = {
         id: fixtureId,
+        name: input.name,
         productId: snapshot.productId ?? artifact.productId ?? 'unknown',
         target: input.target,
         sourceRunId: artifact.runId,
@@ -862,6 +966,7 @@ export function createHarnessStore(
       return updateState((state) => {
         const fixture = state.evalFixtures.find((item) => item.id === fixtureId);
         if (!fixture) throw new Error('Eval fixture not found');
+        if (input.name !== undefined) fixture.name = input.name;
         if (input.target !== undefined) fixture.target = input.target;
         if (input.inputMessages !== undefined) fixture.inputMessages = input.inputMessages;
         if (input.referencedSnippets !== undefined) fixture.referencedSnippets = input.referencedSnippets;
@@ -894,7 +999,8 @@ export function createHarnessStore(
     },
 
     async createEvalRun(input) {
-      return updateState(async (state) => {
+      let pendingExecution: PendingEvalRunExecution | null = null;
+      const evalRun = await updateState(async (state) => {
         const fixture = state.evalFixtures.find((item) => item.id === input.fixtureId);
         if (!fixture) throw new Error('Eval fixture not found');
         const agentSpec = state.agentSpecs.find((item) => item.id === input.agentSpecId);
@@ -907,44 +1013,52 @@ export function createHarnessStore(
         const beforeManifest = await buildFileManifest(runWorkspaceRoot);
         const beforeTextSnapshot = await collectAssertionTextSnapshot(runWorkspaceRoot, fixture.assertions);
         const resolvedAgentConfig = await resolveAgentConfig(state, agentSpec, workspaceStore);
-        const executorResult = options.evalRunExecutor
-          ? await executeCustomEvalRun(options.evalRunExecutor, {
-              evalRunId,
-              workspaceRoot: runWorkspaceRoot,
-              fixture,
-              agentSpec,
-              resolvedAgentConfig,
-              runMode: input.runMode ?? 'repro',
-            })
-          : await replayFixtureExpectations(runWorkspaceRoot, fixture);
-        const toolEvents = executorResult.toolEvents ?? [];
-        const afterManifest = await buildFileManifest(runWorkspaceRoot);
-        const fileDiff = diffFileManifests(beforeManifest, afterManifest);
-        const changedFiles = await captureEvalRunChangedFiles(runWorkspaceRoot, fileDiff);
-        const assertionResults = await evaluateAssertions(runWorkspaceRoot, beforeManifest, afterManifest, fixture.assertions, toolEvents, fixture.productId, state.workspaceManifests, beforeTextSnapshot);
-        const assertionStatus = assertionResults.every((result) => result.passed) ? 'passed' : 'failed';
-        const status = executorResult.status === 'error' ? 'error' : assertionStatus;
+        const sourceArtifact = fixture.sourceRunId ? state.runArtifacts.find((item) => item.runId === fixture.sourceRunId) : undefined;
+        const model = sourceArtifact?.modelParams?.model ?? sourceArtifact?.model;
+        const modelParams = sourceArtifact?.modelParams ?? (model ? { model, maxSteps: 25, source: 'run_input' as const } : undefined);
         const evalRun: EvalRun = {
           id: evalRunId,
           fixtureId: fixture.id,
           agentSpecId: agentSpec.id,
           runMode: input.runMode ?? 'repro',
-          executionMode: executorResult.executionMode ?? (options.evalRunExecutor ? 'custom_executor' : 'fixture_replay'),
-          status,
+          executionMode: options.evalRunExecutor ? 'custom_executor' : 'fixture_replay',
+          status: 'running',
+          model,
+          modelParams,
           startedAt: now,
-          endedAt: new Date().toISOString(),
-          outputMessage: executorResult.outputMessage ?? `Repro EvalRun executed in isolated workspace ${normalizePath(path.relative(harnessRoot, runWorkspaceRoot))}. V1 runner replays fixture file changes and captured tool events before assertion evaluation.`,
-          errorMessage: executorResult.errorMessage,
-          toolEvents,
-          fileDiff,
-          changedFiles,
-          assertionResults,
+          outputMessage: `EvalRun created. Execution continues in isolated workspace ${normalizePath(path.relative(harnessRoot, runWorkspaceRoot))}. Model: ${model ?? 'runtime default'}.`,
+          toolEvents: [],
+          fileDiff: [],
+          changedFiles: [],
+          assertionResults: [],
           humanReview: null,
           resolvedAgentConfig,
         };
         state.evalRuns.push(evalRun);
+        pendingExecution = {
+          evalRunId,
+          runWorkspaceRoot,
+          fixture: structuredClone(fixture),
+          agentSpec: structuredClone(agentSpec),
+          model,
+          modelParams,
+          beforeManifest,
+          beforeTextSnapshot,
+          resolvedAgentConfig,
+          runMode: input.runMode ?? 'repro',
+        };
         return evalRun;
       });
+      if (pendingExecution) {
+        if (options.asyncEvalRuns === true) {
+          void executeEvalRunAndUpdate(pendingExecution);
+        } else {
+          await executeEvalRunAndUpdate(pendingExecution);
+          const completedEvalRun = (await readState()).evalRuns.find((item) => item.id === evalRun.id);
+          if (completedEvalRun) return completedEvalRun;
+        }
+      }
+      return evalRun;
     },
 
     async completeEvalRun(evalRunId, outputMessage) {
@@ -1027,13 +1141,46 @@ async function seedProductProfileBaseline(state: HarnessState, productId: string
   const productProfile = resolveProductProfile(productId);
   const now = new Date().toISOString();
 
+  await ensureBaselinePromptBlocks(state, productProfile, now);
   const memoryPolicy = ensureBaselineMemoryPolicy(state, productId, now);
   const retrievalPolicy = ensureBaselineRetrievalPolicy(state, productId, now);
   ensureBaselineWorkspaceManifest(state, productId, now);
   const layerConfig = await ensureBaselineLayerConfig(state, productId, memoryPolicy, retrievalPolicy, now);
 
+  const existingSystemSpec = state.agentSpecs.find((spec) => spec.productId === productId && spec.agentId === 'system' && spec.status === 'active');
+  if (existingSystemSpec) {
+    if (existingSystemSpec.id === `seed_${productId}_system_active_v1` && existingSystemSpec.promptBlockRefs.length === 0) {
+      existingSystemSpec.promptBlockRefs = baselinePromptBlockRefs(productId, 'system');
+      existingSystemSpec.updatedAt = now;
+    }
+  } else {
+    state.agentSpecs.push({
+      id: `seed_${productId}_system_active_v1`,
+      productId,
+      agentId: 'system',
+      version: 1,
+      status: 'active',
+      layerConfigRef: layerConfig.id,
+      promptBlockRefs: baselinePromptBlockRefs(productId, 'system'),
+      skillRefs: [],
+      memoryPolicyRef: `${memoryPolicy.id}@${memoryPolicy.version}`,
+      retrievalPolicyRef: `${retrievalPolicy.id}@${retrievalPolicy.version}`,
+      toolPolicyRef: layerConfig.toolPolicyRef,
+      modelPolicyRef: layerConfig.modelPolicyRef,
+      changelog: `Seeded from ${productId} product profile system prompt as the baseline active AgentSpec.`,
+      createdAt: now,
+      updatedAt: now,
+      activatedAt: now,
+    });
+  }
+
   for (const agentId of productProfile.defaultAgentSkillNames) {
-    if (state.agentSpecs.some((spec) => spec.productId === productId && spec.agentId === agentId && spec.status === 'active')) {
+    const existingActiveSpec = state.agentSpecs.find((spec) => spec.productId === productId && spec.agentId === agentId && spec.status === 'active');
+    if (existingActiveSpec) {
+      if (existingActiveSpec.id === `seed_${productId}_${agentId}_active_v1` && existingActiveSpec.promptBlockRefs.length === 0) {
+        existingActiveSpec.promptBlockRefs = baselinePromptBlockRefs(productId, agentId);
+        existingActiveSpec.updatedAt = now;
+      }
       continue;
     }
     state.agentSpecs.push({
@@ -1043,7 +1190,7 @@ async function seedProductProfileBaseline(state: HarnessState, productId: string
       version: 1,
       status: 'active',
       layerConfigRef: layerConfig.id,
-      promptBlockRefs: [],
+      promptBlockRefs: baselinePromptBlockRefs(productId, agentId),
       skillRefs: [{ skillId: agentId, version: 1 }],
       memoryPolicyRef: `${memoryPolicy.id}@${memoryPolicy.version}`,
       retrievalPolicyRef: `${retrievalPolicy.id}@${retrievalPolicy.version}`,
@@ -1053,6 +1200,63 @@ async function seedProductProfileBaseline(state: HarnessState, productId: string
       createdAt: now,
       updatedAt: now,
       activatedAt: now,
+    });
+  }
+}
+
+async function ensureBaselinePromptBlocks(state: HarnessState, profile: ProductProfile, now: string): Promise<void> {
+  const productId = profile.id;
+  const definitions: Array<{ id: string; title: string; scope: PromptBlock['scope']; content: string }> = [
+    {
+      id: `seed_${productId}_system_orchestration`,
+      title: 'System orchestration and workflow gates',
+      scope: 'system',
+      content: systemWorkflowBlock(productId),
+    },
+    {
+      id: `seed_${productId}_workspace_output_policy`,
+      title: 'Workspace output and tool policy',
+      scope: 'tool',
+      content: workspaceOutputPolicyBlock(productId),
+    },
+  ];
+
+  for (const agentId of profile.defaultAgentSkillNames) {
+    const prompt = await readProductSkillPrompt(profile, agentId).catch(() => '');
+    definitions.push({
+      id: `seed_${productId}_${agentId}_role_boundary`,
+      title: `${agentId} role and boundary`,
+      scope: agentId === 'reviewer-agent' ? 'reviewer' : 'specialist',
+      content: extractPromptBlock(prompt, ['职责', '边界', '输入', '规则', '打回对象判断']) || fallbackRoleBoundaryBlock(productId, agentId),
+    });
+    definitions.push({
+      id: `seed_${productId}_${agentId}_quality_gate`,
+      title: `${agentId} quality gate`,
+      scope: agentId === 'reviewer-agent' ? 'reviewer' : 'quality',
+      content: extractPromptBlock(prompt, ['质量标准', '合格故事最低门槛', '基本要求', '好原著分析标准', '好改编方案标准', '好剧本标准', '故事一票否决项', '故事审查项', '原著分析审查', '改编方案审查', '剧本审查']) || fallbackQualityGateBlock(productId, agentId),
+    });
+    definitions.push({
+      id: `seed_${productId}_${agentId}_output_contract`,
+      title: `${agentId} output contract`,
+      scope: 'specialist',
+      content: extractPromptBlock(prompt, ['输出格式']) || fallbackOutputContractBlock(productId, agentId),
+    });
+  }
+
+  for (const definition of definitions) {
+    const existing = state.promptBlocks.find((block) => block.id === definition.id && block.version === 1);
+    if (existing) continue;
+    state.promptBlocks.push({
+      id: definition.id,
+      productId,
+      version: 1,
+      status: 'active',
+      title: definition.title,
+      scope: definition.scope,
+      content: definition.content.trim(),
+      contentHash: sha256(definition.content.trim()),
+      createdAt: now,
+      updatedAt: now,
     });
   }
 }
@@ -1145,11 +1349,151 @@ function ensureBaselineWorkspaceManifest(state: HarnessState, productId: string,
   return manifest;
 }
 
+function baselinePromptBlockRefs(productId: string, agentId: string): string[] {
+  if (agentId === 'system') {
+    return [`seed_${productId}_system_orchestration@1`, `seed_${productId}_workspace_output_policy@1`];
+  }
+  return [
+    `seed_${productId}_system_orchestration@1`,
+    `seed_${productId}_workspace_output_policy@1`,
+    `seed_${productId}_${agentId}_role_boundary@1`,
+    `seed_${productId}_${agentId}_quality_gate@1`,
+    `seed_${productId}_${agentId}_output_contract@1`,
+  ];
+}
+
+function systemWorkflowBlock(productId: string): string {
+  if (productId === 'sitcom') {
+    return [
+      'System agent 统筹情景剧创作链路，不替代 specialist 完成正式故事或剧本。',
+      '脑暴只委派 brainstorm-agent，在聊天中展示，不进入审稿闭环，不写正式文件。',
+      '正式故事请求必须读取项目设定、人物关系、场景规则、风格约束和目标集数已有文件。',
+      '人物动机、角色关系或连续性不足时，先委派 character-agent 或 continuity-agent 补齐约束。',
+      '正式故事必须由 story-agent 产出，并经 reviewer-agent 通过后才能写入正式故事路径。',
+      '审稿打回时按 reviewer-agent 的具体不合格项返工；达到全局返工上限仍失败时停止并说明阻塞点。',
+    ].join('\n');
+  }
+  return [
+    'System agent 统筹小说改编链路，不替代 specialist 完成正式产物。',
+    '脑暴只委派 brainstorm-agent，在聊天中展示，不进入审稿闭环，不写正式文件。',
+    '正式流程按原著分析、改编方案、剧本逐级推进；每一级正式产物都必须经过 reviewer-agent。',
+    '原著分析打回交回 source-analyst-agent；方案打回交回 adaptation-planner-agent；剧本问题按根因交回 screenwriter-agent、adaptation-planner-agent 或 source-analyst-agent。',
+    '达到全局返工上限仍失败时停止并说明最近一次不合格项、失败根因和需要用户决策的点。',
+  ].join('\n');
+}
+
+function workspaceOutputPolicyBlock(productId: string): string {
+  const paths = productId === 'sitcom'
+    ? [
+      '整季故事线：02 故事/整季故事线.md',
+      '单集故事：02 故事/<集数>/单集大纲.md',
+      '情节卡片：02 故事/<集数>/情节卡片.md',
+      '剧本：03 剧本/<集数>/定稿剧本.md',
+    ]
+    : [
+      '原著分析：01 原著资料/章节拆解.md、01 原著资料/人物关系.md 或用户指定路径',
+      '改编方案：02 改编方案/全季改编方案.md、02 改编方案/<集数>/单集改编方案.md',
+      '剧本：03 剧本/<集数>/剧本.md',
+    ];
+  return [
+    '所有正式文件写入必须遵守 WorkspaceManifest 和用户明确指定路径；用户指定路径优先。',
+    '审稿意见默认只展示在聊天中，不保存为项目文件，除非用户明确要求记录。',
+    '图片工具调用前必须先展示完整 prompt、比例、数量、预计保存路径；编辑图片还要说明原图和修改要点，并等待用户明确确认。',
+    '正式产物路径：',
+    ...paths.map((item) => `- ${item}`),
+  ].join('\n');
+}
+
+function fallbackRoleBoundaryBlock(productId: string, agentId: string): string {
+  const sitcom: Record<string, string> = {
+    'brainstorm-agent': '只负责情景剧方向脑暴和候选故事种子，不审稿、不写正式文件。',
+    'character-agent': '只负责人设、角色关系、行为边界和可复用喜剧机关，不写完整故事或剧本。',
+    'continuity-agent': '只负责连续性事实、场景规则、历史包袱和不可违背约束，不做最终质量验收。',
+    'story-agent': '负责正式情景剧故事创作，处理目标、阻力、升级、A/B 故事和结尾回收，不写完整剧本。',
+    'screenwriter-agent': '只能基于已通过故事大纲写可拍摄剧本，不推翻故事核心。',
+    'reviewer-agent': '作为严格质量闸门，只判断通过或打回，不直接改稿。',
+  };
+  const adaptation: Record<string, string> = {
+    'brainstorm-agent': '只负责小说改编方向脑暴，不审稿、不写正式项目文件。',
+    'source-analyst-agent': '负责把用户提供或引用的小说资料拆解为可改编依据。',
+    'adaptation-planner-agent': '负责把已成立的原著分析转换为全季或单集改编方案。',
+    'screenwriter-agent': '负责把已通过改编方案转换为可拍摄、可表演剧本。',
+    'reviewer-agent': '作为严格改编质量闸门，只判断通过或打回，不直接改稿。',
+  };
+  return (productId === 'sitcom' ? sitcom : adaptation)[agentId] ?? `${agentId} follows product-specific specialist boundaries.`;
+}
+
+function fallbackQualityGateBlock(productId: string, agentId: string): string {
+  if (productId === 'sitcom') {
+    if (agentId === 'reviewer-agent') return '必须检查主角目标、持续阻力、因果升级、喜剧机制、人物一致性、结尾回收和可表演性；任一结构性失败都打回。';
+    if (agentId === 'story-agent') return '故事必须同时具备具体目标、持续阻力、因果链、升级、选择与后果、喜剧机制、人物一致性、单集闭合和结尾回收。';
+    if (agentId === 'character-agent') return '主要角色必须有表层目标、隐藏需求、喜剧缺点、行为边界、关系压力和可执行行动约束。';
+    if (agentId === 'continuity-agent') return '必须区分已确认事实、推断和待确认信息，并给出具体冲突来源、影响范围和修复方式。';
+    if (agentId === 'screenwriter-agent') return '每场戏必须有场景目标、冲突、动作、对白和转折，喜剧节拍必须可表演可拍摄。';
+    return '候选方向必须包含角色欲望、阻力、喜剧错位和升级可能，并说明推荐方向的理由。';
+  }
+  if (agentId === 'reviewer-agent') return '必须严格审查原著分析、改编方案或剧本是否达标，只允许通过或打回。';
+  if (agentId === 'source-analyst-agent') return '原著分析必须明确主题、主线、人物关系、可影视化场面、外化处理建议和改编风险。';
+  if (agentId === 'adaptation-planner-agent') return '改编方案必须明确原著范围、戏剧任务、主角行动、角色取舍、外化方式和结尾钩子。';
+  if (agentId === 'screenwriter-agent') return '剧本每场戏必须有目标、冲突、可拍摄动作、可表演对白、节拍和原著对应关系。';
+  return '候选方向必须包含改编定位、主视角、篇幅建议、人物取舍、潜在风险和推荐理由。';
+}
+
+function fallbackOutputContractBlock(productId: string, agentId: string): string {
+  if (productId === 'sitcom') {
+    if (agentId === 'story-agent') return '输出单集故事，包含一句话故事核、本集主题、设定约束、A 故事、B 故事、关键场景、涉及人物和场景、喜剧机制、给 screenwriter-agent 的提示。';
+    if (agentId === 'reviewer-agent') return '输出结论、审查对象、打回对象、硬门槛检查、不合格项、返工要求和通过条件；需要结构化时附加 JSON。';
+    if (agentId === 'character-agent') return '输出人物设定补充、角色小传、角色关系表和给 story-agent 的约束。';
+    if (agentId === 'continuity-agent') return '输出连续性检查、已确认事实、角色关系状态、场景与规则、冲突检查和给 story-agent 的约束。';
+    if (agentId === 'brainstorm-agent') return '输出候选方向和推荐方向；每个方向包含故事种子、人物欲望、阻力/误会、喜剧机制、升级方式和风险。';
+    return '输出可拍摄剧本，按场景组织动作、对白、节拍和可表演冲突。';
+  }
+  if (agentId === 'source-analyst-agent') return '输出原著分析，包含核心主题、主线剧情、人物关系、关键场面、可改编单元、外化处理建议、改编边界与风险。';
+  if (agentId === 'adaptation-planner-agent') return '输出改编方案，包含改编定位、原著范围、分集规划、单集节拍、角色与情节取舍、原著对应关系。';
+  if (agentId === 'screenwriter-agent') return '输出剧本，包含冷开场、正戏、结尾；每场包含地点/时间、动作、角色对白、节拍和原著对应。';
+  if (agentId === 'reviewer-agent') return '输出结论、打回对象、不合格项和返工要求。';
+  return '输出 3 到 5 个候选改编方向，并推荐最值得进入 source-analyst-agent 的方向。';
+}
+
+function extractPromptBlock(prompt: string, headings: string[]): string {
+  const lines = stripYamlFrontmatter(prompt).split(/\r?\n/);
+  const sections: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^##\s+(.+?)\s*$/.exec(lines[index] ?? '');
+    if (!match || !headings.includes(match[1])) continue;
+    const sectionLines = [lines[index]];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      if (/^##\s+/.test(lines[next] ?? '')) break;
+      sectionLines.push(lines[next]);
+    }
+    sections.push(sectionLines.join('\n').trim());
+  }
+  return sections.join('\n\n').trim();
+}
+
+function stripYamlFrontmatter(content: string): string {
+  return content.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+}
+
 async function ensureBaselineLayerConfig(state: HarnessState, productId: string, memoryPolicy: MemoryPolicy, retrievalPolicy: RetrievalPolicy, now: string): Promise<AgentLayerConfig> {
   const existing = state.agentLayerConfigs
     .filter((config) => config.productId === productId && config.status === 'active')
     .sort(compareVersionAndUpdatedAt)[0];
-  if (existing) return existing;
+  if (existing) {
+    if (existing.id === `seed_${productId}_layer_config`) {
+      const systemRefs = [`seed_${productId}_system_orchestration@1`, `seed_${productId}_workspace_output_policy@1`];
+      existing.systemAgent.promptBlockRefs = uniqueStrings([...existing.systemAgent.promptBlockRefs, ...systemRefs]);
+      existing.specialists = existing.specialists.map((specialist) => ({
+        ...specialist,
+        promptBlockRefs: uniqueStrings([
+          ...specialist.promptBlockRefs,
+          ...baselinePromptBlockRefs(productId, specialist.agentId).filter((ref) => !systemRefs.includes(ref)),
+        ]),
+      }));
+      existing.updatedAt = now;
+    }
+    return existing;
+  }
 
   const profile = resolveProductProfile(productId);
   const systemInstructions = await readProductSystemAgentPrompt(profile).catch(() => '');
@@ -1160,14 +1504,14 @@ async function ensureBaselineLayerConfig(state: HarnessState, productId: string,
     status: 'active',
     systemAgent: {
       agentId: 'system',
-      promptBlockRefs: [],
+      promptBlockRefs: [`seed_${productId}_system_orchestration@1`, `seed_${productId}_workspace_output_policy@1`],
       allowedTools: ['read_workspace_file', 'write_workspace_file', 'delegate_to_specialist_agent', 'recall_project_memory', 'retrieve_knowledge_cards'],
       instructionOverride: systemInstructions,
     },
     specialists: await Promise.all(profile.defaultAgentSkillNames.map(async (agentId) => ({
       agentId,
       skillRef: `${agentId}@1`,
-      promptBlockRefs: [],
+      promptBlockRefs: baselinePromptBlockRefs(productId, agentId).filter((ref) => !ref.includes('_system_orchestration') && !ref.includes('_workspace_output_policy')),
       defaultEnabled: true,
       instructionOverride: await readProductSkillPrompt(profile, agentId).catch(() => undefined),
     }))),
@@ -1212,6 +1556,10 @@ function compareVersionAndUpdatedAt<T extends { version: number; updatedAt?: str
 
 function compareUpdatedAt(left: { updatedAt?: string }, right: { updatedAt?: string }): number {
   return (right.updatedAt ?? '').localeCompare(left.updatedAt ?? '');
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function evaluateReleaseGate(state: HarnessState, spec: AgentSpec): AgentSpecReleaseGate {
@@ -1768,6 +2116,24 @@ function diffFileManifests(before: RunInputSnapshotFile[], after: RunInputSnapsh
   return changes.sort((left, right) => left.path.localeCompare(right.path));
 }
 
+function summarizeEvalRunProgress(events: EvalRun['toolEvents']): string {
+  const lastEvent = events[events.length - 1];
+  const toolStarts = events.filter((event) => event.type === 'tool_use.start').length;
+  const toolEnds = events.filter((event) => event.type === 'tool_use.end').length;
+  const textDeltas = events.filter((event) => event.type === 'text.delta').length;
+  const lastText = [...events].reverse().find((event): event is Extract<EvalRun['toolEvents'][number], { type: 'text.delta' }> => event.type === 'text.delta')?.delta;
+  const lastTool = [...events].reverse().find((event): event is Extract<EvalRun['toolEvents'][number], { type: 'tool_use.start' | 'tool_use.end' }> => event.type === 'tool_use.start' || event.type === 'tool_use.end');
+  const lastToolName = lastTool && 'toolName' in lastTool ? lastTool.toolName : lastTool?.toolCallId;
+  const lastDetail = lastTool
+    ? `${lastTool.type === 'tool_use.end' ? '工具完成' : '工具调用'}：${lastToolName}`
+    : lastText
+      ? `最新输出：${lastText.slice(0, 80)}`
+      : lastEvent
+        ? `最新事件：${lastEvent.type}`
+        : '等待执行事件';
+  return `EvalRun 正在执行。已收到 ${events.length} 个事件，工具 ${toolEnds}/${toolStarts}，文本片段 ${textDeltas}。${lastDetail}`;
+}
+
 async function evaluateAssertions(
   workspaceRoot: string,
   beforeManifest: RunInputSnapshotFile[],
@@ -1790,9 +2156,16 @@ async function evaluateAssertions(
 
   const mustCreateOrModify = arrayOfStrings(files.mustCreateOrModify);
   for (const filePath of mustCreateOrModify) {
-    const passed = diff.some((item) => item.path === filePath && (item.change === 'created' || item.change === 'modified'))
-      || afterManifest.some((item) => item.path === filePath);
-    results.push({ id: `files.mustCreateOrModify:${filePath}`, passed, message: passed ? undefined : `Expected ${filePath} to be created or modified` });
+    const changed = diff.find((item) => item.path === filePath && (item.change === 'created' || item.change === 'modified'));
+    const exists = afterManifest.some((item) => item.path === filePath);
+    const passed = Boolean(changed);
+    results.push({
+      id: `files.mustCreateOrModify:${filePath}`,
+      passed,
+      message: passed ? undefined : exists
+        ? `断言未满足：${filePath} 存在，但本次 EvalRun 没有创建或修改它。实际变更：${summarizeFileDiffForMessage(diff)}`
+        : `断言未满足：${filePath} 不存在，也没有被创建。实际变更：${summarizeFileDiffForMessage(diff)}`,
+    });
   }
 
   const mustNotModify = arrayOfStrings(files.mustNotModify);
@@ -1804,19 +2177,22 @@ async function evaluateAssertions(
   const mustCreate = arrayOfStrings(files.mustCreate);
   for (const filePath of mustCreate) {
     const passed = diff.some((item) => item.path === filePath && item.change === 'created');
-    results.push({ id: `files.mustCreate:${filePath}`, passed, message: passed ? undefined : `Expected ${filePath} to be created` });
+    const actual = diff.find((item) => item.path === filePath);
+    results.push({ id: `files.mustCreate:${filePath}`, passed, message: passed ? undefined : `断言未满足：期望创建 ${filePath}，实际${actual ? `是 ${actual.change}` : '没有变更'}。实际变更：${summarizeFileDiffForMessage(diff)}` });
   }
 
   const mustModify = arrayOfStrings(files.mustModify);
   for (const filePath of mustModify) {
     const passed = diff.some((item) => item.path === filePath && item.change === 'modified');
-    results.push({ id: `files.mustModify:${filePath}`, passed, message: passed ? undefined : `Expected ${filePath} to be modified` });
+    const actual = diff.find((item) => item.path === filePath);
+    results.push({ id: `files.mustModify:${filePath}`, passed, message: passed ? undefined : `断言未满足：期望修改 ${filePath}，实际${actual ? `是 ${actual.change}` : '没有变更'}。实际变更：${summarizeFileDiffForMessage(diff)}` });
   }
 
   const mustDelete = arrayOfStrings(files.mustDelete);
   for (const filePath of mustDelete) {
     const passed = diff.some((item) => item.path === filePath && item.change === 'deleted');
-    results.push({ id: `files.mustDelete:${filePath}`, passed, message: passed ? undefined : `Expected ${filePath} to be deleted` });
+    const actual = diff.find((item) => item.path === filePath);
+    results.push({ id: `files.mustDelete:${filePath}`, passed, message: passed ? undefined : `断言未满足：期望删除 ${filePath}，实际${actual ? `是 ${actual.change}` : '没有变更'}。实际变更：${summarizeFileDiffForMessage(diff)}` });
   }
 
   const mustNotWrite = arrayOfStrings(files.mustNotWrite);
@@ -1868,15 +2244,20 @@ async function evaluateAssertions(
     const filePath = typeof assertion.path === 'string' ? assertion.path : '';
     if (!filePath) continue;
     const content = await readTextIfExists(path.join(workspaceRoot, filePath));
+    const actualHeadings = content === null ? [] : extractMarkdownHeadings(content);
     const requiredHeadings = arrayOfStrings(assertion.requiredHeadings);
     for (const heading of requiredHeadings) {
       const passed = content !== null && markdownHasHeading(content, heading);
-      results.push({ id: `markdown.requiredHeadings:${filePath}:${heading}`, passed, message: passed ? undefined : `Missing heading ${heading} in ${filePath}` });
+      results.push({ id: `markdown.requiredHeadings:${filePath}:${heading}`, passed, message: passed ? undefined : content === null
+        ? `断言未满足：${filePath} 不存在，无法检查标题 ${heading}`
+        : `断言未满足：${filePath} 缺少 Markdown 标题 ${heading}。实际标题：${summarizeListForMessage(actualHeadings)}` });
     }
     const requiredText = arrayOfStrings(assertion.requiredText);
     for (const text of requiredText) {
       const passed = content !== null && content.includes(text);
-      results.push({ id: `markdown.requiredText:${filePath}:${text}`, passed, message: passed ? undefined : `Missing text ${text} in ${filePath}` });
+      results.push({ id: `markdown.requiredText:${filePath}:${text}`, passed, message: passed ? undefined : content === null
+        ? `断言未满足：${filePath} 不存在，无法检查文本 ${text}`
+        : `断言未满足：${filePath} 缺少文本 ${text}。文件长度 ${content.length} 字符。` });
     }
     const forbiddenText = arrayOfStrings(assertion.forbiddenText);
     for (const text of forbiddenText) {
@@ -2004,16 +2385,20 @@ async function evaluateAssertions(
     const artifactType = typeof assertion.artifactType === 'string' ? assertion.artifactType : 'artifact';
     const manifestArtifact = workspaceManifest?.artifactTypes[artifactType];
     const expectedPaths = resolveManifestAssertionPaths(assertion, artifactType, productId, diff.map((item) => item.path), workspaceManifest);
+    const hasExplicitRequiredSections = Object.prototype.hasOwnProperty.call(assertion, 'requiredSections');
     const requiredSections = arrayOfStrings(assertion.requiredSections);
-    const resolvedRequiredSections = requiredSections.length > 0 ? requiredSections : manifestArtifact?.requiredSections ?? [];
+    const resolvedRequiredSections = hasExplicitRequiredSections ? requiredSections : manifestArtifact?.requiredSections ?? [];
     if (expectedPaths.length === 0) continue;
     for (const expectedPath of expectedPaths) {
       const exists = afterManifest.some((item) => item.path === expectedPath);
       results.push({ id: `manifest.canonicalPath:${artifactType}:${expectedPath}`, passed: exists, message: exists ? undefined : `Expected canonical ${artifactType} artifact at ${expectedPath}` });
       const content = await readTextIfExists(path.join(workspaceRoot, expectedPath));
+      const actualHeadings = content === null ? [] : extractMarkdownHeadings(content);
       for (const heading of resolvedRequiredSections) {
         const passed = content !== null && markdownHasHeading(content, heading);
-        results.push({ id: `manifest.requiredSections:${artifactType}:${expectedPath}:${heading}`, passed, message: passed ? undefined : `Missing required section ${heading} in canonical ${artifactType} artifact ${expectedPath}` });
+        results.push({ id: `manifest.requiredSections:${artifactType}:${expectedPath}:${heading}`, passed, message: passed ? undefined : content === null
+          ? `断言未满足：${artifactType} 产物 ${expectedPath} 不存在，无法检查 section ${heading}`
+          : `断言未满足：${artifactType} 产物 ${expectedPath} 缺少 section ${heading}。实际标题：${summarizeListForMessage(actualHeadings)}` });
       }
       for (const text of arrayOfStrings(assertion.requiredText)) {
         const passed = content !== null && content.includes(text);
@@ -2394,6 +2779,18 @@ async function readTextIfExists(filePath: string): Promise<string | null> {
 function markdownHasHeading(content: string, heading: string): boolean {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`^#{1,6}\\s+${escaped}\\s*$`, 'm').test(content);
+}
+
+function summarizeFileDiffForMessage(diff: EvalRun['fileDiff']): string {
+  if (diff.length === 0) return '没有文件变更';
+  const preview = diff.slice(0, 8).map((item) => `${item.change} ${item.path}`).join('；');
+  return diff.length > 8 ? `${preview}；另有 ${diff.length - 8} 个变更` : preview;
+}
+
+function summarizeListForMessage(values: string[], limit = 12): string {
+  if (values.length === 0) return '未发现标题';
+  const preview = values.slice(0, limit).join('；');
+  return values.length > limit ? `${preview}；另有 ${values.length - limit} 项` : preview;
 }
 
 function pathMatchesPattern(filePath: string, pattern: string): boolean {

@@ -19,7 +19,7 @@ import { isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoen
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
-import { createAgentRegistry, createTool, createWorkspaceTools, type AgentRegistry, type LangGraphAgentClient, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
+import { createAgentRegistry, createTool, createWorkspaceTools, type AgentRegistry, type LangGraphAgentClient, type LangGraphAgentInput, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
 import { getPromptText } from './langfusePromptStore';
 
 type LangGraphRunOptions = {
@@ -134,23 +134,26 @@ export function createLangGraphEvalRunExecutor(
     const toolEvents: StreamEvent[] = [];
     const publish = (event: StreamEvent) => {
       toolEvents.push(event);
+      input.onEvent?.(event);
     };
     const emittedAt = () => new Date().toISOString();
     const prompt = buildEvalRunPrompt(input);
+    const evalModel = resolveEvalModel(input, options.model);
+    const evalLayerConfig = buildEvalLayerConfigWithPromptBlocks(input);
     const runInput: CreateRunInput = {
       runId,
       projectId: EVAL_PROJECT_ID,
-      prompt,
-      source: 'web',
+      prompt: stringifyAgentInput(prompt),
+      source: 'eval',
       traceId,
       referencedSnippets: input.fixture.referencedSnippets,
     };
     const registryOptions = {
       ...options,
-      model: resolveEvalModel(input, options.model),
+      model: evalModel,
       traceId,
       productProfile,
-      layerConfig: input.resolvedAgentConfig?.layerConfig,
+      layerConfig: evalLayerConfig,
     };
     const tools = createWorkspaceTools(isolatedStore, runInput.projectId, publish, runId, emittedAt, {
       traceId,
@@ -168,7 +171,7 @@ export function createLangGraphEvalRunExecutor(
 
     let outputMessage = '';
     if (options.createAgent) {
-      const instructions = buildSystemInstructions(productProfile, input.resolvedAgentConfig?.layerConfig);
+      const instructions = buildSystemInstructions(productProfile, evalLayerConfig);
       const singleAgentTools = registry
         ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId: runId, input: runInput, productId: productProfile.id }) }
         : tools;
@@ -176,7 +179,7 @@ export function createLangGraphEvalRunExecutor(
       const streamed = await agent.stream(prompt, {
         runId,
         traceId,
-        source: 'web',
+        source: 'eval',
         productId: productProfile.id,
         maxSteps: 25,
         memory: { thread: runId, resource: runInput.projectId },
@@ -188,7 +191,7 @@ export function createLangGraphEvalRunExecutor(
         store: isolatedStore,
         input: runInput,
         productProfile,
-        prompt,
+        prompt: stringifyAgentInput(prompt),
         publish,
         emittedAt,
         runId,
@@ -201,7 +204,7 @@ export function createLangGraphEvalRunExecutor(
     return {
       executionMode: 'langgraph_isolated',
       status: 'passed',
-      outputMessage: outputMessage || `LangGraph isolated EvalRun completed in ${Date.now() - startedAt.getTime()}ms.`,
+      outputMessage: outputMessage || `LangGraph isolated EvalRun completed in ${Date.now() - startedAt.getTime()}ms with model ${evalModel ?? 'runtime default'}.`,
       toolEvents,
     };
   };
@@ -1046,42 +1049,47 @@ function textLogValue(text: string, limit = 50_000): { text: string; length: num
   };
 }
 
-function buildEvalRunPrompt(input: EvalRunExecutorInput): string {
-  const messages = input.fixture.inputMessages.length > 0
-    ? input.fixture.inputMessages.map((message) => `## ${message.role}\n${message.content}`).join('\n\n')
-    : '## user\n请基于此评估用例完成任务。';
-  const memory = input.fixture.memoryFixture.length > 0
-    ? input.fixture.memoryFixture.map((record) => `- [${record.scope}/${record.memoryType}/${record.authority}] ${record.content}`).join('\n')
-    : '无固定记忆 fixture。';
-  const knowledge = input.fixture.knowledgeFixture.length > 0
-    ? input.fixture.knowledgeFixture.map((entry) => `- [${entry.type}/${entry.rightsRisk}] ${entry.title} (${entry.path})`).join('\n')
-    : '无固定知识 fixture。';
-  const assertions = JSON.stringify(input.fixture.assertions ?? {}, null, 2);
-  const resolvedConfig = formatResolvedEvalConfig(input);
+function buildEvalRunPrompt(input: EvalRunExecutorInput): LangGraphAgentInput {
+  const messages = input.fixture.inputMessages;
+  if (messages.length === 0) return '请继续。';
+  if (messages.length === 1) return messages[0]?.content || '请继续。';
+  return messages.map((message) => ({ role: message.role, content: message.content }));
+}
 
-  return [
-    '# Agent Harness EvalRun',
-    `目标：${input.fixture.target}`,
-    `运行模式：${input.runMode}`,
-    '',
-    '# Resolved Agent Config',
-    resolvedConfig,
-    '',
-    '# 原始输入消息',
-    messages,
-    '',
-    '# 固定 Memory Fixture',
-    memory,
-    '',
-    '# 固定 Knowledge Fixture',
-    knowledge,
-    '',
-    '# 程序检查项',
-    '下面 JSON 是本次评估的程序检查项。你不需要复述它，但你的文件写入和工具调用应该满足这些约束。',
-    '```json',
-    assertions,
-    '```',
-  ].join('\n');
+function stringifyAgentInput(input: LangGraphAgentInput): string {
+  if (typeof input === 'string') return input;
+  return input.map((message) => `${message.role}: ${message.content}`).join('\n\n');
+}
+
+function buildEvalLayerConfigWithPromptBlocks(input: EvalRunExecutorInput): NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] | undefined {
+  const layerConfig = input.resolvedAgentConfig?.layerConfig;
+  if (!layerConfig) return undefined;
+  const behaviorRules = (input.resolvedAgentConfig?.promptBlocks ?? [])
+    .filter((block) => input.agentSpec.promptBlockRefs.includes(block.ref) && block.content?.trim())
+    .map((block) => `### ${block.ref}\n${block.content!.trim()}`);
+  if (behaviorRules.length === 0) return layerConfig;
+
+  const behaviorSection = ['## Agent 行为规则', ...behaviorRules].join('\n\n');
+  if (input.agentSpec.agentId === 'system') {
+    return {
+      ...layerConfig,
+      systemAgent: {
+        ...layerConfig.systemAgent,
+        instructionOverride: appendInstructionSection(layerConfig.systemAgent.instructionOverride, behaviorSection),
+      },
+    };
+  }
+
+  return {
+    ...layerConfig,
+    specialists: layerConfig.specialists.map((specialist) => specialist.agentId === input.agentSpec.agentId
+      ? { ...specialist, instructionOverride: appendInstructionSection(specialist.instructionOverride, behaviorSection) }
+      : specialist),
+  };
+}
+
+function appendInstructionSection(base: string | undefined, section: string): string {
+  return [base?.trim(), section.trim()].filter(Boolean).join('\n\n');
 }
 
 function formatResolvedEvalConfig(input: EvalRunExecutorInput): string {
@@ -1125,6 +1133,8 @@ function resolveEvalProductProfile(productId: string, fallback?: ProductProfile)
 }
 
 function resolveEvalModel(input: EvalRunExecutorInput, fallback?: string): string | undefined {
+  if (input.modelParams?.model) return input.modelParams.model;
+  if (input.model) return input.model;
   const modelPolicy = input.resolvedAgentConfig?.modelPolicyRef ?? input.agentSpec.modelPolicyRef ?? input.resolvedAgentConfig?.agentSpec?.modelPolicyRef;
   if (modelPolicy && !modelPolicy.includes('@')) return modelPolicy;
   return fallback;

@@ -98,9 +98,11 @@ export type LangGraphStreamOutput = {
 export type LangGraphAgentClient = {
   id?: string;
   name?: string;
-  stream(messages: string, options: Record<string, unknown>): Promise<LangGraphStreamOutput>;
-  generate(messages: string, options: Record<string, unknown>): Promise<{ text: string }>;
+  stream(messages: LangGraphAgentInput, options: Record<string, unknown>): Promise<LangGraphStreamOutput>;
+  generate(messages: LangGraphAgentInput, options: Record<string, unknown>): Promise<{ text: string }>;
 };
+
+export type LangGraphAgentInput = string | Array<{ role: 'user' | 'assistant'; content: string }>;
 
 export type LangGraphToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;
 
@@ -1694,28 +1696,39 @@ function createLangGraphAgentClient(input: {
   checkpointer: BaseCheckpointSaver;
   store: BaseStore;
 }): LangGraphAgentClient {
-  const runnable = createReactAgent({
-    llm: createChatModel(input.model),
-    tools: Object.values(input.tools).filter(isLangGraphTool),
-    prompt: input.instructions,
-    checkpointer: input.checkpointer,
-    store: input.store,
-    name: input.id,
-  });
+  const createRunnable = (options: Record<string, unknown>) => {
+    const source = typeof options.source === 'string' ? options.source : undefined;
+    const isEvalRun = source === 'eval';
+    return createReactAgent({
+      llm: createChatModel(input.model),
+      tools: Object.values(input.tools).filter(isLangGraphTool),
+      prompt: input.instructions,
+      checkpointer: isEvalRun ? undefined : input.checkpointer,
+      store: isEvalRun ? undefined : input.store,
+      name: input.id,
+    });
+  };
 
   return {
     id: input.id,
     name: input.name,
     async stream(prompt, options) {
       const config = langGraphRunnableConfig(input.id, options);
-      return { fullStream: toLangGraphStreamChunks(runnable.streamEvents({ messages: [new HumanMessage(prompt)] }, config), input.id) };
+      const runnable = createRunnable(options);
+      return { fullStream: toLangGraphStreamChunks(runnable.streamEvents({ messages: toLangGraphMessages(prompt) }, config), input.id) };
     },
     async generate(prompt, options) {
       const config = langGraphRunnableConfig(input.id, options);
-      const output = await runnable.invoke({ messages: [new HumanMessage(prompt)] }, config);
+      const runnable = createRunnable(options);
+      const output = await runnable.invoke({ messages: toLangGraphMessages(prompt) }, config);
       return { text: textFromMessages(Array.isArray(output.messages) ? output.messages : []) };
     },
   };
+}
+
+function toLangGraphMessages(input: LangGraphAgentInput): BaseMessage[] {
+  if (typeof input === 'string') return [new HumanMessage(input)];
+  return input.map((message) => message.role === 'assistant' ? new AIMessage(message.content) : new HumanMessage(message.content));
 }
 
 function isLangGraphTool(value: unknown): value is StructuredToolInterface {
@@ -1730,6 +1743,7 @@ function langGraphRunnableConfig(agentId: string, options: Record<string, unknow
   const productId = typeof options.productId === 'string' ? options.productId : undefined;
   const source = typeof options.source === 'string' ? options.source : undefined;
   const maxSteps = typeof options.maxSteps === 'number' ? options.maxSteps : 25;
+  const isEvalRun = source === 'eval';
 
   return {
     version: 'v2' as const,
@@ -1744,6 +1758,7 @@ function langGraphRunnableConfig(agentId: string, options: Record<string, unknow
       viwork_product_id: productId,
       viwork_source: source,
     },
+    ...(isEvalRun ? { callbacks: [] } : {}),
     configurable: {
       thread_id: memory?.thread ?? viworkRunId ?? `${agentId}-${Date.now()}`,
       resource_id: memory?.resource,

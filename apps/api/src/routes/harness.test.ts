@@ -636,6 +636,7 @@ describe('harness routes', () => {
       body: JSON.stringify({
         snapshotId: run.inputSnapshotId,
         target: 'story-agent-workflow',
+        inputMessages: [{ role: 'user', content: '请根据记忆和知识卡补齐大纲' }],
         assertions: {
           files: { mustCreateOrModify: ['02 故事/01 第一集/单集大纲.md'] },
           markdown: [{ path: '02 故事/01 第一集/单集大纲.md', requiredHeadings: ['主角目标'] }],
@@ -700,7 +701,7 @@ describe('harness routes', () => {
             id: 'test-agent',
             name: 'Test Agent',
             async stream(prompt) {
-              capturedEvalPrompt = prompt;
+              capturedEvalPrompt = typeof prompt === "string" ? prompt : prompt.map((message) => message.content).join("\n\n");
               await tools.recall_project_memory.invoke({ query: '业主群误会', topK: 3 });
               await tools.retrieve_knowledge_cards.invoke({ query: '业主群误会升级', tags: ['误会'], topK: 3 });
               await tools.write_workspace_file.invoke({
@@ -743,6 +744,7 @@ describe('harness routes', () => {
       body: JSON.stringify({
         snapshotId: run.inputSnapshotId,
         target: 'story-agent-workflow',
+        inputMessages: [{ role: 'user', content: '请根据记忆和知识卡补齐大纲' }],
         assertions: {
           files: { mustModify: ['02 故事/01 第一集/单集大纲.md'] },
           markdown: [{ path: '02 故事/01 第一集/单集大纲.md', requiredHeadings: ['主角目标'] }],
@@ -832,13 +834,9 @@ describe('harness routes', () => {
       expect.objectContaining({ ref: 'story-agent@2', skillId: 'story-agent', contentHash: expect.stringMatching(/^sha256:/), source: 'agent_config' }),
     ]));
     expect(capturedInstructions).toContain('EVAL SYSTEM OVERRIDE');
-    expect(capturedEvalPrompt).toContain('# Resolved Agent Config');
-    expect(capturedEvalPrompt).toContain('modelPolicyRef: eval-test-model');
-    expect(capturedEvalPrompt).toContain('toolPolicyRef: workspace-safe-write@2');
-    expect(capturedEvalPrompt).toContain('system: tools=recall_project_memory,retrieve_knowledge_cards,write_workspace_file, prompts=eval-system-policy@1');
-    expect(capturedEvalPrompt).toContain('story-agent: skill=story-agent@2, tools=read_workspace_file,write_workspace_file, prompts=sitcom-story-quality@2');
-    expect(capturedEvalPrompt).toContain('promptBlocks: eval-system-policy@1,sitcom-story-quality@2');
-    expect(capturedEvalPrompt).toContain('skillRefs: story-agent@2#sha256:story-skill');
+    expect(capturedEvalPrompt).toBe('请根据记忆和知识卡补齐大纲');
+    expect(capturedEvalPrompt).not.toContain('Agent Harness EvalRun');
+    expect(capturedEvalPrompt).not.toContain('程序检查项');
     await expect(store.readWorkspaceFile(project.id, '02 故事/01 第一集/单集大纲.md')).resolves.toMatchObject({
       content: '# 旧大纲\n',
     });

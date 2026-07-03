@@ -71,6 +71,7 @@ export function createRunsRoutes(service: RunService, bus?: RunBus, harnessStore
             runId,
             projectId: parsed.data.projectId,
             sessionId: parsed.data.sessionId,
+            prompt: parsed.data.prompt,
             referencedFiles: parsed.data.referencedFiles,
             referencedSnippets: parsed.data.referencedSnippets,
           })

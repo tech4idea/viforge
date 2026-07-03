@@ -11,7 +11,7 @@
 Agent Harness 不是普通配置页，而是一个 agent 改动发布流水线：
 
 ```text
-看清当前 agent 完整提示词 -> 修改或新增行为规则 -> 创建候选 AgentSpec -> 选择/创建评测案例 -> 运行 EvalRun -> 人工审阅 -> 发布为运行配置
+看清当前 agent 完整提示词 -> 修改或新增行为规则 -> 创建候选 AgentSpec -> 从历史对话沉淀 Fixture -> 运行 EvalRun -> 人工审阅 -> 发布为运行配置
 ```
 
 关键点：创建候选配置不会影响真实运行；发布为运行配置才会改变真实默认 agent 行为。
@@ -77,11 +77,11 @@ EvalRun 是一次实际评测运行。它复制 fixture 工作区到隔离目录
 
 ### 1. 先看当前 agent 全貌
 
-在修改规则前，用户必须能看到当前 agent 的提示词和关键上下文。当前 UI 分三层展示：
+Harness 入口会直接打开独立浏览器标签页，不再挤在主工作台悬浮窗里。在修改规则前，用户必须能看到当前 agent 的提示词和关键上下文。当前 UI 分三层展示：
 
 - 第一层：当前 active 的用户决策摘要，例如运行版本、当前 agent、提示词来源、绑定规则数量。
 - 第二层：当前 agent 的 specialist prompt 和绑定的 Agent 行为规则。
-- 第三层：折叠在“Agent 上下文全貌 / 高级审计信息”中的 system/layer/memory/retrieval/tool/model/manifest 和全部 specialist 配置。
+- 第三层：右侧“Agent 上下文全貌”预览区展示 active/candidate 和简单差异；更底层的 system/layer/memory/retrieval/tool/model/manifest 和全部 specialist 配置收进高级审计信息。
 
 这样设计的原因是：日常操作先看“我正在改哪个 agent、当前 prompt 是什么、候选比 active 改了什么”；底层 resolved config 仍然保留，但作为审计证据，不再默认压到主界面上。
 
@@ -122,7 +122,7 @@ Harness 会自动准备 baseline active AgentSpec：
 - 新增独立约束：新建行为规则。
 - 不确定是否通用：先只绑定到当前 agent 的候选 AgentSpec，不要跨 agent 共享。
 
-当前 UI 已把按钮放到标题和内容输入框后面，并要求标题和内容都非空才可点击。
+当前 UI 已把“查看当前规则”和“修改当前规则”合并：选择行为规则后可以直接看标题、类型、内容，并且只有内容、标题或类型发生变化时，才允许保存为新版本。新建行为规则使用独立输入框，创建成功后会清空，避免连续误点生成重复规则。创建候选 AgentSpec 同样要求至少有候选名称或行为规则变化。
 
 ### 4. 创建候选配置
 
@@ -152,13 +152,16 @@ Harness 会自动准备 baseline active AgentSpec：
 
 推荐优先级：
 
-1. 从失败 RunArtifact 创建 Fixture。
-2. 从 RunInputSnapshot 创建 Fixture。
-3. 手动编辑 assertions。
+1. 从历史会话选择一条用户消息创建 Fixture。
+2. 从失败 RunArtifact 创建 Fixture。
+3. 从 RunInputSnapshot 创建 Fixture。
+4. 手动编辑 assertions。
 
-从失败 RunArtifact 创建更好，因为它能带出当时的文件 diff、工具事件、memory recall、knowledge retrieval 和 resolved config 线索。
+从历史会话创建 Fixture 时，只能选择一条用户消息。系统会使用这条消息对应 run 的输入快照恢复 workspace，并保存这条消息之前的最近会话上下文；EvalRun 会按 user/assistant 消息序列送入 LangGraph，而不是把多条消息拼成一段文本。agent 输出只作为历史上下文或预期结果来源，不会被当作新的用户输入。
 
-断言构建器应是“选择一个断言类型 -> 填对应字段 -> 添加断言”，不应该把五种断言做成按钮平铺。按钮平铺会让用户以为它们是并列动作，且容易在字段没填完整时误点。
+从失败 RunArtifact 创建也可以保留，因为它能带出当时的文件 diff、工具事件、memory recall、knowledge retrieval 和 resolved config 线索；但普通用户入口优先走历史会话。
+
+断言构建器是“选择一个断言类型 -> 填对应字段 -> 添加断言”。自动生成的断言会显示成可勾选列表，可批量删除；同时保留 JSON 高级编辑。手动编辑 JSON 时不会被后台刷新覆盖，只有点击“保存断言”后才写入 Fixture。
 
 ### 6. 运行 EvalRun
 
@@ -168,6 +171,8 @@ Harness 会自动准备 baseline active AgentSpec：
 - Live：读取当前 live memory/knowledge，用于诊断真实环境下是否仍然正常。
 
 无论 Repro 还是 Live，EvalRun 都不应该写真实 memory。memory write 工具应该 mock 并记录到 artifact。
+
+EvalRun 会使用 source RunArtifact 记录的模型参数；如果 source 没有模型记录，才回退到当前运行时默认模型。候选 AgentSpec 新增或修改的 PromptBlock 会拼入对应 agent 的 instruction，避免“界面绑定了规则但评测实际没用”的情况。
 
 ### 7. 人工审阅
 
@@ -210,6 +215,7 @@ Harness 会自动准备 baseline active AgentSpec：
 - 当前 agent prompt 分段展示。
 - 行为规则来源标记：agent spec / layer config / prompt block / missing。
 - 底层 spec/layer/memory/retrieval/manifest/tools 收进高级审计信息。
+- 配置页默认记住上次选择的产品、agent、候选、fixture、EvalRun 和 tab。
 
 仍建议后续补：Active vs Candidate 的 assembled prompt diff。目前能看到 active/candidate 两边内容，但还不是专门的逐段 diff 视图。
 
@@ -233,7 +239,7 @@ Harness 会自动准备 baseline active AgentSpec：
 [保存行为规则草稿] [保存并生成候选配置]
 ```
 
-并在标题或内容为空、内容和默认模板完全一致时禁用“保存并生成候选配置”。当前 UI 已实现这一步。
+并在标题或内容为空、没有发生差异时禁用“保存并生成候选配置”。当前 UI 已实现这一步。
 
 ### 卡点 4：两个创建按钮语义不清
 

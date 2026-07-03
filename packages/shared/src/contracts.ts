@@ -39,7 +39,7 @@ export type ReferencedChatSnippet = {
 
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled';
 
-export type RunSource = 'web' | 'schedule' | 'qq' | 'wechat';
+export type RunSource = 'web' | 'schedule' | 'qq' | 'wechat' | 'eval';
 
 export type AgentRun = {
   id: string;
@@ -463,6 +463,7 @@ export type SkillSnapshot = {
 
 export type AgentSpec = {
   id: string;
+  name?: string;
   productId: string;
   agentId: string;
   version: number;
@@ -509,6 +510,7 @@ export type RunInputSnapshot = {
   runId: string;
   projectId: string;
   sessionId?: string;
+  prompt?: string;
   productId?: string;
   snapshotMode: 'full_project';
   root: string;
@@ -523,6 +525,7 @@ export type RunInputSnapshot = {
 
 export type EvalFixture = {
   id: string;
+  name?: string;
   productId: string;
   target: string;
   sourceRunId?: string;
@@ -615,6 +618,8 @@ export type EvalRun = {
   runMode: 'live' | 'repro';
   executionMode?: 'fixture_replay' | 'custom_executor' | 'langgraph_isolated';
   status: 'pending' | 'running' | 'passed' | 'failed' | 'error';
+  model?: string;
+  modelParams?: RunArtifact['modelParams'];
   startedAt: string;
   endedAt?: string;
   outputMessage?: string;

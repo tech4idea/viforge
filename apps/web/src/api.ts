@@ -230,6 +230,7 @@ export type CreateSkillInput = {
 
 export type CreateAgentSpecInput = {
   productId: string;
+  name?: string;
   agentId: string;
   status?: AgentSpec['status'];
   layerConfigRef?: string;
@@ -266,7 +267,9 @@ export type CreateWorkspaceManifestInput = Omit<WorkspaceManifest, 'id' | 'creat
 
 export type CreateEvalFixtureInput = {
   snapshotId: string;
+  name?: string;
   target: string;
+  inputMessages?: EvalFixture['inputMessages'];
   tags?: string[];
   assertions?: Record<string, unknown>;
 };
@@ -275,7 +278,7 @@ export type CreateEvalFixtureFromRunArtifactInput = Omit<CreateEvalFixtureInput,
 
 export type UpdateEvalFixtureInput = Partial<Pick<
   EvalFixture,
-  'target' | 'inputMessages' | 'referencedSnippets' | 'memoryFixture' | 'knowledgeFixture' | 'expectedChangedFiles' | 'expectedToolEvents' | 'toolRetentionPolicy' | 'sensitiveFieldRules' | 'toolRetentionArtifacts' | 'assertions' | 'tags' | 'toolMocks'
+  'name' | 'target' | 'inputMessages' | 'referencedSnippets' | 'memoryFixture' | 'knowledgeFixture' | 'expectedChangedFiles' | 'expectedToolEvents' | 'toolRetentionPolicy' | 'sensitiveFieldRules' | 'toolRetentionArtifacts' | 'assertions' | 'tags' | 'toolMocks'
 >>;
 
 export type CreateEvalRunInput = {

@@ -26,6 +26,7 @@ const memoryRecordSchema = z.object({
 
 const createAgentSpecSchema = z.object({
   productId: z.string().trim().min(1),
+  name: z.string().trim().min(1).optional(),
   agentId: z.string().trim().min(1),
   version: z.number().int().positive().optional(),
   status: z.enum(['draft', 'candidate', 'active', 'archived']).default('draft'),
@@ -158,6 +159,7 @@ const createWorkspaceManifestSchema = z.object({
 
 const createEvalFixtureBaseSchema = z.object({
   snapshotId: z.string().trim().min(1),
+  name: z.string().trim().min(1).optional(),
   target: z.string().trim().min(1),
   inputMessages: z.array(z.object({
     role: z.enum(['user', 'assistant']),
@@ -186,6 +188,7 @@ const createEvalRunSchema = z.object({
 });
 
 const updateEvalFixtureSchema = z.object({
+  name: z.string().trim().min(1).optional(),
   target: z.string().trim().min(1).optional(),
   inputMessages: z.array(z.object({
     role: z.enum(['user', 'assistant']),

@@ -60,6 +60,7 @@ export function createApp(): Hono {
   const harnessStore = createHarnessStore(path.join(WORKSPACES_ROOT, '..', 'harness'), workspaceStore, {
     gitService,
     evalRunExecutor: createLangGraphEvalRunExecutor(workspaceStore, { gitService, gitConfigStore }),
+    asyncEvalRuns: true,
   });
 
   const langGraphRunService = createLangGraphRunService(workspaceStore, runBus, {

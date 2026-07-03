@@ -53,7 +53,7 @@ describe('langgraph run service', () => {
         writeTool = tools.write_workspace_file;
         return {
           async stream(prompt, options) {
-            capturedPrompt = prompt;
+            capturedPrompt = typeof prompt === "string" ? prompt : prompt.map((message) => message.content).join("\n\n");
             capturedThread = options.memory;
             const toolResult = await tools.write_workspace_file.execute?.({
               path: '02 改编方案/第1集/单集改编方案.md',
@@ -142,7 +142,7 @@ describe('langgraph run service', () => {
             return {
               id: 'viwork-system-agent',
               async stream(prompt) {
-                capturedPrompt = prompt;
+                capturedPrompt = typeof prompt === "string" ? prompt : prompt.map((message) => message.content).join("\n\n");
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '情景剧处理完成。' } }]) };
               },
               async generate() {
