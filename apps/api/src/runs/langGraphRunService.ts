@@ -13,6 +13,7 @@ import type { BehaviorRule } from '../storage/behaviorRulesStore';
 import { createBehaviorRulesStore } from '../storage/behaviorRulesStore';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
+import { createPlaywriterService, type PlaywriterService } from '../browser/playwriterService';
 import type { EvalRunExecutorInput, EvalRunExecutorResult, HarnessStore } from '../harness/harnessStore';
 import { isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoenix';
 
@@ -38,6 +39,7 @@ type LangGraphRunOptions = {
   productProfile?: ProductProfile;
   gitService?: GitService;
   gitConfigStore?: GitConfigStore;
+  browserService?: PlaywriterService;
   harnessStore?: HarnessStore;
 };
 
@@ -65,6 +67,9 @@ const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'source-analyst-agent': '原著分析',
   'adaptation-planner-agent': '改编方案',
   'screenwriter-agent': '编剧',
+  'outline-agent': '学习大纲',
+  'knowledge-search-agent': '知识点搜索',
+  'knowledge-organizer-agent': '知识点整理',
   'reviewer-agent': '审稿',
 };
 
@@ -159,6 +164,7 @@ export function createLangGraphEvalRunExecutor(
       traceId,
       gitService: options.gitService,
       gitConfigStore: options.gitConfigStore,
+      browserService: options.browserService ?? createPlaywriterService(),
       memoryFixture: input.runMode === 'repro' ? input.fixture.memoryFixture : undefined,
       mockMemoryWrites: true,
       knowledgeFixture: input.runMode === 'repro' ? input.fixture.knowledgeFixture : undefined,
@@ -263,6 +269,7 @@ async function executeLangGraphRun({
       wechat: input.wechat,
       gitService: options.gitService,
       gitConfigStore: options.gitConfigStore,
+      browserService: options.browserService ?? createPlaywriterService(),
     });
     // Create agent registry from skills
     const registryOptions = {
@@ -396,6 +403,7 @@ async function executeMultiAgentWorkflow({
     wechat: input.wechat,
     gitService: options.gitService,
     gitConfigStore: options.gitConfigStore,
+    browserService: options.browserService ?? createPlaywriterService(),
   });
   const orchestrationTools: LangGraphToolset = {
     ...baseTools,
@@ -449,7 +457,7 @@ function createSpecialistDelegationTool({
     description: [
       '将明确需要专业创作能力的子任务交给一个 viwork specialist agent。',
       '普通问候、解释、简单修改、文件读写和一般对话不要使用此工具，由主 agent 直接完成。',
-      '只有在任务明确属于脑暴、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作或审稿时才委派。',
+      '只有在任务明确属于脑暴、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作、学习大纲、知识点搜索、知识点整理或审稿复盘时才委派。',
     ].join('\n'),
     inputSchema: z.object({
       agentId: z.enum([
@@ -460,6 +468,9 @@ function createSpecialistDelegationTool({
         'source-analyst-agent',
         'adaptation-planner-agent',
         'screenwriter-agent',
+        'outline-agent',
+        'knowledge-search-agent',
+        'knowledge-organizer-agent',
         'reviewer-agent',
       ]),
       task: z.string().min(1),
@@ -679,6 +690,9 @@ function getSpecialistAgent(registry: AgentRegistry, agentId: string): LangGraph
     case 'source-analyst-agent': return registry.sourceAnalyst;
     case 'adaptation-planner-agent': return registry.adaptationPlanner;
     case 'screenwriter-agent': return registry.screenwriter;
+    case 'outline-agent': return registry.outline;
+    case 'knowledge-search-agent': return registry.knowledgeSearch;
+    case 'knowledge-organizer-agent': return registry.knowledgeOrganizer;
     case 'reviewer-agent': return registry.reviewer;
     default: return null;
   }
@@ -1000,18 +1014,23 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '当用户明确要求生成、绘制、出图、生成角色图/场景图/剧照/分镜图/海报时，使用 generate_project_image 工具生成图片并保存到项目工作区。',
     '调用 generate_project_image 时只填写 prompt、aspectRatio、count；不要尝试填写或猜测模型名，图片模型由系统配置自动注入。',
     '如果用户只是要人物视觉描述、绘图提示词或图片生成建议，不要调用 generate_project_image，直接输出文本。',
+    '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点或整理在线资料时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
+    '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
+    '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',
+    '涉及登录、提交、购买、删除、发布、授权、付款或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
+    '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并启动 playwriter serve，不要假装已访问网页。',
     '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
     '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
     '当需要查看或合并结构化项目长期记忆时，调用 read_project_memory；写回完整 Markdown 时调用 update_project_memory。',
     '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
     '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
     '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
-    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
+    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、outline-agent、knowledge-search-agent、knowledge-organizer-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
     '如果用户只是要求”帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
     '在情景剧故事创作中，如果人物动机、角色关系或角色行为边界不清，先委派 character-agent；如果涉及多集历史、固定设定或上一集状态，先委派 continuity-agent。',
-    '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿”，再委派给对应 specialist。',
+    '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿/生成学习大纲/搜索知识点/整理资料”，再委派给对应 specialist。',
   ];
 
   const localBase = base.join('\n\n');

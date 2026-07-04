@@ -4462,6 +4462,7 @@ function isTemporaryProjectId(projectId: string): boolean {
 function productTypeLabel(productId: string): string {
   if (productId === 'novel-adaptation') return '剧本改编';
   if (productId === 'sitcom') return '情景剧创作';
+  if (productId === 'study') return '日常学习';
   return '创作项目';
 }
 

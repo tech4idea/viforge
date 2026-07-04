@@ -62,6 +62,12 @@ describe('shared contracts', () => {
       'continuity-agent',
       'story-agent',
     ]));
+    expect(resolveProductProfile('study')).toMatchObject({ id: 'study', documentTitle: 'viwork 日常学习工作台' });
+    expect(resolveProductProfile('study').defaultAgentSkillNames).toEqual(expect.arrayContaining([
+      'outline-agent',
+      'knowledge-search-agent',
+      'knowledge-organizer-agent',
+    ]));
     expect(resolveProductProfile('unknown')).toMatchObject({ id: 'novel-adaptation' });
   });
 

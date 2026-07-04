@@ -68,6 +68,30 @@ LangGraph run service 实现统一的 `RunService` 接口：
    - `tool_use.start`
    - `tool_use.delta`
    - `tool_use.end`
+
+## Playwriter Browser Tools
+
+LangGraph runtime 现在通过 Playwriter 暴露浏览器能力，目标是连接用户已登录、已授权的真实浏览器标签页，而不是启动一个全新的无状态浏览器。API 通过 Playwriter CLI 执行浏览器动作，CLI 路径默认 `playwriter`，可用 `VIWORK_PLAYWRITER_BIN` 覆盖。API 默认连接 `VIWORK_PLAYWRITER_HOST`，未设置时使用 `http://127.0.0.1:19988`；如 Playwriter relay 配置了 token，可设置 `VIWORK_PLAYWRITER_TOKEN`。默认 session id 可用 `VIWORK_PLAYWRITER_SESSION_ID` 覆盖，未设置时为 `1`。
+
+Agent 可用工具：
+
+- `browser_status`：检查 Playwriter host 和启用状态。
+- `browser_use_install`：当 Playwriter CLI、relay 或浏览器授权缺失时，返回安装和连接指引。
+- `browser_navigate`：在授权标签页打开 URL。
+- `browser_snapshot`：读取 Playwriter 的页面可访问性快照，获取文字、链接、控件和 aria-ref。
+- `browser_evaluate`：执行简短 Playwright JavaScript，作用域包含 `page`、`context`、`state`、`require`。
+
+安全边界：登录、提交、购买、删除、发布、授权、付款或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并启动 `playwriter serve`，不能假装已访问网页。
+
+本地启用步骤如下；agent 也可以在用户需要网页访问但环境未就绪时调用 `browser_use_install` 返回同类指引：
+
+```bash
+npm i -g playwriter
+playwriter serve --host 127.0.0.1
+```
+
+浏览器侧需要安装 remorses/playwriter 的 Chrome 扩展，并在要授权给 agent 的标签页点击扩展图标。需要独立 session 时可先执行 `playwriter session new`，再把返回的 id 设置为 `VIWORK_PLAYWRITER_SESSION_ID`。
+默认不需要手动创建 session；viwork 会在首次浏览器工具调用时自动创建并复用 Playwriter session。
    - `file.changed`
    - `image.generated`
    - `wechat.file_sent`
