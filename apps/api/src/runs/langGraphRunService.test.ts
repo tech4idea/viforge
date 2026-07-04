@@ -137,6 +137,9 @@ describe('langgraph run service', () => {
           adaptationPlanner: null,
           screenwriter: null,
           reviewer: null,
+          outline: null,
+          knowledgeSearch: null,
+          knowledgeOrganizer: null,
           async systemAgent(instructions) {
             capturedInstructions = instructions;
             return {
@@ -182,6 +185,9 @@ describe('langgraph run service', () => {
           adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
           screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
           reviewer: specialistAgent('reviewer-agent', specialistCalls),
+          outline: specialistAgent('outline-agent', specialistCalls),
+          knowledgeSearch: specialistAgent('knowledge-search-agent', specialistCalls),
+          knowledgeOrganizer: specialistAgent('knowledge-organizer-agent', specialistCalls),
           async systemAgent(_instructions, toolsOverride) {
             mainAgentTools = toolsOverride ?? tools;
             return {
@@ -225,6 +231,9 @@ describe('langgraph run service', () => {
           adaptationPlanner: specialistAgent('adaptation-planner-agent', specialistCalls),
           screenwriter: specialistAgent('screenwriter-agent', specialistCalls),
           reviewer: specialistAgent('reviewer-agent', specialistCalls),
+          outline: specialistAgent('outline-agent', specialistCalls),
+          knowledgeSearch: specialistAgent('knowledge-search-agent', specialistCalls),
+          knowledgeOrganizer: specialistAgent('knowledge-organizer-agent', specialistCalls),
           async systemAgent(_instructions, toolsOverride) {
             delegateTool = (toolsOverride as typeof tools & { delegate_to_specialist_agent?: typeof delegateTool })?.delegate_to_specialist_agent ?? null;
             return {
@@ -276,6 +285,71 @@ describe('langgraph run service', () => {
       expect.objectContaining({ type: 'tool_use.start', toolName: 'delegate_to_specialist_agent' }),
     ]));
     expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
+  });
+
+  it('exposes Playwriter browser tools to the main agent', async () => {
+    const project = await store.createProject({ name: 'Browser Study', productId: 'study' });
+    const browserCalls: string[] = [];
+    let browserToolResult: unknown = null;
+
+    const browserService = {
+      async status() { return { enabled: true, binary: 'playwriter', host: 'http://127.0.0.1:19988' }; },
+      async installGuide() { return { enabled: true, binary: 'playwriter', host: 'http://127.0.0.1:19988', relayReachable: true, connectedBrowsers: 1, steps: [] }; },
+      async navigate(input: { url: string }) {
+        browserCalls.push(`navigate:${input.url}`);
+        return { stdout: { url: input.url, title: 'Example' } };
+      },
+      async snapshot() {
+        browserCalls.push('snapshot');
+        return { stdout: 'Example Domain\nMore information...' };
+      },
+      async evaluate(input: { code: string }) {
+        browserCalls.push(`evaluate:${input.code}`);
+        return { stdout: { title: 'Example' } };
+      },
+    };
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      browserService,
+      async createAgentRegistry(tools) {
+        return {
+          brainstorm: null,
+          character: null,
+          continuity: null,
+          story: null,
+          sourceAnalyst: null,
+          adaptationPlanner: null,
+          screenwriter: null,
+          reviewer: null,
+          outline: null,
+          knowledgeSearch: null,
+          knowledgeOrganizer: null,
+          async systemAgent(_instructions, toolsOverride) {
+            const runtimeTools = toolsOverride ?? tools;
+            return {
+              id: 'viwork-system-agent',
+              async stream() {
+                browserToolResult = await runtimeTools.browser_navigate.execute?.({ url: 'example.com' }, {} as never);
+                await runtimeTools.browser_snapshot.execute?.({}, {} as never);
+                return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '已读取网页。' } }]) };
+              },
+              async generate() {
+                return { text: '已读取网页。' };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-browser',
+      prompt: '打开 example.com 并总结页面',
+    });
+
+    await collectUntilEnd(bus, run.id);
+
+    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot']);
+    expect(browserToolResult).toEqual({ stdout: { url: 'example.com', title: 'Example' } });
   });
 
   it('stores working and semantic project memory through LangGraph Store tools', async () => {

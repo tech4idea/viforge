@@ -9,8 +9,9 @@ import {
 } from './templates';
 import novelAdaptationProfileConfig from './product-profiles/novel-adaptation/profile.json';
 import sitcomProfileConfig from './product-profiles/sitcom/profile.json';
+import studyProfileConfig from './product-profiles/study/profile.json';
 
-export type ProductProfileId = 'novel-adaptation' | 'sitcom';
+export type ProductProfileId = 'novel-adaptation' | 'sitcom' | 'study';
 
 export type ProductProfile = {
   id: ProductProfileId;
@@ -170,15 +171,97 @@ export const sitcomProfile: ProductProfile = {
   projectFiles: sitcomProjectFiles,
 };
 
+const studyGlobalDirectories = [
+  'Agent 配置',
+  '知识库',
+  '知识库/学习方法',
+  '知识库/资料索引',
+  '知识库/知识点库',
+  '模板库',
+];
+
+const studyProjectDirectories = [
+  '01 学习目标',
+  '02 学习大纲',
+  '03 知识点',
+  '03 知识点/待学习',
+  '03 知识点/已整理',
+  '04 资料检索',
+  '05 学习笔记',
+  '06 复盘与输出',
+];
+
+const studyGlobalFiles: TemplateFile[] = [
+  {
+    path: 'Agent 配置/config.toml',
+    content: '# viwork agent runtime\n[viwork]\nmax_revision_rounds = 3\n',
+  },
+  { path: '知识库/学习方法/学习路径设计.md', content: '# 学习路径设计\n\n## 原则\n\n- 先定义目标产出\n- 再拆分能力模块\n- 每个模块绑定练习和检查点\n' },
+  { path: '知识库/学习方法/知识点整理方法.md', content: '# 知识点整理方法\n\n## 推荐结构\n\n- 概念定义\n- 关键问题\n- 例子\n- 常见误区\n- 关联知识\n' },
+  { path: '知识库/资料索引/资料来源清单.md', content: '# 资料来源清单\n\n| 来源 | 类型 | 适用主题 | 可信度 | 备注 |\n| --- | --- | --- | --- | --- |\n' },
+  { path: '知识库/知识点库/通用知识点索引.md', content: '# 通用知识点索引\n\n| 知识点 | 分类 | 关键词 | 关联资料 |\n| --- | --- | --- | --- |\n' },
+  { path: '模板库/学习大纲模板.md', content: '# 学习大纲模板\n\n## 学习目标\n\n## 阶段拆分\n\n| 阶段 | 主题 | 目标 | 练习 | 检查点 |\n| --- | --- | --- | --- | --- |\n' },
+  { path: '模板库/知识点卡片模板.md', content: '# 知识点卡片模板\n\n## 定义\n\n## 为什么重要\n\n## 例子\n\n## 易错点\n\n## 关联知识\n' },
+  { path: '模板库/资料整理模板.md', content: '# 资料整理模板\n\n| 资料 | 核心观点 | 可引用内容 | 待验证问题 |\n| --- | --- | --- | --- |\n' },
+  { path: '模板库/学习复盘模板.md', content: '# 学习复盘模板\n\n## 本轮完成\n\n## 仍不清楚\n\n## 下一步\n' },
+];
+
+const studyGlobalTree: WorkspaceTreeNode[] = [
+  {
+    name: 'Agent 配置',
+    path: 'Agent 配置',
+    type: 'directory',
+    children: [
+      { name: 'config.toml', path: 'Agent 配置/config.toml', type: 'file' },
+    ],
+  },
+  {
+    name: '知识库',
+    path: '知识库',
+    type: 'directory',
+    children: [
+      directoryNode('知识库/学习方法', '学习方法', ['学习路径设计.md', '知识点整理方法.md']),
+      directoryNode('知识库/资料索引', '资料索引', ['资料来源清单.md']),
+      directoryNode('知识库/知识点库', '知识点库', ['通用知识点索引.md']),
+    ],
+  },
+  { name: '模板库', path: '模板库', type: 'directory', children: ['学习大纲模板.md', '知识点卡片模板.md', '资料整理模板.md', '学习复盘模板.md'].map((name) => ({ name, path: `模板库/${name}`, type: 'file' })) },
+];
+
+const studyProjectFiles: TemplateFile[] = [
+  { path: '01 学习目标/项目简介.md', content: '# {{topic}}\n\n## 学习主题\n\n{{topic}}\n\n## 学习目标\n\n- \n\n## 期望产出\n\n- \n\n## 当前基础\n\n- \n' },
+  { path: '01 学习目标/问题清单.md', content: '# 问题清单\n\n| 问题 | 优先级 | 状态 | 备注 |\n| --- | --- | --- | --- |\n' },
+  { path: '02 学习大纲/总览.md', content: '# {{topic}}学习大纲\n\n## 学习路径\n\n| 阶段 | 主题 | 目标 | 练习 | 检查点 |\n| --- | --- | --- | --- | --- |\n' },
+  { path: '02 学习大纲/阶段计划.md', content: '# 阶段计划\n\n| 周期 | 重点 | 资料 | 任务 | 交付物 |\n| --- | --- | --- | --- | --- |\n' },
+  { path: '03 知识点/知识点索引.md', content: '# 知识点索引\n\n| 知识点 | 分类 | 掌握状态 | 关联文件 |\n| --- | --- | --- | --- |\n' },
+  { path: '03 知识点/待学习/待整理知识点.md', content: '# 待整理知识点\n\n| 知识点 | 来源 | 需要解决的问题 |\n| --- | --- | --- |\n' },
+  { path: '03 知识点/已整理/知识点卡片.md', content: '# 知识点卡片\n\n## 定义\n\n## 关键问题\n\n## 例子\n\n## 易错点\n\n## 关联知识\n' },
+  { path: '04 资料检索/搜索记录.md', content: '# 搜索记录\n\n| 查询词 | 结果摘要 | 可用资料 | 下一步 |\n| --- | --- | --- | --- |\n' },
+  { path: '04 资料检索/资料整理.md', content: '# 资料整理\n\n| 资料 | 核心观点 | 适用知识点 | 可信度 |\n| --- | --- | --- | --- |\n' },
+  { path: '05 学习笔记/课堂笔记.md', content: '# 学习笔记\n\n## 今日主题\n\n## 关键收获\n\n## 待追问\n' },
+  { path: '06 复盘与输出/复盘记录.md', content: '# 复盘记录\n\n| 时间 | 完成内容 | 卡点 | 下一步 |\n| --- | --- | --- | --- |\n' },
+  { path: '06 复盘与输出/输出作品.md', content: '# 输出作品\n\n## 主题\n\n## 内容\n\n## 证据与引用\n' },
+];
+
+export const studyProfile: ProductProfile = {
+  ...(studyProfileConfig as ProductProfileConfig),
+  globalDirectories: studyGlobalDirectories,
+  globalFiles: studyGlobalFiles,
+  globalTree: studyGlobalTree,
+  projectDirectories: studyProjectDirectories,
+  projectFiles: studyProjectFiles,
+};
+
 export const PRODUCT_PROFILES = {
   'novel-adaptation': novelAdaptationProfile,
   sitcom: sitcomProfile,
+  study: studyProfile,
 } satisfies Record<ProductProfileId, ProductProfile>;
 
 export const DEFAULT_PRODUCT_PROFILE_ID: ProductProfileId = 'novel-adaptation';
 
 export function resolveProductProfile(productId?: string | null): ProductProfile {
-  if (productId === 'sitcom' || productId === 'novel-adaptation') {
+  if (productId === 'sitcom' || productId === 'novel-adaptation' || productId === 'study') {
     return PRODUCT_PROFILES[productId];
   }
   return PRODUCT_PROFILES[DEFAULT_PRODUCT_PROFILE_ID];

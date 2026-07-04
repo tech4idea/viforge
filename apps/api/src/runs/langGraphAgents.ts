@@ -18,6 +18,7 @@ import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MO
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
+import type { PlaywriterService } from '../browser/playwriterService';
 import type { WechatSendContext } from './runService';
 import { getPromptText } from './langfusePromptStore';
 import { readProductSkillPrompt } from '../productProfilePrompts';
@@ -163,6 +164,9 @@ export type AgentRegistry = {
   adaptationPlanner: LangGraphAgentClient | null;
   screenwriter: LangGraphAgentClient | null;
   reviewer: LangGraphAgentClient | null;
+  outline: LangGraphAgentClient | null;
+  knowledgeSearch: LangGraphAgentClient | null;
+  knowledgeOrganizer: LangGraphAgentClient | null;
   systemAgent: (instructions: string, toolsOverride?: LangGraphToolset) => Promise<LangGraphAgentClient>;
 };
 
@@ -256,6 +260,39 @@ const AGENT_DEFS: AgentDef[] = [
       '- 待修复项：',
     ].join('\n'),
   },
+  {
+    id: 'outline-agent',
+    name: '学习大纲',
+    workingMemoryTemplate: [
+      '# 学习大纲记忆',
+      '- 学习目标：',
+      '- 当前基础：',
+      '- 阶段计划：',
+      '- 检查点：',
+    ].join('\n'),
+  },
+  {
+    id: 'knowledge-search-agent',
+    name: '知识点搜索',
+    workingMemoryTemplate: [
+      '# 知识点搜索记忆',
+      '- 已检索主题：',
+      '- 可靠资料来源：',
+      '- 待验证问题：',
+      '- 常用关键词：',
+    ].join('\n'),
+  },
+  {
+    id: 'knowledge-organizer-agent',
+    name: '知识点整理',
+    workingMemoryTemplate: [
+      '# 知识点整理记忆',
+      '- 已整理知识点：',
+      '- 关联知识：',
+      '- 常见误区：',
+      '- 待补充资料：',
+    ].join('\n'),
+  },
 ];
 
 type ProjectMemoryMessage = {
@@ -340,6 +377,7 @@ export function createWorkspaceTools(
     wechat?: WechatSendContext;
     gitService?: GitService;
     gitConfigStore?: GitConfigStore;
+    browserService?: PlaywriterService;
     memoryFixture?: MemoryRecord[];
     mockMemoryWrites?: boolean;
     knowledgeFixture?: KnowledgeBaseEntry[];
@@ -508,6 +546,93 @@ export function createWorkspaceTools(
       description: '读取全局工作区中的 UTF-8 文本文件，如知识库、模板或 Agent 配置。',
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path: filePath }) => store.readGlobalWorkspaceFile(filePath),
+    }),
+    browser_status: createTool({
+      id: 'browser_status',
+      description: '检查 Playwriter 浏览器连接状态。Playwriter 连接到用户已登录的真实浏览器标签页，适合读取当前网页、导航、搜索和整理资料。',
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!options.browserService) {
+          return { enabled: false, error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+        }
+        return options.browserService.status();
+      },
+    }),
+    browser_use_install: createTool({
+      id: 'browser_use_install',
+      description: [
+        '当用户有网页访问需求但 Playwriter 未安装、relay 未启动或浏览器标签页未授权时，调用此工具生成安装与连接指引。',
+        '该工具不会访问网页，只返回当前检测状态和用户需要执行的步骤。',
+      ].join('\n'),
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!options.browserService) {
+          return {
+            enabled: false,
+            relayReachable: false,
+            connectedBrowsers: 0,
+            steps: [
+              '安装 Playwriter Chrome 扩展。',
+              '在浏览器所在机器启动 relay：playwriter serve --host 127.0.0.1 --replace。',
+              '打开需要访问的标签页，点击 Playwriter 扩展图标授权。',
+              '重试网页访问请求。',
+            ],
+          };
+        }
+        return options.browserService.installGuide();
+      },
+    }),
+    browser_navigate: createTool({
+      id: 'browser_navigate',
+      description: [
+        '通过 Playwriter 在用户授权的真实浏览器标签页中打开 URL。',
+        '适合访问用户已登录页面或需要浏览器环境的网页。只在用户要求浏览网页、搜索资料或读取页面时使用。',
+      ].join('\n'),
+      inputSchema: z.object({
+        url: z.string().min(1).describe('要打开的网址。缺少协议时会自动补 https://'),
+        sessionId: z.string().optional().describe('可选 Playwriter session id；默认使用环境变量或 1'),
+      }),
+      execute: async ({ url, sessionId }) => {
+        if (!options.browserService) {
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+        }
+        return safeBrowserToolCall(() => options.browserService!.navigate({ url, sessionId }));
+      },
+    }),
+    browser_snapshot: createTool({
+      id: 'browser_snapshot',
+      description: [
+        '读取当前 Playwriter 浏览器标签页的可访问性快照，返回页面文字、链接、按钮、输入框和 aria-ref 定位信息。',
+        '需要理解网页内容、选择可点击元素或整理资料时优先使用，不要用截图 OCR 替代。',
+      ].join('\n'),
+      inputSchema: z.object({
+        sessionId: z.string().optional().describe('可选 Playwriter session id；默认使用环境变量或 1'),
+      }),
+      execute: async ({ sessionId }) => {
+        if (!options.browserService) {
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+        }
+        return safeBrowserToolCall(() => options.browserService!.snapshot({ sessionId }));
+      },
+    }),
+    browser_evaluate: createTool({
+      id: 'browser_evaluate',
+      description: [
+        '在 Playwriter stateful sandbox 中执行一段受控 Playwright JavaScript。作用域包含 page、context、state、require。',
+        '用于点击 aria-ref 元素、填写表单、读取标题/URL、等待响应、提取页面结构等浏览器操作。',
+        '不要读取本地文件、不要访问工作区外路径、不要执行与浏览器任务无关的 Node.js 代码。对登录、提交、购买、删除、发布等敏感操作必须先让用户确认。',
+      ].join('\n'),
+      inputSchema: z.object({
+        code: z.string().min(1).describe('要执行的 Playwright JavaScript，建议用 console.log(JSON.stringify(result)) 输出结构化结果'),
+        sessionId: z.string().optional().describe('可选 Playwriter session id；默认使用环境变量或 1'),
+        timeoutMs: z.number().int().min(1_000).max(120_000).default(30_000).describe('执行超时毫秒数，默认 30000'),
+      }),
+      execute: async ({ code, sessionId, timeoutMs }) => {
+        if (!options.browserService) {
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+        }
+        return safeBrowserToolCall(() => options.browserService!.evaluate({ code, sessionId, timeoutMs }));
+      },
     }),
     read_project_memory: createTool({
       id: 'read_project_memory',
@@ -1587,7 +1712,7 @@ export async function createAgentRegistry(
     });
   };
 
-  const [brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer] = await Promise.all(
+  const [brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, outline, knowledgeSearch, knowledgeOrganizer] = await Promise.all(
     AGENT_DEFS.map(createAgentWithSkill),
   );
 
@@ -1605,7 +1730,7 @@ export async function createAgentRegistry(
     });
   };
 
-  return { brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, systemAgent: createSystemAgent };
+  return { brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, outline, knowledgeSearch, knowledgeOrganizer, systemAgent: createSystemAgent };
 }
 
 async function loadSkillInstructions(store: WorkspaceStore, agentId: string, productProfile?: ProductProfile): Promise<string> {
@@ -1857,4 +1982,15 @@ function sanitizeToolResult(output: unknown): unknown {
     return sanitizeToolOutputValue((output as { content?: unknown }).content).output;
   }
   return sanitizeToolOutputValue(output).output;
+}
+
+async function safeBrowserToolCall(execute: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return await execute();
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+      hint: '请确认已安装 Playwriter CLI、浏览器扩展已授权当前标签页，并已启动 playwriter serve。',
+    };
+  }
 }
