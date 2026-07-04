@@ -37,6 +37,7 @@ VIWORK_API_PORT=13001
 VIWORK_AIGC_HUB_BASE_URL=
 VIWORK_AIGC_HUB_API_KEY=
 VIWORK_AIGC_HUB_CHAT_MODEL=
+VIWORK_WECHAT_CHAT_MODEL=minimax/minimax-m2.7
 VIWORK_AIGC_HUB_IMAGE_MODEL=
 PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
 ```
@@ -47,6 +48,7 @@ PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
 - `VITE_API_BASE_URL` 在 compose 部署中应保持为空；只有前端需要直连外部 API 时才覆盖。
 - `DATABASE_URL` 和 `QDRANT_URL` 由 `docker-compose.yml` 注入到 `api` 容器，默认分别指向 `postgres:5432` 和 `qdrant:6333`。
 - `VIWORK_AIGC_HUB_*` 是当前 compose 默认注入到 `api` 容器的关键运行时环境变量。
+- `VIWORK_WECHAT_CHAT_MODEL` 是微信入口专用文本模型，默认使用不触发 coding plan 能力的 `minimax/minimax-m2.7`，避免部分上游模型在微信会话中返回 coding plan 不支持错误。
 - `VIWORK_PLAYWRITER_BIN` 可选，用于指定 Playwriter CLI 路径，默认 `playwriter`；`VIWORK_PLAYWRITER_HOST` 默认 `http://127.0.0.1:19988`，如 relay 启用了 token，可设置 `VIWORK_PLAYWRITER_TOKEN`。
 - `VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS` 控制 LangGraph Store pgvector 索引维度，默认 `1024`，应与 `VIWORK_AIGC_HUB_EMBEDDING_MODEL` 的输出维度一致。
 - `PHOENIX_COLLECTOR_ENDPOINT` 开启 LangGraph/LangChain OpenTelemetry trace 上报，默认指向 `http://192.168.43.167:6006`，API 会向 `${PHOENIX_COLLECTOR_ENDPOINT}/v1/traces` 发送 spans。

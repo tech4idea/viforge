@@ -71,7 +71,6 @@ import {
   Pin,
   Plus,
   RefreshCw,
-  Save,
   Send,
   Square,
   Trash2,
@@ -219,6 +218,21 @@ type ChatSessionContextMenu = {
   title?: string;
 };
 
+type PreviewTabContextMenu = {
+  x: number;
+  y: number;
+  tabId: string;
+};
+
+type PreviewTab = {
+  id: string;
+  workspaceScope: WorkspaceScope;
+  projectId: string | null;
+  path: string;
+};
+
+type MarkdownMode = 'edit' | 'preview';
+
 type SelectedTextContextMenu = {
   x: number;
   y: number;
@@ -282,6 +296,7 @@ function App() {
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
+  const [entriesProjectId, setEntriesProjectId] = useState<string | null>(null);
   const [entriesState, setEntriesState] = useState<LoadState>('idle');
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [globalEntries, setGlobalEntries] = useState<WorkspaceEntry[]>([]);
@@ -310,6 +325,8 @@ function App() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
+  const [markdownModesByPath, setMarkdownModesByPath] = useState<Record<string, MarkdownMode>>({});
 
   const [prompt, setPrompt] = useState('');
   const [runState, setRunState] = useState<RunState>('idle');
@@ -417,6 +434,7 @@ function App() {
   const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
+  const [previewTabContextMenu, setPreviewTabContextMenu] = useState<PreviewTabContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
   const [createEntryDraft, setCreateEntryDraft] = useState<CreateEntryDraft | null>(null);
   const [renameEntryDraft, setRenameEntryDraft] = useState<RenameEntryDraft | null>(null);
@@ -449,7 +467,9 @@ function App() {
     ? globalEntries
     : activeWorkspaceScope === 'temporary' && selectedTemporaryProjectId
       ? temporaryEntriesByProject[selectedTemporaryProjectId] ?? []
-      : entries;
+      : selectedProjectId && entriesProjectId === selectedProjectId
+        ? entries
+        : [];
   const selectedPath = activeWorkspaceScope === 'global'
     ? selectedGlobalPath
     : activeWorkspaceScope === 'temporary'
@@ -471,6 +491,90 @@ function App() {
         : ''
     : '';
   const hasUnsavedChanges = isTextFile && fileContent !== lastSavedContent;
+  const selectedTabId = selectedPath ? previewTabId(activeWorkspaceScope, activeProjectWorkspaceId, selectedPath) : null;
+  const selectedMarkdownMode = selectedPath ? markdownModesByPath[selectedTabId ?? selectedPath] ?? 'edit' : 'edit';
+  const visiblePreviewTabs = useMemo(
+    () => previewTabs.filter((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId),
+    [activeProjectWorkspaceId, activeWorkspaceScope, previewTabs],
+  );
+  const selectWorkspacePath = useCallback((workspaceScope: WorkspaceScope, projectId: string | null, path: string) => {
+    setActiveWorkspaceScope(workspaceScope);
+    if (workspaceScope === 'global') {
+      setSelectedGlobalPath(path);
+      return;
+    }
+    if (workspaceScope === 'temporary') {
+      setSelectedTemporaryProjectId(projectId);
+      setSelectedTemporaryPath(path);
+      return;
+    }
+    if (projectId) setSelectedProjectId(projectId);
+    setSelectedProjectPath(path);
+  }, []);
+
+  const selectEntryForPreview = useCallback((workspaceScope: WorkspaceScope, projectId: string | null, entry: WorkspaceEntry) => {
+    selectWorkspacePath(workspaceScope, projectId, entry.path);
+    if (entry.type === 'file') {
+      setEditorPanelOpen(true);
+      const tab: PreviewTab = {
+        id: previewTabId(workspaceScope, projectId, entry.path),
+        workspaceScope,
+        projectId,
+        path: entry.path,
+      };
+      setPreviewTabs((current) => [tab, ...current.filter((item) => item.id !== tab.id)].slice(0, 12));
+    }
+  }, [selectWorkspacePath]);
+
+  const closePreviewTab = useCallback((tabId: string) => {
+    setPreviewTabs((current) => {
+      const index = current.findIndex((tab) => tab.id === tabId);
+      const next = current.filter((tab) => tab.id !== tabId);
+      if (selectedTabId === tabId) {
+        const fallback = next[Math.max(0, index - 1)] ?? next[0] ?? null;
+        if (fallback) {
+          selectWorkspacePath(fallback.workspaceScope, fallback.projectId, fallback.path);
+        }
+      }
+      return next;
+    });
+  }, [selectWorkspacePath, selectedTabId]);
+
+  const closePreviewTabsByMode = useCallback((tabId: string, mode: 'left' | 'right' | 'others' | 'all') => {
+    setPreviewTabs((current) => {
+      const scopedTabs = current.filter((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId);
+      const targetIndex = scopedTabs.findIndex((tab) => tab.id === tabId);
+      if (targetIndex === -1) return current;
+
+      const scopedIdsToClose = new Set(scopedTabs
+        .filter((tab, index) => {
+          if (mode === 'left') return index < targetIndex;
+          if (mode === 'right') return index > targetIndex;
+          if (mode === 'others') return tab.id !== tabId;
+          return true;
+        })
+        .map((tab) => tab.id));
+      const next = current.filter((tab) => !scopedIdsToClose.has(tab.id));
+
+      if (selectedTabId && scopedIdsToClose.has(selectedTabId)) {
+        const fallback = next.find((tab) => tab.id === tabId) ?? next.find((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId) ?? null;
+        if (fallback) {
+          selectWorkspacePath(fallback.workspaceScope, fallback.projectId, fallback.path);
+        }
+      }
+
+      return next;
+    });
+  }, [activeProjectWorkspaceId, activeWorkspaceScope, selectWorkspacePath, selectedTabId]);
+
+  const navigateToMarkdownReference = useCallback((path: string) => {
+    const targetEntry = activeEntries.find((entry) => entry.type === 'file' && entry.path === path);
+    if (!targetEntry) {
+      showToast(`未找到引用文件：${path}`, 'error');
+      return;
+    }
+    selectEntryForPreview(activeWorkspaceScope, activeProjectWorkspaceId, targetEntry);
+  }, [activeEntries, activeProjectWorkspaceId, activeWorkspaceScope, selectEntryForPreview, showToast]);
   const projectChatSessions = useMemo(
     () =>
       chatSessions
@@ -496,8 +600,8 @@ function App() {
   const activeChatLastMessage = activeChatSession?.messages[activeChatSession.messages.length - 1] ?? null;
   const activeChatSessionArchived = Boolean(activeChatSession?.archivedAt);
   const visibleEntries = useMemo(
-    () => filterVisibleWorkspaceEntries(entries, collapsedDirectoriesByProject[selectedProjectId ?? ''] ?? []),
-    [collapsedDirectoriesByProject, entries, selectedProjectId],
+    () => filterVisibleWorkspaceEntries(selectedProjectId && entriesProjectId === selectedProjectId ? entries : [], collapsedDirectoriesByProject[selectedProjectId ?? ''] ?? []),
+    [collapsedDirectoriesByProject, entries, entriesProjectId, selectedProjectId],
   );
   const visibleGlobalEntries = useMemo(
     () => filterVisibleGlobalWorkspaceEntries(globalEntries, collapsedGlobalPaths),
@@ -511,8 +615,8 @@ function App() {
     [chatSessions],
   );
   const selectedProjectFiles = useMemo(
-    () => activeWorkspaceScope === 'project' ? entries.filter((entry) => entry.type === 'file') : [],
-    [activeWorkspaceScope, entries],
+    () => activeWorkspaceScope === 'project' && selectedProjectId && entriesProjectId === selectedProjectId ? entries.filter((entry) => entry.type === 'file') : [],
+    [activeWorkspaceScope, entries, entriesProjectId, selectedProjectId],
   );
   const activeChatScopeName = chatScope === 'project' && selectedProject ? selectedProject.name : '临时工作目录';
   const chatModelOptions = useMemo(() => modelsForCapability(aigcHubModels, 'chat'), [aigcHubModels]);
@@ -529,6 +633,7 @@ function App() {
     event.stopPropagation();
     setSidebarContextMenu(null);
     setChatSessionContextMenu(null);
+    setPreviewTabContextMenu(null);
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
     setSelectedTextContextMenu({
@@ -542,6 +647,27 @@ function App() {
       createdAt: message.createdAt,
     });
   }, []);
+
+  useEffect(() => {
+    if (!selectedPath || !selectedTabId) return;
+    const selectedTabIsVisible = visiblePreviewTabs.some((tab) => tab.id === selectedTabId);
+    if (!selectedTabIsVisible) return;
+    const selectedEntryStillExists = activeEntries.some((entry) => entry.type === 'file' && entry.path === selectedPath);
+    if (selectedEntryStillExists) return;
+    const fallback = visiblePreviewTabs.find((tab) => tab.id !== selectedTabId) ?? null;
+    if (fallback) {
+      selectWorkspacePath(fallback.workspaceScope, fallback.projectId, fallback.path);
+      return;
+    }
+    if (activeWorkspaceScope === 'global') {
+      setSelectedGlobalPath(null);
+    } else if (activeWorkspaceScope === 'temporary') {
+      setSelectedTemporaryPath(null);
+    } else {
+      setSelectedProjectPath(null);
+    }
+  }, [activeEntries, activeWorkspaceScope, selectWorkspacePath, selectedPath, selectedTabId, visiblePreviewTabs]);
+
   const openAttachmentFnRef = useRef<(attachment: ChatMessageAttachment) => void>(() => {});
   openAttachmentFnRef.current = (attachment: ChatMessageAttachment) => {
     setEditorPanelOpen(true);
@@ -675,10 +801,8 @@ function App() {
       }
 
       if (event.key === 's' || event.key === 'S') {
-        const target = event.target as HTMLElement;
-        const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-        if (isInput) return;
         event.preventDefault();
+        event.stopPropagation();
         const { selectedPath: sp, isTextFile: itf, fileContent: fc, lastSavedContent: lsc } = saveShortcutRef.current;
         if (sp && itf && fc !== lsc) {
           void saveFileRef.current().then(() => {
@@ -773,6 +897,7 @@ function App() {
   useEffect(() => {
     if (!selectedProjectId) {
       setEntries([]);
+      setEntriesProjectId(null);
       setSelectedProjectPath(null);
       return;
     }
@@ -868,6 +993,17 @@ function App() {
       void loadFile(activeProjectWorkspaceId, selectedEntry.path);
     }
   }, [activeProjectWorkspaceId, activeWorkspaceScope, selectedEntry?.path, selectedEntry?.type]);
+
+  useEffect(() => {
+    if (!selectedEntry || selectedEntry.type !== 'file' || !selectedPath) return;
+    const tab: PreviewTab = {
+      id: previewTabId(activeWorkspaceScope, activeProjectWorkspaceId, selectedPath),
+      workspaceScope: activeWorkspaceScope,
+      projectId: activeProjectWorkspaceId,
+      path: selectedPath,
+    };
+    setPreviewTabs((current) => current.some((item) => item.id === tab.id) ? current : [tab, ...current].slice(0, 12));
+  }, [activeProjectWorkspaceId, activeWorkspaceScope, selectedEntry?.path, selectedEntry?.type, selectedPath]);
 
   useEffect(() => {
     setReferencedFiles([]);
@@ -1160,6 +1296,7 @@ function App() {
       if (selectedProjectId === projectId) {
         setSelectedProjectId(null);
         setEntries([]);
+        setEntriesProjectId(null);
         setSelectedProjectPath(null);
       }
     } catch (error) {
@@ -1174,6 +1311,7 @@ function App() {
     try {
       const loadedEntries = await apiClient.listWorkspaceEntries(projectId);
       setEntries(loadedEntries);
+      setEntriesProjectId(projectId);
 
       const preferredPath = options.keepSelectedPath ?? selectedProjectPath;
       const preferredEntry = preferredPath ? loadedEntries.find((entry) => entry.path === preferredPath) : null;
@@ -2036,6 +2174,7 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     closeChatSessionContextMenu();
+    closePreviewTabContextMenu();
     closeSelectedTextContextMenu();
     const workspaceScope = payload.workspaceScope ?? 'project';
     setActiveWorkspaceScope(workspaceScope);
@@ -2075,6 +2214,7 @@ function App() {
     event.stopPropagation();
     suppressNextShellClickRef.current = true;
     closeSidebarContextMenu();
+    closePreviewTabContextMenu();
     closeSelectedTextContextMenu();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
@@ -2090,6 +2230,25 @@ function App() {
     setChatSessionContextMenu(null);
   }
 
+  function openPreviewTabContextMenu(event: React.MouseEvent, tabId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeSidebarContextMenu();
+    closeChatSessionContextMenu();
+    closeSelectedTextContextMenu();
+    const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
+    const menuY = Math.min(event.clientY, window.innerHeight - SIDEBAR_CONTEXT_MENU_MAX_HEIGHT - VIEWPORT_EDGE_GAP);
+    setPreviewTabContextMenu({
+      x: Math.max(VIEWPORT_EDGE_GAP, menuX),
+      y: Math.max(VIEWPORT_EDGE_GAP, menuY),
+      tabId,
+    });
+  }
+
+  function closePreviewTabContextMenu() {
+    setPreviewTabContextMenu(null);
+  }
+
   function openSelectedTextContextMenu(event: React.MouseEvent) {
     const selectedText = getSelectedTextFromEvent(event).trim();
     if (!selectedText || !selectedPath) {
@@ -2101,6 +2260,7 @@ function App() {
     event.stopPropagation();
     closeSidebarContextMenu();
     closeChatSessionContextMenu();
+    closePreviewTabContextMenu();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
     setSelectedTextContextMenu({
@@ -2911,6 +3071,7 @@ function App() {
         }
         closeSidebarContextMenu();
         closeChatSessionContextMenu();
+        closePreviewTabContextMenu();
         closeSelectedTextContextMenu();
       }}
     >
@@ -3036,8 +3197,7 @@ function App() {
                             onDragLeave={entry.type === 'directory' ? () => setDragOverTargetKey(null) : undefined}
                             onDrop={entry.type === 'directory' ? (event) => void handleDropOnDirectory(event, { workspaceScope: 'global', projectId: null, parentPath: entry.path }) : undefined}
                             onClick={() => {
-                              setActiveWorkspaceScope('global');
-                              setSelectedGlobalPath(entry.path);
+                              selectEntryForPreview('global', null, entry);
                               if (entry.type === 'file') {
                                 setEditorPanelOpen(true);
                               }
@@ -3152,8 +3312,7 @@ function App() {
                                       onDragLeave={entry.type === 'directory' ? () => setDragOverTargetKey(null) : undefined}
                                       onDrop={entry.type === 'directory' ? (event) => void handleDropOnDirectory(event, { workspaceScope: 'project', projectId: project.id, parentPath: entry.path }) : undefined}
                                       onClick={() => {
-                                        setActiveWorkspaceScope('project');
-                                        setSelectedProjectPath(entry.path);
+                                        selectEntryForPreview('project', project.id, entry);
                                         if (entry.type === 'file') {
                                           setEditorPanelOpen(true);
                                         }
@@ -3262,9 +3421,7 @@ function App() {
                                         onDragLeave={entry.type === 'directory' ? () => setDragOverTargetKey(null) : undefined}
                                         onDrop={entry.type === 'directory' ? (event) => void handleDropOnDirectory(event, { workspaceScope: 'temporary', projectId: session.projectId, parentPath: entry.path }) : undefined}
                                         onClick={() => {
-                                          setActiveWorkspaceScope('temporary');
-                                          setSelectedTemporaryProjectId(session.projectId);
-                                          setSelectedTemporaryPath(entry.path);
+                                          selectEntryForPreview('temporary', session.projectId, entry);
                                           if (entry.type === 'file') {
                                             setEditorPanelOpen(true);
                                           }
@@ -3313,24 +3470,66 @@ function App() {
       {editorPanelOpen ? (
       <section className="editor-panel">
         <div className="editor-header">
-          <div className="editor-mini-bar">
-            <span className="mini-bar__title" title={selectedPath ?? ''}>
-              {selectedPath ? basename(selectedPath) : '选择文件'}
-            </span>
-            {hasUnsavedChanges ? <span className="dirty-marker">未保存</span> : null}
-          </div>
-          <div className="editor-top-bar">
-            <div className="editor-breadcrumb">
-              <span className="editor-breadcrumb__item">{selectedPath ?? '选择文件'}</span>
+          {visiblePreviewTabs.length > 0 ? (
+            <div className="editor-tab-strip" role="tablist" aria-label="预览历史">
+              {visiblePreviewTabs.map((tab) => {
+                const active = tab.id === selectedTabId;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`editor-tab${active ? ' active' : ''}`}
+                    role="tab"
+                    aria-selected={active}
+                    title={tab.path}
+                    onClick={() => selectWorkspacePath(tab.workspaceScope, tab.projectId, tab.path)}
+                    onContextMenu={(event) => openPreviewTabContextMenu(event, tab.id)}
+                  >
+                    <span>{basename(tab.path)}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="editor-tab__close"
+                      aria-label={`关闭 ${basename(tab.path)}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closePreviewTab(tab.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          closePreviewTab(tab.id);
+                        }
+                      }}
+                    >
+                      <X size={12} />
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="editor-actions">
-              {hasUnsavedChanges ? <span className="dirty-marker">未保存</span> : null}
-              <button type="button" disabled={!hasUnsavedChanges || saveState === 'saving'} onClick={() => void saveFile()}>
-                <Save size={14} />
-                {saveState === 'saving' ? '保存中...' : '保存'}
-              </button>
+          ) : null}
+          {selectedEntry?.type === 'file' && /\.(md|markdown)$/i.test(selectedEntry.path) ? (
+            <div className="editor-inline-tools">
+              <div className="markdown-mode-switch" role="tablist" aria-label="Markdown 视图">
+                <button
+                  type="button"
+                  className={selectedMarkdownMode === 'edit' ? 'active' : ''}
+                  onClick={() => selectedTabId && setMarkdownModesByPath((current) => ({ ...current, [selectedTabId]: 'edit' }))}
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  className={selectedMarkdownMode === 'preview' ? 'active' : ''}
+                  onClick={() => selectedTabId && setMarkdownModesByPath((current) => ({ ...current, [selectedTabId]: 'preview' }))}
+                >
+                  预览
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
         <div className="editor-scroll" onContextMenu={openSelectedTextContextMenu}>
@@ -3381,11 +3580,14 @@ function App() {
                     fileState,
                     fileError,
                     rawPreviewUrl,
+                    workspaceEntries: activeEntries,
+                    markdownMode: selectedMarkdownMode,
                     onChange: (content: string) => {
                       setFileContent(content);
                       setSaveState('idle');
                       setSaveError(null);
                     },
+                    onNavigateToPath: navigateToMarkdownReference,
                   })}
                   {saveState === 'saved' ? <p className="success-text">已保存。</p> : null}
                   {saveState === 'error' ? <p className="inline-error">保存失败：{saveError}</p> : null}
@@ -3859,6 +4061,20 @@ function App() {
           </button>
         </div>
       ) : null}
+      {previewTabContextMenu ? (
+        <div
+          className="sidebar-context-menu"
+          style={{ left: previewTabContextMenu.x, top: previewTabContextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button type="button" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'left'); closePreviewTabContextMenu(); }}>关闭左侧</button>
+          <button type="button" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'right'); closePreviewTabContextMenu(); }}>关闭右侧</button>
+          <button type="button" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'others'); closePreviewTabContextMenu(); }}>关闭其它</button>
+          <div className="context-menu-separator" />
+          <button type="button" className="danger-item" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'all'); closePreviewTabContextMenu(); }}>关闭全部</button>
+        </div>
+      ) : null}
       {selectedTextContextMenu ? (
         <div
           className="sidebar-context-menu"
@@ -3931,6 +4147,10 @@ function HarnessStandalonePage(): JSX.Element {
 
 function isSupportedTextFile(path: string): boolean {
   return TEXT_FILE_PATTERN.test(path);
+}
+
+function previewTabId(workspaceScope: WorkspaceScope, projectId: string | null, path: string): string {
+  return `${workspaceScope}:${projectId ?? 'global'}:${path}`;
 }
 
 function encodeWorkspacePath(path: string): string {

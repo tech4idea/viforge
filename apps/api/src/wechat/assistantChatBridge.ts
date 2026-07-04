@@ -49,7 +49,8 @@ export function createAssistantChatBridge(
 
       const session = await chatSessionStore.getSession(sessionId);
       const modelConfig = session?.modelConfig ?? {};
-      const runModel = modelConfig.chatModel || runInput.model;
+      // WeChat should not inherit a web-selected session model: some upstream models reject the agent runtime's planning/tool features.
+      const runModel = resolveWechatChatModel(runInput.model);
       const runImageGeneration = {
         model: runInput.imageGeneration?.model ?? modelConfig.imageModel,
       };
@@ -187,4 +188,11 @@ export function createAssistantChatBridge(
       return { sessionId, replyText, attachments: latestAssistantMessage?.attachments ?? [] };
     },
   };
+}
+
+function resolveWechatChatModel(runInputModel?: string): string | undefined {
+  return process.env.VIWORK_WECHAT_CHAT_MODEL
+    || process.env.VIWORK_AIGC_HUB_WECHAT_MODEL
+    || runInputModel
+    || 'minimax/minimax-m2.7';
 }

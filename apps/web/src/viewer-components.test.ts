@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { buildMarkdownInstanceKey, renderEditorViewer } from './viewer-components';
+import { buildMarkdownInstanceKey, renderEditorViewer, resolveMarkdownWorkspacePath } from './viewer-components';
 import { detectLanguage } from './editors';
 
 describe('buildMarkdownInstanceKey', () => {
@@ -37,5 +37,19 @@ describe('text editor viewer selection', () => {
 
   it('maps toml to toml syntax highlighting', () => {
     expect(detectLanguage('agent/config.toml')).toBe('toml');
+  });
+});
+
+describe('markdown workspace references', () => {
+  it('resolves relative links beside the current markdown file', () => {
+    expect(resolveMarkdownWorkspacePath('docs/episode-1/outline.md', './assets/scene.png')).toBe('docs/episode-1/assets/scene.png');
+  });
+
+  it('resolves parent directory links without escaping workspace root', () => {
+    expect(resolveMarkdownWorkspacePath('docs/episode-1/outline.md', '../characters.md#lead')).toBe('docs/characters.md');
+  });
+
+  it('ignores external links', () => {
+    expect(resolveMarkdownWorkspacePath('docs/outline.md', 'https://example.com/ref.md')).toBeNull();
   });
 });

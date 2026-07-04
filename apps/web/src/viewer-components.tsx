@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { lazy, memo, Suspense, useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -18,7 +18,53 @@ interface EditorViewerProps {
   fileState: 'idle' | 'loading' | 'error';
   fileError: string | null;
   rawPreviewUrl: string;
+  workspaceEntries?: WorkspaceEntry[];
+  markdownMode?: 'edit' | 'preview';
   onChange: (content: string) => void;
+  onNavigateToPath?: (path: string) => void;
+}
+
+function dirname(path: string): string {
+  const index = path.lastIndexOf('/');
+  return index === -1 ? '' : path.slice(0, index);
+}
+
+function normalizeWorkspacePath(path: string): string {
+  const parts: string[] = [];
+  for (const rawPart of path.replace(/\\/g, '/').split('/')) {
+    const part = rawPart.trim();
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function isExternalUrl(url: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url) || /^(?:mailto|tel):/i.test(url) || url.startsWith('#') || url.startsWith('data:');
+}
+
+export function resolveMarkdownWorkspacePath(currentPath: string, rawTarget: string): string | null {
+  const cleanTarget = rawTarget.split('#')[0]?.split('?')[0] ?? '';
+  if (!cleanTarget.trim() || isExternalUrl(cleanTarget)) return null;
+
+  let decoded = cleanTarget;
+  try {
+    decoded = decodeURIComponent(cleanTarget);
+  } catch {
+    // Keep the raw target when the Markdown contains a partial escape sequence.
+  }
+
+  return normalizeWorkspacePath(decoded.startsWith('/') ? decoded : `${dirname(currentPath)}/${decoded}`);
+}
+
+function buildMarkdownRawUrl(rawPreviewUrl: string, currentPath: string, targetPath: string): string {
+  const suffix = encodeURIComponent(currentPath).replace(/%2F/g, '/');
+  const encodedTarget = encodeURIComponent(targetPath).replace(/%2F/g, '/');
+  return rawPreviewUrl.endsWith(suffix) ? `${rawPreviewUrl.slice(0, -suffix.length)}${encodedTarget}` : rawPreviewUrl;
 }
 
 function EditorFallback({ label }: { label: string }): JSX.Element {
@@ -144,6 +190,18 @@ export function renderEditorViewer(props: EditorViewerProps): JSX.Element {
       return <EditorFallback label="Markdown 文档" />;
     }
 
+    if (props.markdownMode === 'preview') {
+      return (
+        <MarkdownReadPreview
+          content={props.fileContent}
+          currentPath={props.entry.path}
+          rawPreviewUrl={props.rawPreviewUrl}
+          workspaceEntries={props.workspaceEntries ?? []}
+          onNavigateToPath={props.onNavigateToPath}
+        />
+      );
+    }
+
     return (
       <Suspense fallback={<EditorFallback label="Markdown 编辑器" />}>
         <LazyMarkdownEditor
@@ -203,10 +261,53 @@ export function buildMarkdownInstanceKey(filePath: string, savedContent: string)
   return `${filePath}:${savedContent.length}:${hash}`;
 }
 
-export const MarkdownReadPreview = memo(function MarkdownReadPreview({ content }: { content: string }): JSX.Element {
+export const MarkdownReadPreview = memo(function MarkdownReadPreview({
+  content,
+  currentPath,
+  rawPreviewUrl,
+  workspaceEntries = [],
+  onNavigateToPath,
+}: {
+  content: string;
+  currentPath?: string;
+  rawPreviewUrl?: string;
+  workspaceEntries?: WorkspaceEntry[];
+  onNavigateToPath?: (path: string) => void;
+}): JSX.Element {
+  const filePaths = useMemo(() => new Set(workspaceEntries.filter((entry) => entry.type === 'file').map((entry) => entry.path)), [workspaceEntries]);
+
   return (
     <div className="markdown-read-preview">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a({ href, children, ...anchorProps }) {
+            const targetPath = currentPath && href ? resolveMarkdownWorkspacePath(currentPath, href) : null;
+            const canNavigate = Boolean(targetPath && filePaths.has(targetPath) && onNavigateToPath);
+            return (
+              <a
+                {...anchorProps}
+                href={href}
+                onClick={canNavigate ? (event) => {
+                  event.preventDefault();
+                  onNavigateToPath?.(targetPath!);
+                } : anchorProps.onClick}
+              >
+                {children}
+              </a>
+            );
+          },
+          img({ src, alt, ...imageProps }) {
+            const targetPath = currentPath && src ? resolveMarkdownWorkspacePath(currentPath, src) : null;
+            const resolvedSrc = targetPath && rawPreviewUrl && currentPath && filePaths.has(targetPath)
+              ? buildMarkdownRawUrl(rawPreviewUrl, currentPath, targetPath)
+              : src;
+            return <img {...imageProps} src={resolvedSrc} alt={alt ?? ''} />;
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 });
