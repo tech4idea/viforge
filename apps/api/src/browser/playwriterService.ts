@@ -41,6 +41,7 @@ export function createPlaywriterService(options: { binary?: string; host?: strin
   const host = trimTrailingSlashes(options.host || process.env.PLAYWRITER_HOST || process.env.VIWORK_PLAYWRITER_HOST || 'http://127.0.0.1:19988');
   const token = options.token || process.env.PLAYWRITER_TOKEN || process.env.VIWORK_PLAYWRITER_TOKEN || '';
   const configuredSessionId = options.defaultSessionId || process.env.PLAYWRITER_SESSION_ID || process.env.VIWORK_PLAYWRITER_SESSION_ID || '';
+  const hostHeader = process.env.PLAYWRITER_HOST_HEADER || process.env.VIWORK_PLAYWRITER_HOST_HEADER || '';
   let createdSessionId: string | null = null;
 
   async function resolveSessionId(inputSessionId?: string): Promise<string> {
@@ -62,7 +63,7 @@ export function createPlaywriterService(options: { binary?: string; host?: strin
 
     async installGuide() {
       const cli = await checkPlaywriterCli(binary);
-      const relay = cli.ok ? await checkPlaywriterRelay({ binary, host, token }) : { reachable: false, connectedBrowsers: 0 };
+      const relay = cli.ok ? await checkPlaywriterRelay({ host, token, hostHeader }) : { reachable: false, connectedBrowsers: 0 };
       return {
         enabled: cli.ok && relay.reachable && relay.connectedBrowsers > 0,
         binary,
@@ -74,6 +75,7 @@ export function createPlaywriterService(options: { binary?: string; host?: strin
           '在浏览器所在机器安装 Playwriter Chrome 扩展。',
           '在浏览器所在机器启动 relay：playwriter serve --host 127.0.0.1 --replace。',
           '打开需要让 agent 访问的标签页，点击 Playwriter 扩展图标授权该标签页。',
+          'Docker/WSL 部署可使用 host.docker.internal 指向宿主机；如果 Playwriter relay 拒绝该 Host header，可设置 VIWORK_PLAYWRITER_HOST_HEADER=127.0.0.1:19988。',
           '如果 API 不在同一台机器，把 VIWORK_PLAYWRITER_HOST 设置为浏览器机器对 API 可访问的地址，并在远程监听时配置 VIWORK_PLAYWRITER_TOKEN。',
           '无需手动创建 session；viwork 会在首次调用浏览器工具时自动创建并复用 Playwriter session。',
         ],
@@ -151,10 +153,10 @@ async function executeWithResolvedSession(input: {
   }
 }
 
-async function checkPlaywriterRelay(input: { binary: string; host: string; token: string }): Promise<{ reachable: boolean; connectedBrowsers: number; error?: string }> {
+async function checkPlaywriterRelay(input: { host: string; token: string; hostHeader: string }): Promise<{ reachable: boolean; connectedBrowsers: number; error?: string }> {
   try {
     const response = await fetch(new URL('/extensions/status', input.host), {
-      headers: input.token ? { authorization: `Bearer ${input.token}` } : undefined,
+      headers: playwriterRequestHeaders(input),
       signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
@@ -165,6 +167,13 @@ async function checkPlaywriterRelay(input: { binary: string; host: string; token
   } catch (error) {
     return { reachable: false, connectedBrowsers: 0, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function playwriterRequestHeaders(input: { token: string; hostHeader: string }): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  if (input.token) headers.authorization = `Bearer ${input.token}`;
+  if (input.hostHeader) headers.host = input.hostHeader;
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 async function checkPlaywriterCli(binary: string): Promise<{ ok: true } | { ok: false; error: string }> {
