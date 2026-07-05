@@ -11,6 +11,8 @@
 
 当前代码里的微信实现仍是本地模拟接口，不是真实微信开放平台 OAuth，也不是企业微信。后续真实接入建议参考 cc-connect 的个人微信通道，使用腾讯 ilink 机器人 HTTP 网关：`getUpdates` 长轮询接收消息，`sendMessage` 下发回复。
 
+微信创作 run 默认优先使用 `VIWORK_WECHAT_CHAT_MODEL`，未配置时回退到 `minimax/minimax-m2.7`。这个入口不复用前端会话上一次选择的文本模型，避免微信消息被路由到不支持 coding plan 能力的上游模型后返回 404。
+
 ## 参考方案：cc-connect Weixin / ilink
 
 参考文档：[cc-connect docs/weixin.md](https://github.com/chenhg5/cc-connect/blob/main/docs/weixin.md)

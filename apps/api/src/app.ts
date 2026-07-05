@@ -28,7 +28,7 @@ import { createAssistantChatBridge } from './wechat/assistantChatBridge';
 import { createWechatIlinkClient } from './wechat/wechatIlinkClient';
 import { createWechatPoller } from './wechat/wechatPoller';
 import { createWechatSessionRouter, type WechatSessionRouter } from './wechat/wechatSessionRouter';
-import type { PendingSessionAction } from './wechat/wechatStore';
+import { assertNever, type PendingSessionAction } from './wechat/wechatTypes';
 import type { WechatIlinkClient } from './wechat/wechatIlinkClient';
 import type { WechatPoller } from './wechat/wechatPoller';
 import { WORKSPACES_ROOT } from './env';
@@ -117,6 +117,16 @@ export function createApp(): Hono {
       let processText = update.text;
       if (routing.type === 'confirmed') {
         await executeConfirmedSessionAction(wechatStore, chatSessionStore, workspaceStore, update.fromUserId, routing.action);
+        if (!routing.action.originalPrompt.trim()) {
+          if (routing.replyText) {
+            await ilinkClient.sendText({
+              to: update.fromUserId,
+              text: routing.replyText,
+              contextToken: update.contextToken,
+            });
+          }
+          return;
+        }
         processText = routing.action.originalPrompt;
         console.info('[wechat] session action confirmed', {
           fromUserId: update.fromUserId,
@@ -259,13 +269,13 @@ async function executeConfirmedSessionAction(
   externalUserId: string,
   action: PendingSessionAction,
 ): Promise<void> {
-  if (action.type === 'new_session') {
+  switch (action.type) {
+  case 'new_session':
     await wechatStore.setActiveChatSessionId(externalUserId, null);
     console.info('[wechat] cleared active session for new session', { externalUserId });
     return;
-  }
 
-  if (action.type === 'switch_session') {
+  case 'switch_session': {
     const route: import('./wechat/wechatStore').WechatRouteState = {
       scope: 'project',
       projectId: action.projectId,
@@ -273,11 +283,17 @@ async function executeConfirmedSessionAction(
       lastCommandAt: new Date().toISOString(),
     };
     await wechatStore.setRouteState(externalUserId, route);
-    await wechatStore.setActiveChatSessionId(externalUserId, null);
+    await wechatStore.setActiveChatSessionId(externalUserId, action.sessionId ?? null);
     console.info('[wechat] switched route to project', {
       externalUserId,
       projectId: action.projectId,
       projectName: action.projectName,
+      sessionId: action.sessionId ?? null,
     });
+    return;
+  }
+
+  default:
+    assertNever(action);
   }
 }

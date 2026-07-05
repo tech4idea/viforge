@@ -9,6 +9,7 @@ import type { WechatPoller } from '../wechat/wechatPoller';
 import type { WechatSessionRouter } from '../wechat/wechatSessionRouter';
 import type { WechatStore } from '../wechat/wechatStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
+import { assertNever } from '../wechat/wechatTypes';
 
 const completeSetupSchema = z.object({
   displayName: z.string().min(1),
@@ -169,16 +170,24 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
       }
 
       if (routing.type === 'confirmed') {
-        if (routing.action.type === 'new_session') {
+        switch (routing.action.type) {
+        case 'new_session':
           await wechatStore.setActiveChatSessionId(externalUserId, null);
-        } else if (routing.action.type === 'switch_session') {
+          break;
+        case 'switch_session':
           await wechatStore.setRouteState(externalUserId, {
             scope: 'project',
             projectId: routing.action.projectId,
             projectName: routing.action.projectName,
             lastCommandAt: new Date().toISOString(),
           });
-          await wechatStore.setActiveChatSessionId(externalUserId, null);
+          await wechatStore.setActiveChatSessionId(externalUserId, routing.action.sessionId ?? null);
+          break;
+        default:
+          assertNever(routing.action);
+        }
+        if (!routing.action.originalPrompt.trim()) {
+          return context.json({ accepted: true, reply: routing.replyText ?? null, notePath: null }, 202);
         }
         text = routing.action.originalPrompt;
       }

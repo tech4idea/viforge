@@ -2,23 +2,15 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { WechatSetupSession, WechatStatus } from '@viwork/shared';
+import type { PendingSessionAction, WechatRouteState } from './wechatTypes';
+
+export type { PendingSessionAction, PendingSessionOption, WechatRouteState } from './wechatTypes';
 
 type WechatConnection = {
   displayName: string;
   externalUserId: string;
   connectedAt: string;
 };
-
-export type WechatRouteState = {
-  scope: 'project' | 'temporary';
-  projectId: string | null;
-  projectName: string | null;
-  lastCommandAt: string | null;
-};
-
-export type PendingSessionAction =
-  | { type: 'new_session'; projectName: string; projectId: string | null; originalPrompt: string }
-  | { type: 'switch_session'; projectName: string; projectId: string; originalPrompt: string };
 
 export type WechatUserState = {
   route: WechatRouteState;
