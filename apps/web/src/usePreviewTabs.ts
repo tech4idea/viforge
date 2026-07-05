@@ -17,6 +17,13 @@ export type PreviewTabContextMenu = {
   tabId: string;
 };
 
+export type PreviewTabCloseAvailability = {
+  canCloseLeft: boolean;
+  canCloseRight: boolean;
+  canCloseOthers: boolean;
+  canCloseAll: boolean;
+};
+
 export function previewTabId(workspaceScope: PreviewWorkspaceScope, projectId: string | null, path: string): string {
   return `${workspaceScope}:${projectId ?? 'global'}:${path}`;
 }
@@ -26,12 +33,14 @@ export function usePreviewTabs({
   activeProjectWorkspaceId,
   selectedPath,
   selectWorkspacePath,
+  clearWorkspaceSelection,
   maxTabs = 12,
 }: {
   activeWorkspaceScope: PreviewWorkspaceScope;
   activeProjectWorkspaceId: string | null;
   selectedPath: string | null;
   selectWorkspacePath: (workspaceScope: PreviewWorkspaceScope, projectId: string | null, path: string) => void;
+  clearWorkspaceSelection: (workspaceScope: PreviewWorkspaceScope) => void;
   maxTabs?: number;
 }) {
   const [tabs, setTabs] = useState<PreviewTab[]>([]);
@@ -54,8 +63,8 @@ export function usePreviewTabs({
       path,
     };
     setTabs((current) => {
-      if (current[0]?.id === tab.id) return current;
-      return [tab, ...current.filter((item) => item.id !== tab.id)].slice(0, maxTabs);
+      if (current.some((item) => item.id === tab.id)) return current;
+      return [...current, tab].slice(-maxTabs);
     });
   }, [maxTabs]);
 
@@ -72,9 +81,13 @@ export function usePreviewTabs({
 
     if (selectedTabId === tabId) {
       const fallback = next[Math.max(0, index - 1)] ?? next[0] ?? null;
-      if (fallback) selectTab(fallback);
+      if (fallback) {
+        selectTab(fallback);
+      } else {
+        clearWorkspaceSelection(activeWorkspaceScope);
+      }
     }
-  }, [selectTab, selectedTabId, tabs]);
+  }, [activeWorkspaceScope, clearWorkspaceSelection, selectTab, selectedTabId, tabs]);
 
   const closeTabsByMode = useCallback((tabId: string, mode: PreviewTabCloseMode) => {
     const scopedTabs = tabs.filter((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId);
@@ -95,9 +108,13 @@ export function usePreviewTabs({
 
     if (selectedTabId && scopedIdsToClose.has(selectedTabId)) {
       const fallback = next.find((tab) => tab.id === tabId) ?? next.find((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId) ?? null;
-      if (fallback) selectTab(fallback);
+      if (fallback) {
+        selectTab(fallback);
+      } else {
+        clearWorkspaceSelection(activeWorkspaceScope);
+      }
     }
-  }, [activeProjectWorkspaceId, activeWorkspaceScope, selectTab, selectedTabId, tabs]);
+  }, [activeProjectWorkspaceId, activeWorkspaceScope, clearWorkspaceSelection, selectTab, selectedTabId, tabs]);
 
   const setSelectedMarkdownMode = useCallback((mode: MarkdownMode) => {
     if (!selectedTabId) return;
@@ -105,6 +122,20 @@ export function usePreviewTabs({
   }, [selectedTabId]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  const getCloseAvailability = useCallback((tabId: string): PreviewTabCloseAvailability => {
+    const targetIndex = visibleTabs.findIndex((tab) => tab.id === tabId);
+    if (targetIndex === -1) {
+      return { canCloseLeft: false, canCloseRight: false, canCloseOthers: false, canCloseAll: false };
+    }
+    const hasOtherTabs = visibleTabs.length > 1;
+    return {
+      canCloseLeft: targetIndex > 0,
+      canCloseRight: targetIndex < visibleTabs.length - 1,
+      canCloseOthers: hasOtherTabs,
+      canCloseAll: visibleTabs.length > 0,
+    };
+  }, [visibleTabs]);
 
   return useMemo(() => ({
     tabs,
@@ -118,12 +149,14 @@ export function usePreviewTabs({
     selectTab,
     closeTab,
     closeTabsByMode,
+    getCloseAvailability,
     setSelectedMarkdownMode,
   }), [
     closeContextMenu,
     closeTab,
     closeTabsByMode,
     contextMenu,
+    getCloseAvailability,
     openTab,
     selectTab,
     selectedMarkdownMode,

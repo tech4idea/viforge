@@ -3,12 +3,15 @@ import { buildModelConfig } from '../runs/langGraphAgents';
 import type { ChatSessionStore } from '../chat/chatSessionStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 
-import type { PendingSessionAction, WechatStore } from './wechatStore';
+import type { WechatStore } from './wechatStore';
+import { assertNever, type PendingSessionAction } from './wechatTypes';
 
 export type SessionRoutingResult =
   | { type: 'continue' }
   | { type: 'pending_confirmation'; replyText: string }
   | { type: 'confirmed'; action: PendingSessionAction; replyText?: string };
+
+type RoutingIntent = 'continue' | 'new_session' | 'switch_session';
 
 export type WechatSessionRouter = {
   routeMessage(input: {
@@ -100,9 +103,17 @@ async function handlePendingResponse(
     return { type: 'continue' };
   }
 
-  const actionDesc = pending.type === 'new_session'
-    ? `新建会话（${pending.projectName}）`
-    : `切换到「${pending.projectName}」`;
+  let actionDesc: string;
+  switch (pending.type) {
+    case 'new_session':
+      actionDesc = `新建会话（${pending.projectName}）`;
+      break;
+    case 'switch_session':
+      actionDesc = `切换到「${pending.projectName}」`;
+      break;
+    default:
+      assertNever(pending);
+  }
 
   return {
     type: 'pending_confirmation',
@@ -180,19 +191,21 @@ async function classifyAndRoute(
   const jsonMatch = classificationText.match(/\{[^}]+\}/);
   if (!jsonMatch) return { type: 'continue' };
 
-  let intent = 'continue';
+  let intent: RoutingIntent = 'continue';
   let target = '';
   try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    intent = parsed.intent ?? 'continue';
-    target = parsed.target ?? '';
+    const parsed = JSON.parse(jsonMatch[0]) as { intent?: unknown; target?: unknown };
+    intent = parseRoutingIntent(parsed.intent);
+    target = typeof parsed.target === 'string' ? parsed.target : '';
   } catch {
     return { type: 'continue' };
   }
 
-  if (intent === 'continue') return { type: 'continue' };
+  switch (intent) {
+  case 'continue':
+    return { type: 'continue' };
 
-  if (intent === 'new_session') {
+  case 'new_session': {
     const projectName = route.projectName ?? '草稿区';
     const projectId = route.projectId;
     const action: PendingSessionAction = {
@@ -208,7 +221,7 @@ async function classifyAndRoute(
     };
   }
 
-  if (intent === 'switch_session') {
+  case 'switch_session': {
     const allSessions = await Promise.all(
       projects.map(async (p) => {
         const sessions = await chatSessionStore.listProjectSessions(p.id, { includeArchived: false });
@@ -310,5 +323,12 @@ async function classifyAndRoute(
     return { type: 'pending_confirmation', replyText: lines.join('\n') };
   }
 
-  return { type: 'continue' };
+  default:
+    assertNever(intent);
+  }
+}
+
+function parseRoutingIntent(value: unknown): RoutingIntent {
+  if (value === 'new_session' || value === 'switch_session') return value;
+  return 'continue';
 }

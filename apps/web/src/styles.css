@@ -2427,7 +2427,7 @@ body.is-resizing-panels .panel-resizer::after {
 
 .sidebar-context-menu {
   position: fixed;
-  z-index: 40;
+  z-index: 300;
   display: grid;
   min-width: 160px;
   max-height: calc(100vh - 16px);

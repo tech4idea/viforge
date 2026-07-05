@@ -46,7 +46,7 @@ import {
 import { ACTIVE_PRODUCT_PROFILE, SELECTABLE_PRODUCT_PROFILES } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { ContextMenu } from './components/ContextMenu';
+import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { EditorHeader } from './components/EditorHeader';
 import { GitSyncPanel } from './components/GitSyncPanel';
 import { HarnessPanel } from './components/HarnessPanel';
@@ -491,11 +491,22 @@ function App() {
     setSelectedProjectPath(path);
   }, []);
 
+  const clearWorkspaceSelection = useCallback((workspaceScope: WorkspaceScope) => {
+    if (workspaceScope === 'global') {
+      setSelectedGlobalPath(null);
+    } else if (workspaceScope === 'temporary') {
+      setSelectedTemporaryPath(null);
+    } else {
+      setSelectedProjectPath(null);
+    }
+  }, []);
+
   const previewTabs = usePreviewTabs({
     activeWorkspaceScope,
     activeProjectWorkspaceId,
     selectedPath,
     selectWorkspacePath,
+    clearWorkspaceSelection,
   });
 
   const selectEntryForPreview = useCallback((workspaceScope: WorkspaceScope, projectId: string | null, entry: WorkspaceEntry) => {
@@ -3947,13 +3958,7 @@ function App() {
           x={previewTabs.contextMenu.x}
           y={previewTabs.contextMenu.y}
           onClose={previewTabs.closeContextMenu}
-          items={[
-            { label: '关闭左侧', onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'left') },
-            { label: '关闭右侧', onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'right') },
-            { label: '关闭其它', onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'others') },
-            { separator: true },
-            { label: '关闭全部', danger: true, onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'all') },
-          ]}
+          items={buildPreviewTabContextMenuItems(previewTabs)}
         />
       ) : null}
       {selectedTextContextMenu ? (
@@ -4028,6 +4033,28 @@ function HarnessStandalonePage(): JSX.Element {
 
 function isSupportedTextFile(path: string): boolean {
   return TEXT_FILE_PATTERN.test(path);
+}
+
+function buildPreviewTabContextMenuItems(previewTabs: ReturnType<typeof usePreviewTabs>): ContextMenuItem[] {
+  const tabId = previewTabs.contextMenu?.tabId;
+  if (!tabId) return [];
+
+  const availability = previewTabs.getCloseAvailability(tabId);
+  const items: ContextMenuItem[] = [];
+  if (availability.canCloseLeft) {
+    items.push({ label: '关闭左侧', onClick: () => previewTabs.closeTabsByMode(tabId, 'left') });
+  }
+  if (availability.canCloseRight) {
+    items.push({ label: '关闭右侧', onClick: () => previewTabs.closeTabsByMode(tabId, 'right') });
+  }
+  if (availability.canCloseOthers) {
+    items.push({ label: '关闭其它', onClick: () => previewTabs.closeTabsByMode(tabId, 'others') });
+  }
+  if (availability.canCloseAll) {
+    if (items.length > 0) items.push({ separator: true });
+    items.push({ label: '关闭全部', danger: true, onClick: () => previewTabs.closeTabsByMode(tabId, 'all') });
+  }
+  return items;
 }
 
 function encodeWorkspacePath(path: string): string {
