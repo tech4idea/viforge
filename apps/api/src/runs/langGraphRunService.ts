@@ -520,13 +520,13 @@ function createScheduledTaskTool({
     inputSchema: z.object({
       title: z.string().min(1).optional().describe('任务标题，简短描述该提醒任务'),
       sourcePrompt: z.string().min(1).describe('用户原始请求或你归纳的创建依据'),
-      nextRunAt: z.string().datetime().describe('下一次执行时间，ISO 8601 格式'),
+      nextRunAt: z.string().datetime().describe('下一次执行时间，ISO 8601 格式，如 2026-07-06T01:00:00.000Z（即北京时间 09:00，注意当前时区为 Asia/Shanghai，UTC 需减 8 小时）'),
       schedule: z.object({
         frequency: z.enum(['once', 'minutes', 'hourly', 'daily', 'weekly']).describe('执行频率'),
         intervalMinutes: z.number().int().min(1).optional().describe('frequency=minutes 时的间隔分钟数'),
-        timeOfDay: z.string().regex(/^\d{2}:\d{2}$/).optional().describe('daily/weekly/hourly 使用的 HH:mm 时间'),
+        timeOfDay: z.string().regex(/^\d{2}:\d{2}$/).optional().describe('daily/weekly/hourly 使用的 HH:mm 时间（本地时区，如 "09:00" 表示上午 9 点）'),
         dayOfWeek: z.number().int().min(0).max(6).optional().describe('frequency=weekly 时使用，0=周日，1=周一'),
-        timezone: z.string().min(1).default('Asia/Shanghai').describe('时区，默认 Asia/Shanghai'),
+        timezone: z.string().min(1).default('Asia/Shanghai').describe('时区，IANA 时区名，默认 Asia/Shanghai；用户说"北京时间/上海时间"时填 Asia/Shanghai，其它地区按实际填写，如 America/New_York'),
       }),
       wechatMessage: z.string().min(1).describe('执行时发送到微信的文本消息'),
     }),
