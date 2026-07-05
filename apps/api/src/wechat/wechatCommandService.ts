@@ -91,7 +91,7 @@ export function createWechatCommandService(
       }
 
       const route = await wechatStore.getRouteState(externalUserId);
-      return await resolveAndCreateRun(wechatStore, workspaceStore, externalUserId, route, text);
+      return await resolveAndCreateRun(wechatStore, workspaceStore, chatSessionStore, externalUserId, route, text);
     },
   };
 }
@@ -99,6 +99,7 @@ export function createWechatCommandService(
 async function resolveAndCreateRun(
   wechatStore: WechatStore,
   workspaceStore: WorkspaceStore,
+  chatSessionStore: ChatSessionStore | undefined,
   externalUserId: string,
   route: WechatRouteState,
   text: string,
@@ -140,11 +141,35 @@ async function resolveAndCreateRun(
     await wechatStore.setRouteState(externalUserId, newRoute);
   }
 
+  const sessionId = chatSessionStore
+    ? await resolveActiveSessionId(wechatStore, chatSessionStore, externalUserId, projectId, text)
+    : undefined;
+
   return {
     type: 'create_run',
-    input: { projectId, prompt: text, source: 'wechat' },
+    input: { projectId, sessionId, prompt: text, source: 'wechat' },
     replyText: `📝 在「${projectName}」中处理你的请求...`,
   };
+}
+
+async function resolveActiveSessionId(
+  wechatStore: WechatStore,
+  chatSessionStore: ChatSessionStore,
+  externalUserId: string,
+  projectId: string,
+  text: string,
+): Promise<string> {
+  const activeId = await wechatStore.getActiveChatSessionId(externalUserId);
+  if (activeId) {
+    const active = await chatSessionStore.getSession(activeId);
+    if (active?.projectId === projectId && !active.archivedAt) return active.id;
+  }
+
+  const session = await chatSessionStore.createSession(projectId, {
+    title: text.slice(0, 40) || '微信创作请求',
+  });
+  await wechatStore.setActiveChatSessionId(externalUserId, session.id);
+  return session.id;
 }
 
 async function handleProjectCommand(

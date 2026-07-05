@@ -352,6 +352,89 @@ describe('langgraph run service', () => {
     expect(browserToolResult).toEqual({ stdout: { url: 'example.com', title: 'Example' } });
   });
 
+  it('exposes scheduled task creation as a system agent tool', async () => {
+    const project = await store.createProject({ name: 'Schedule Tool' });
+    const createdTasks: unknown[] = [];
+    let scheduleTool: { execute?: (input: Record<string, unknown>, options: never) => Promise<unknown> } | null = null;
+
+    const scheduleService = {
+      async createTask(input: unknown) {
+        createdTasks.push(input);
+        return {
+          task: { id: 'schedule-test' },
+          reply: '已创建定时任务。',
+        };
+      },
+      async executeTask() { return undefined; },
+      async pauseTask() { return undefined; },
+      async resumeTask() { return undefined; },
+      async runDueNow() {},
+      start() {},
+      stop() {},
+    } as never;
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      scheduleService,
+      async createAgentRegistry(tools) {
+        return {
+          brainstorm: null,
+          character: null,
+          continuity: null,
+          story: null,
+          sourceAnalyst: null,
+          adaptationPlanner: null,
+          screenwriter: null,
+          reviewer: null,
+          outline: null,
+          knowledgeSearch: null,
+          knowledgeOrganizer: null,
+          async systemAgent(_instructions, toolsOverride) {
+            scheduleTool = (toolsOverride ?? tools).create_scheduled_task as typeof scheduleTool;
+            return {
+              id: 'viwork-system-agent',
+              async stream() {
+                const result = await scheduleTool?.execute?.({
+                  title: '每日检查大纲',
+                  sourcePrompt: '每天上午9点微信提醒我检查故事大纲',
+                  nextRunAt: '2026-07-06T01:00:00.000Z',
+                  schedule: { frequency: 'daily', timeOfDay: '09:00', timezone: 'Asia/Shanghai' },
+                  wechatMessage: '检查故事大纲',
+                }, {} as never);
+                return {
+                  fullStream: asyncGenerator([
+                    { type: 'tool-call', payload: { toolCallId: 'tool_schedule', toolName: 'create_scheduled_task', args: { title: '每日检查大纲' } } },
+                    { type: 'tool-result', payload: { toolCallId: 'tool_schedule', toolName: 'create_scheduled_task', result } },
+                    { type: 'text-delta', payload: { text: '已创建定时任务。' } },
+                  ]),
+                };
+              },
+              async generate() {
+                return { text: '已创建定时任务。' };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-schedule',
+      prompt: '每天上午9点微信提醒我检查故事大纲',
+    });
+
+    const events = await collectUntilEnd(bus, run.id);
+
+    expect(scheduleTool).toBeTruthy();
+    expect(createdTasks).toEqual([expect.objectContaining({
+      projectId: project.id,
+      sessionId: 'session-schedule',
+      title: '每日检查大纲',
+      action: { type: 'wechat_message', message: '检查故事大纲' },
+    })]);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'tool_use.start', toolName: 'create_scheduled_task' }),
+    ]));
+  });
+
   it('stores working and semantic project memory through LangGraph Store tools', async () => {
     const project = await store.createProject({ name: 'Memory Tools' });
     const events: StreamEvent[] = [];

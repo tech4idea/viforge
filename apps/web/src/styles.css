@@ -1191,7 +1191,7 @@ body.is-resizing-panels .panel-resizer::after {
 }
 
 .chat-panel__header:hover {
-  max-height: 200px;
+  max-height: 280px;
 }
 
 .chat-panel__mini-bar {
@@ -1486,6 +1486,145 @@ body.is-resizing-panels .panel-resizer::after {
   align-items: center;
   flex: 0 0 auto;
   gap: 6px;
+}
+
+.scheduled-task-board {
+  flex: 0 0 auto;
+  position: relative;
+  min-width: 92px;
+}
+
+.scheduled-task-board summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.scheduled-task-board summary::-webkit-details-marker { display: none; }
+
+.scheduled-task-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.62rem;
+}
+
+.scheduled-task-board__body {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  z-index: 20;
+  width: min(320px, calc(100vw - 40px));
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+}
+
+.scheduled-task-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.scheduled-task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.scheduled-task-card + .scheduled-task-card { margin-top: 6px; }
+.scheduled-task-card.error { border-color: var(--danger); }
+.scheduled-task-card.paused, .scheduled-task-card.cancelled, .scheduled-task-card.completed { opacity: 0.74; }
+
+.scheduled-task-card__main {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.scheduled-task-title,
+.scheduled-task-message,
+.scheduled-task-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-task-title {
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.scheduled-task-meta {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+}
+
+.scheduled-task-message {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.scheduled-task-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scheduled-task-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  color: var(--text-muted);
+}
+
+.scheduled-task-icon:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-color-strong);
+}
+
+.scheduled-task-icon.danger:hover:not(:disabled) {
+  color: var(--danger-text);
+  border-color: var(--danger);
+}
+
+.scheduled-task-icon:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.scheduled-task-empty {
+  margin: 0;
+  padding: 10px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
 }
 
 .chat-context-compact button {

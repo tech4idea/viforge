@@ -16,6 +16,7 @@ import type { GitConfigStore } from '../storage/gitConfigStore';
 import { createPlaywriterService, type PlaywriterService } from '../browser/playwriterService';
 import type { EvalRunExecutorInput, EvalRunExecutorResult, HarnessStore } from '../harness/harnessStore';
 import { isPhoenixTracingEnabled, withPhoenixSpan } from '../observability/phoenix';
+import type { ScheduleService } from '../schedules/scheduleService';
 
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
@@ -41,6 +42,7 @@ type LangGraphRunOptions = {
   gitConfigStore?: GitConfigStore;
   browserService?: PlaywriterService;
   harnessStore?: HarnessStore;
+  scheduleService?: ScheduleService;
 };
 
 type ToolState = {
@@ -271,6 +273,9 @@ async function executeLangGraphRun({
       gitConfigStore: options.gitConfigStore,
       browserService: options.browserService ?? createPlaywriterService(),
     });
+    const runTools = input.sessionId && options.scheduleService
+      ? { ...tools, create_scheduled_task: createScheduledTaskTool({ scheduleService: options.scheduleService, projectId: input.projectId, sessionId: input.sessionId }) }
+      : tools;
     // Create agent registry from skills
     const registryOptions = {
       ...options,
@@ -279,10 +284,10 @@ async function executeLangGraphRun({
       productProfile,
     };
     const registry = options.createAgentRegistry
-      ? await options.createAgentRegistry(tools, registryOptions)
+      ? await options.createAgentRegistry(runTools, registryOptions)
       : options.createAgent
         ? null
-        : await createAgentRegistry(store, registryOptions, tools);
+        : await createAgentRegistry(store, registryOptions, runTools);
 
     // Build the combined prompt with references.
     const prompt = buildLangGraphPrompt(input, productProfile);
@@ -293,8 +298,8 @@ async function executeLangGraphRun({
       // Backward compat: single agent mode
       const instructions = buildSystemInstructions(productProfile);
       const singleAgentTools = registry
-        ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input, productId: productProfile.id }) }
-        : tools;
+        ? { ...runTools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input, productId: productProfile.id }) }
+        : runTools;
       const agent = options.createAgent({ instructions, tools: singleAgentTools });
 
       appendJsonLog('api-runs.jsonl', {
@@ -405,8 +410,12 @@ async function executeMultiAgentWorkflow({
     gitConfigStore: options.gitConfigStore,
     browserService: options.browserService ?? createPlaywriterService(),
   });
+  const scheduleTools: LangGraphToolset = input.sessionId && options.scheduleService
+    ? { create_scheduled_task: createScheduledTaskTool({ scheduleService: options.scheduleService, projectId: input.projectId, sessionId: input.sessionId }) } as LangGraphToolset
+    : {} as LangGraphToolset;
   const orchestrationTools: LangGraphToolset = {
     ...baseTools,
+    ...scheduleTools,
     delegate_to_specialist_agent: createSpecialistDelegationTool({
       registry,
       publish,
@@ -488,6 +497,51 @@ function createSpecialistDelegationTool({
       input,
       productId,
     }),
+  });
+}
+
+function createScheduledTaskTool({
+  scheduleService,
+  projectId,
+  sessionId,
+}: {
+  scheduleService: ScheduleService;
+  projectId: string;
+  sessionId: string;
+}) {
+  return createTool({
+    id: 'create_scheduled_task',
+    description: [
+      '创建绑定当前会话的定时任务。',
+      '仅当用户明确要求在未来某个时间、周期性、每天、每周、每隔一段时间执行提醒或通知时调用。',
+      '当前 MVP 支持向已绑定微信发送一条文本消息。不要用关键词猜测；先理解用户意图，再把时间、频率和消息结构化传入。',
+      '如果用户没有给出可执行时间或要发送的消息内容，先追问，不要创建任务。',
+    ].join('\n'),
+    inputSchema: z.object({
+      title: z.string().min(1).optional().describe('任务标题，简短描述该提醒任务'),
+      sourcePrompt: z.string().min(1).describe('用户原始请求或你归纳的创建依据'),
+      nextRunAt: z.string().datetime().describe('下一次执行时间，ISO 8601 格式'),
+      schedule: z.object({
+        frequency: z.enum(['once', 'minutes', 'hourly', 'daily', 'weekly']).describe('执行频率'),
+        intervalMinutes: z.number().int().min(1).optional().describe('frequency=minutes 时的间隔分钟数'),
+        timeOfDay: z.string().regex(/^\d{2}:\d{2}$/).optional().describe('daily/weekly/hourly 使用的 HH:mm 时间'),
+        dayOfWeek: z.number().int().min(0).max(6).optional().describe('frequency=weekly 时使用，0=周日，1=周一'),
+        timezone: z.string().min(1).default('Asia/Shanghai').describe('时区，默认 Asia/Shanghai'),
+      }),
+      wechatMessage: z.string().min(1).describe('执行时发送到微信的文本消息'),
+    }),
+    execute: async ({ title, sourcePrompt, nextRunAt, schedule, wechatMessage }) => {
+      const result = await scheduleService.createTask({
+        projectId,
+        sessionId,
+        title,
+        sourcePrompt,
+        schedule,
+        action: { type: 'wechat_message', message: wechatMessage },
+        nextRunAt,
+      });
+      return result;
+    },
   });
 }
 
@@ -1014,6 +1068,9 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '当用户明确要求生成、绘制、出图、生成角色图/场景图/剧照/分镜图/海报时，使用 generate_project_image 工具生成图片并保存到项目工作区。',
     '调用 generate_project_image 时只填写 prompt、aspectRatio、count；不要尝试填写或猜测模型名，图片模型由系统配置自动注入。',
     '如果用户只是要人物视觉描述、绘图提示词或图片生成建议，不要调用 generate_project_image，直接输出文本。',
+    '当用户明确要求创建定时任务、提醒、每天/每周/每隔一段时间向微信发送消息时，使用 create_scheduled_task 工具创建绑定当前会话的任务。',
+    '调用 create_scheduled_task 前必须确认有明确的 nextRunAt、频率和微信消息内容；缺少时间或消息内容时先追问。',
+    '创建定时任务后，用简短文字告诉用户任务标题、下次执行时间和微信消息内容。',
     '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点或整理在线资料时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
     '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
     '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',

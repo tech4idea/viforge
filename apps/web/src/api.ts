@@ -25,6 +25,7 @@ import type {
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
+  ScheduledTask,
   ProductProfile,
   Project,
   ProjectGitConfig,
@@ -62,6 +63,7 @@ export type {
   ChatMessage,
   ChatMessageAttachment,
   ChatSession,
+  ScheduledTask,
   GeminiImageAspectRatio,
   GeminiImageModel,
   GeminiImageThinkingLevel,
@@ -131,6 +133,11 @@ export type ApiClient = {
   updateChatMessage(sessionId: string, messageId: string, message: ChatMessage): Promise<ChatSession>;
   listAigcHubModels(): Promise<AigcHubModelListResponse>;
   createImageGeneration(input: ImageGenerationRequest): Promise<ImageGenerationResponse>;
+  listSessionScheduledTasks(sessionId: string): Promise<ScheduledTask[]>;
+  runScheduledTaskNow(taskId: string): Promise<ScheduledTask>;
+  pauseScheduledTask(taskId: string): Promise<ScheduledTask>;
+  resumeScheduledTask(taskId: string): Promise<ScheduledTask>;
+  deleteScheduledTask(taskId: string): Promise<{ deleted: true }>;
   createRun(input: CreateRunInput): Promise<CreateRunResponse>;
   cancelRun(runId: string): Promise<void>;
   streamRunEvents(runId: string, handlers: StreamRunHandlers): () => void;
@@ -483,6 +490,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    listSessionScheduledTasks: (sessionId) =>
+      request<ScheduledTask[]>(fetcher, baseUrl, `/api/chat-sessions/${encodePathSegment(sessionId)}/schedules`),
+    runScheduledTaskNow: (taskId) =>
+      request<ScheduledTask>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/run-now`, { method: 'POST' }),
+    pauseScheduledTask: (taskId) =>
+      request<ScheduledTask>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/cancel`, { method: 'POST' }),
+    resumeScheduledTask: (taskId) =>
+      request<ScheduledTask>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/resume`, { method: 'POST' }),
+    deleteScheduledTask: (taskId) =>
+      request<{ deleted: true }>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}`, { method: 'DELETE' }),
     createRun: (input) =>
       request<CreateRunResponse>(fetcher, baseUrl, '/api/runs', {
         method: 'POST',

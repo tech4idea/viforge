@@ -106,6 +106,37 @@ export type ChatSession = {
   messages: ChatMessage[];
 };
 
+export type ScheduledTaskStatus = 'active' | 'paused' | 'completed' | 'cancelled' | 'error';
+
+export type ScheduledTaskFrequency = 'once' | 'minutes' | 'hourly' | 'daily' | 'weekly';
+
+export type ScheduledTaskAction = {
+  type: 'wechat_message';
+  message: string;
+};
+
+export type ScheduledTask = {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  title: string;
+  sourcePrompt: string;
+  status: ScheduledTaskStatus;
+  schedule: {
+    frequency: ScheduledTaskFrequency;
+    intervalMinutes?: number;
+    timeOfDay?: string;
+    dayOfWeek?: number;
+    timezone: string;
+  };
+  action: ScheduledTaskAction;
+  nextRunAt: string;
+  lastRunAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type GeminiImageModel = 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview';
 
 export type GeminiImageAspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';

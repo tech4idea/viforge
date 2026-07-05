@@ -28,6 +28,7 @@ import {
   type ReferencedChatSnippet,
   type ReferencedFile,
   type RunEvent,
+  type ScheduledTask,
   type StreamEvent,
   type WechatSetupSession,
   type WechatStatus,
@@ -336,6 +337,9 @@ function App() {
   const [imageReferenceDrafts, setImageReferenceDrafts] = useState<ImageReferenceDraft[]>([]);
   const [chatSessions, setChatSessionsState] = useState<ChatSession[]>([]);
   const chatSessionsRef = useRef<ChatSession[]>([]);
+  const [scheduledTasksBySession, setScheduledTasksBySession] = useState<Record<string, ScheduledTask[]>>({});
+  const [scheduledTaskState, setScheduledTaskState] = useState<LoadState>('idle');
+  const [scheduledTaskBusyId, setScheduledTaskBusyId] = useState<string | null>(null);
   const [chatScope, setChatScope] = useState<ChatScope>(initState.chatScope);
   const [chatSessionsProjectId, setChatSessionsProjectId] = useState<string | null>(null);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(initState.activeChatSessionId);
@@ -714,6 +718,14 @@ function App() {
   useEffect(() => {
     writeStoredRunNotifyMode(runNotifyMode);
   }, [runNotifyMode]);
+
+  useEffect(() => {
+    if (!activeChatSession || getSessionKind(activeChatSession) !== 'assistant') {
+      setScheduledTaskState('idle');
+      return;
+    }
+    void loadScheduledTasks(activeChatSession.id);
+  }, [activeChatSession?.id]);
 
   useEffect(() => {
     writeStoredThemeMode(themeMode);
@@ -1853,6 +1865,73 @@ function App() {
           referencedSnippets: attachedSnippets,
         }),
       );
+    }
+  }
+
+  async function loadScheduledTasks(sessionId: string) {
+    setScheduledTaskState('loading');
+    try {
+      const tasks = await apiClient.listSessionScheduledTasks(sessionId);
+      setScheduledTasksBySession((current) => ({ ...current, [sessionId]: tasks }));
+      setScheduledTaskState('idle');
+    } catch (error) {
+      setScheduledTaskState('error');
+      setRunError(errorToMessage(error));
+    }
+  }
+
+  async function runScheduledTaskNow(taskId: string) {
+    if (!activeChatSession) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.runScheduledTaskNow(taskId);
+      await loadScheduledTasks(activeChatSession.id);
+      showToast('定时任务已立即执行', 'success');
+    } catch (error) {
+      showToast(`立即执行失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
+  async function pauseScheduledTask(taskId: string) {
+    if (!activeChatSession) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.pauseScheduledTask(taskId);
+      await loadScheduledTasks(activeChatSession.id);
+    } catch (error) {
+      showToast(`停止任务失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
+  async function resumeScheduledTask(taskId: string) {
+    if (!activeChatSession) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.resumeScheduledTask(taskId);
+      await loadScheduledTasks(activeChatSession.id);
+    } catch (error) {
+      showToast(`恢复任务失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
+  async function deleteScheduledTask(taskId: string) {
+    if (!activeChatSession) return;
+    const confirmed = await showConfirm({ title: '删除定时任务', message: '删除后无法恢复。', danger: true, confirmLabel: '删除' });
+    if (!confirmed) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.deleteScheduledTask(taskId);
+      await loadScheduledTasks(activeChatSession.id);
+    } catch (error) {
+      showToast(`删除任务失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
     }
   }
 
@@ -3593,6 +3672,18 @@ function App() {
                   <span className="chat-session-empty">{chatSessionView === 'archived' ? '暂无归档会话' : '暂无最近会话'}</span>
                 ) : null}
               </section>
+              {activeChatSession ? (
+                <ScheduledTaskBoard
+                  tasks={scheduledTasksBySession[activeChatSession.id] ?? []}
+                  state={scheduledTaskState}
+                  busyTaskId={scheduledTaskBusyId}
+                  onRefresh={() => void loadScheduledTasks(activeChatSession.id)}
+                  onRunNow={(taskId) => void runScheduledTaskNow(taskId)}
+                  onPause={(taskId) => void pauseScheduledTask(taskId)}
+                  onResume={(taskId) => void resumeScheduledTask(taskId)}
+                  onDelete={(taskId) => void deleteScheduledTask(taskId)}
+                />
+              ) : null}
               <div className="chat-context-compact">
                 {chatMode === 'assistant' && selectedProjectId ? (
                   <button
@@ -4975,6 +5066,91 @@ const WechatPanelBody = memo(function WechatPanelBody({
     </>
   );
 });
+
+const ScheduledTaskBoard = memo(function ScheduledTaskBoard({
+  tasks,
+  state,
+  busyTaskId,
+  onRefresh,
+  onRunNow,
+  onPause,
+  onResume,
+  onDelete,
+}: {
+  tasks: ScheduledTask[];
+  state: LoadState;
+  busyTaskId: string | null;
+  onRefresh: () => void;
+  onRunNow: (taskId: string) => void;
+  onPause: (taskId: string) => void;
+  onResume: (taskId: string) => void;
+  onDelete: (taskId: string) => void;
+}): JSX.Element {
+  return (
+    <details className="scheduled-task-board">
+      <summary>
+        <span>定时任务</span>
+        <span className="scheduled-task-count">{state === 'loading' ? '...' : tasks.length}</span>
+      </summary>
+      <div className="scheduled-task-board__body">
+        <div className="scheduled-task-toolbar">
+          <button type="button" className="scheduled-task-icon" onClick={onRefresh} title="刷新" aria-label="刷新定时任务">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+        {tasks.length > 0 ? tasks.map((task) => {
+          const busy = busyTaskId === task.id;
+          const paused = task.status === 'paused' || task.status === 'cancelled';
+          return (
+            <article key={task.id} className={`scheduled-task-card ${task.status}`}>
+              <div className="scheduled-task-card__main">
+                <span className="scheduled-task-title" title={task.title}>{task.title}</span>
+                <span className="scheduled-task-meta">{scheduledTaskStatusLabel(task.status)} · {formatScheduleNextRun(task)}</span>
+                <span className="scheduled-task-message" title={task.action.message}>{task.action.message}</span>
+              </div>
+              <div className="scheduled-task-actions">
+                <button type="button" className="scheduled-task-icon" disabled={busy} onClick={() => onRunNow(task.id)} title="立即执行" aria-label="立即执行定时任务">
+                  <Send size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="scheduled-task-icon"
+                  disabled={busy || task.status === 'completed'}
+                  onClick={() => paused ? onResume(task.id) : onPause(task.id)}
+                  title={paused ? '恢复' : '停止'}
+                  aria-label={paused ? '恢复定时任务' : '停止定时任务'}
+                >
+                  {paused ? <RefreshCw size={13} /> : <Square size={13} />}
+                </button>
+                <button type="button" className="scheduled-task-icon danger" disabled={busy} onClick={() => onDelete(task.id)} title="删除" aria-label="删除定时任务">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </article>
+          );
+        }) : (
+          <p className="scheduled-task-empty">当前会话暂无定时任务</p>
+        )}
+      </div>
+    </details>
+  );
+});
+
+function scheduledTaskStatusLabel(status: ScheduledTask['status']): string {
+  switch (status) {
+    case 'active': return '运行中';
+    case 'paused': return '已停止';
+    case 'completed': return '已完成';
+    case 'cancelled': return '已取消';
+    case 'error': return '异常';
+    default: return status satisfies never;
+  }
+}
+
+function formatScheduleNextRun(task: ScheduledTask): string {
+  if (task.status === 'completed') return task.lastRunAt ? `完成于 ${formatChatTime(task.lastRunAt)}` : '已完成';
+  return `下次 ${formatChatTime(task.nextRunAt)}`;
+}
 
 function Root(): JSX.Element {
   return isHarnessStandaloneRoute() ? <HarnessStandalonePage /> : <App />;
