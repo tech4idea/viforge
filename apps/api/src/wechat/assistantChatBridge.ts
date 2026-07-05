@@ -30,12 +30,14 @@ export function createAssistantChatBridge(
 
       // 1. Find or create a chat session
       let sessionId = await wechatStore.getActiveChatSessionId(externalUserId);
+      let usingExistingSession = Boolean(sessionId);
 
       if (sessionId) {
         try {
           await chatSessionStore.getSession(sessionId);
         } catch {
           sessionId = null;
+          usingExistingSession = false;
         }
       }
 
@@ -49,8 +51,7 @@ export function createAssistantChatBridge(
 
       const session = await chatSessionStore.getSession(sessionId);
       const modelConfig = session?.modelConfig ?? {};
-      // WeChat should not inherit a web-selected session model: some upstream models reject the agent runtime's planning/tool features.
-      const runModel = resolveWechatChatModel(runInput.model);
+      const runModel = resolveWechatChatModel({ runInputModel: runInput.model, sessionModel: usingExistingSession ? modelConfig.chatModel : undefined });
       const runImageGeneration = {
         model: runInput.imageGeneration?.model ?? modelConfig.imageModel,
       };
@@ -190,9 +191,10 @@ export function createAssistantChatBridge(
   };
 }
 
-function resolveWechatChatModel(runInputModel?: string): string | undefined {
+function resolveWechatChatModel(input: { runInputModel?: string; sessionModel?: string }): string | undefined {
+  if (input.sessionModel) return input.sessionModel;
   return process.env.VIWORK_WECHAT_CHAT_MODEL
     || process.env.VIWORK_AIGC_HUB_WECHAT_MODEL
-    || runInputModel
+    || input.runInputModel
     || 'minimax/minimax-m2.7';
 }

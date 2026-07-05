@@ -8,7 +8,7 @@ import type { PendingSessionAction, WechatStore } from './wechatStore';
 export type SessionRoutingResult =
   | { type: 'continue' }
   | { type: 'pending_confirmation'; replyText: string }
-  | { type: 'confirmed'; action: PendingSessionAction };
+  | { type: 'confirmed'; action: PendingSessionAction; replyText?: string };
 
 export type WechatSessionRouter = {
   routeMessage(input: {
@@ -20,6 +20,7 @@ export type WechatSessionRouter = {
 
 const CONFIRM_RE = /^(好[的吧]?|确认|确定|可以|没问题|对|是的|行|ok|yes|y)$/i;
 const CANCEL_RE = /^(不[用了行好]?|取消|算了|不用了|返回|留在当前|继续当前|no|n)$/i;
+const NEW_SESSION_RE = /^新建$/;
 
 export function createWechatSessionRouter(
   wechatStore: WechatStore,
@@ -54,6 +55,40 @@ async function handlePendingResponse(
   pending: PendingSessionAction,
 ): Promise<SessionRoutingResult> {
   const trimmed = text.trim();
+
+  const selectedIndex = Number(trimmed);
+  if (pending.type === 'switch_session' && Number.isInteger(selectedIndex) && pending.sessionOptions?.length) {
+    const option = pending.sessionOptions.find((item) => item.index === selectedIndex);
+    if (option) {
+      await wechatStore.setPendingSessionAction(externalUserId, null);
+      return {
+        type: 'confirmed',
+        replyText: `已切换到「${option.projectName}」下的会话「${option.sessionTitle}」。`,
+        action: {
+          type: 'switch_session',
+          projectName: option.projectName,
+          projectId: option.projectId,
+          sessionId: option.sessionId,
+          sessionTitle: option.sessionTitle,
+          originalPrompt: '',
+        },
+      };
+    }
+  }
+
+  if (NEW_SESSION_RE.test(trimmed)) {
+    await wechatStore.setPendingSessionAction(externalUserId, null);
+    return {
+      type: 'confirmed',
+      replyText: `已准备在「${pending.projectName}」下新建会话。`,
+      action: {
+        type: 'new_session',
+        projectName: pending.projectName,
+        projectId: pending.projectId,
+        originalPrompt: '',
+      },
+    };
+  }
 
   if (CONFIRM_RE.test(trimmed)) {
     await wechatStore.setPendingSessionAction(externalUserId, null);
@@ -241,6 +276,7 @@ async function classifyAndRoute(
     }
 
     const lines: string[] = ['可选项目和会话：', ''];
+    const sessionOptions: NonNullable<Extract<PendingSessionAction, { type: 'switch_session' }>['sessionOptions']> = [];
     let idx = 1;
     for (const entry of allSessions) {
       lines.push(`【${entry.project.name}】`);
@@ -251,12 +287,26 @@ async function classifyAndRoute(
           const title = s.title ?? '未命名会话';
           const msgCount = s.messages.length ?? 0;
           lines.push(`  ${idx}. ${title}（${msgCount} 条）`);
+          sessionOptions.push({
+            index: idx,
+            projectId: entry.project.id,
+            projectName: entry.project.name,
+            sessionId: s.id,
+            sessionTitle: title,
+          });
           idx++;
         }
       }
       lines.push('');
     }
     lines.push('回复项目名称或会话序号切换，回复「新建」创建新会话。');
+    await wechatStore.setPendingSessionAction(externalUserId, {
+      type: 'switch_session',
+      projectName: route.projectName ?? '当前项目',
+      projectId: route.projectId ?? projects[0]?.id ?? '',
+      originalPrompt: text,
+      sessionOptions,
+    });
     return { type: 'pending_confirmation', replyText: lines.join('\n') };
   }
 

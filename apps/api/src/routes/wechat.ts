@@ -178,7 +178,10 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
             projectName: routing.action.projectName,
             lastCommandAt: new Date().toISOString(),
           });
-          await wechatStore.setActiveChatSessionId(externalUserId, null);
+          await wechatStore.setActiveChatSessionId(externalUserId, routing.action.sessionId ?? null);
+        }
+        if (!routing.action.originalPrompt.trim()) {
+          return context.json({ accepted: true, reply: routing.replyText ?? null, notePath: null }, 202);
         }
         text = routing.action.originalPrompt;
       }

@@ -18,7 +18,23 @@ export type WechatRouteState = {
 
 export type PendingSessionAction =
   | { type: 'new_session'; projectName: string; projectId: string | null; originalPrompt: string }
-  | { type: 'switch_session'; projectName: string; projectId: string; originalPrompt: string };
+  | {
+    type: 'switch_session';
+    projectName: string;
+    projectId: string;
+    originalPrompt: string;
+    sessionId?: string;
+    sessionTitle?: string;
+    sessionOptions?: PendingSessionOption[];
+  };
+
+export type PendingSessionOption = {
+  index: number;
+  projectId: string;
+  projectName: string;
+  sessionId: string;
+  sessionTitle: string;
+};
 
 export type WechatUserState = {
   route: WechatRouteState;

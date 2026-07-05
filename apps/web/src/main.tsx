@@ -46,6 +46,8 @@ import {
 import { ACTIVE_PRODUCT_PROFILE, SELECTABLE_PRODUCT_PROFILES } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { ContextMenu } from './components/ContextMenu';
+import { EditorHeader } from './components/EditorHeader';
 import { GitSyncPanel } from './components/GitSyncPanel';
 import { HarnessPanel } from './components/HarnessPanel';
 import {
@@ -78,6 +80,7 @@ import {
   Upload,
   X,
 } from './components/icons';
+import { usePreviewTabs } from './usePreviewTabs';
 import './styles.css';
 
 const DEFAULT_PROJECT_NAME = ACTIVE_PRODUCT_PROFILE.defaultProjectName;
@@ -218,21 +221,6 @@ type ChatSessionContextMenu = {
   title?: string;
 };
 
-type PreviewTabContextMenu = {
-  x: number;
-  y: number;
-  tabId: string;
-};
-
-type PreviewTab = {
-  id: string;
-  workspaceScope: WorkspaceScope;
-  projectId: string | null;
-  path: string;
-};
-
-type MarkdownMode = 'edit' | 'preview';
-
 type SelectedTextContextMenu = {
   x: number;
   y: number;
@@ -325,8 +313,6 @@ function App() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
-  const [markdownModesByPath, setMarkdownModesByPath] = useState<Record<string, MarkdownMode>>({});
 
   const [prompt, setPrompt] = useState('');
   const [runState, setRunState] = useState<RunState>('idle');
@@ -434,7 +420,6 @@ function App() {
   const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | null>(null);
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
-  const [previewTabContextMenu, setPreviewTabContextMenu] = useState<PreviewTabContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
   const [createEntryDraft, setCreateEntryDraft] = useState<CreateEntryDraft | null>(null);
   const [renameEntryDraft, setRenameEntryDraft] = useState<RenameEntryDraft | null>(null);
@@ -491,12 +476,6 @@ function App() {
         : ''
     : '';
   const hasUnsavedChanges = isTextFile && fileContent !== lastSavedContent;
-  const selectedTabId = selectedPath ? previewTabId(activeWorkspaceScope, activeProjectWorkspaceId, selectedPath) : null;
-  const selectedMarkdownMode = selectedPath ? markdownModesByPath[selectedTabId ?? selectedPath] ?? 'edit' : 'edit';
-  const visiblePreviewTabs = useMemo(
-    () => previewTabs.filter((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId),
-    [activeProjectWorkspaceId, activeWorkspaceScope, previewTabs],
-  );
   const selectWorkspacePath = useCallback((workspaceScope: WorkspaceScope, projectId: string | null, path: string) => {
     setActiveWorkspaceScope(workspaceScope);
     if (workspaceScope === 'global') {
@@ -512,60 +491,20 @@ function App() {
     setSelectedProjectPath(path);
   }, []);
 
+  const previewTabs = usePreviewTabs({
+    activeWorkspaceScope,
+    activeProjectWorkspaceId,
+    selectedPath,
+    selectWorkspacePath,
+  });
+
   const selectEntryForPreview = useCallback((workspaceScope: WorkspaceScope, projectId: string | null, entry: WorkspaceEntry) => {
     selectWorkspacePath(workspaceScope, projectId, entry.path);
     if (entry.type === 'file') {
       setEditorPanelOpen(true);
-      const tab: PreviewTab = {
-        id: previewTabId(workspaceScope, projectId, entry.path),
-        workspaceScope,
-        projectId,
-        path: entry.path,
-      };
-      setPreviewTabs((current) => [tab, ...current.filter((item) => item.id !== tab.id)].slice(0, 12));
+      previewTabs.openTab(workspaceScope, projectId, entry.path);
     }
-  }, [selectWorkspacePath]);
-
-  const closePreviewTab = useCallback((tabId: string) => {
-    setPreviewTabs((current) => {
-      const index = current.findIndex((tab) => tab.id === tabId);
-      const next = current.filter((tab) => tab.id !== tabId);
-      if (selectedTabId === tabId) {
-        const fallback = next[Math.max(0, index - 1)] ?? next[0] ?? null;
-        if (fallback) {
-          selectWorkspacePath(fallback.workspaceScope, fallback.projectId, fallback.path);
-        }
-      }
-      return next;
-    });
-  }, [selectWorkspacePath, selectedTabId]);
-
-  const closePreviewTabsByMode = useCallback((tabId: string, mode: 'left' | 'right' | 'others' | 'all') => {
-    setPreviewTabs((current) => {
-      const scopedTabs = current.filter((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId);
-      const targetIndex = scopedTabs.findIndex((tab) => tab.id === tabId);
-      if (targetIndex === -1) return current;
-
-      const scopedIdsToClose = new Set(scopedTabs
-        .filter((tab, index) => {
-          if (mode === 'left') return index < targetIndex;
-          if (mode === 'right') return index > targetIndex;
-          if (mode === 'others') return tab.id !== tabId;
-          return true;
-        })
-        .map((tab) => tab.id));
-      const next = current.filter((tab) => !scopedIdsToClose.has(tab.id));
-
-      if (selectedTabId && scopedIdsToClose.has(selectedTabId)) {
-        const fallback = next.find((tab) => tab.id === tabId) ?? next.find((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId) ?? null;
-        if (fallback) {
-          selectWorkspacePath(fallback.workspaceScope, fallback.projectId, fallback.path);
-        }
-      }
-
-      return next;
-    });
-  }, [activeProjectWorkspaceId, activeWorkspaceScope, selectWorkspacePath, selectedTabId]);
+  }, [previewTabs, selectWorkspacePath]);
 
   const navigateToMarkdownReference = useCallback((path: string) => {
     const targetEntry = activeEntries.find((entry) => entry.type === 'file' && entry.path === path);
@@ -633,7 +572,7 @@ function App() {
     event.stopPropagation();
     setSidebarContextMenu(null);
     setChatSessionContextMenu(null);
-    setPreviewTabContextMenu(null);
+    previewTabs.closeContextMenu();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
     setSelectedTextContextMenu({
@@ -646,15 +585,15 @@ function App() {
       label: `${message.role === 'user' ? '你' : '创作助手'}片段`,
       createdAt: message.createdAt,
     });
-  }, []);
+  }, [previewTabs]);
 
   useEffect(() => {
-    if (!selectedPath || !selectedTabId) return;
-    const selectedTabIsVisible = visiblePreviewTabs.some((tab) => tab.id === selectedTabId);
+    if (!selectedPath || !previewTabs.selectedTabId) return;
+    const selectedTabIsVisible = previewTabs.visibleTabs.some((tab) => tab.id === previewTabs.selectedTabId);
     if (!selectedTabIsVisible) return;
     const selectedEntryStillExists = activeEntries.some((entry) => entry.type === 'file' && entry.path === selectedPath);
     if (selectedEntryStillExists) return;
-    const fallback = visiblePreviewTabs.find((tab) => tab.id !== selectedTabId) ?? null;
+    const fallback = previewTabs.visibleTabs.find((tab) => tab.id !== previewTabs.selectedTabId) ?? null;
     if (fallback) {
       selectWorkspacePath(fallback.workspaceScope, fallback.projectId, fallback.path);
       return;
@@ -666,7 +605,7 @@ function App() {
     } else {
       setSelectedProjectPath(null);
     }
-  }, [activeEntries, activeWorkspaceScope, selectWorkspacePath, selectedPath, selectedTabId, visiblePreviewTabs]);
+  }, [activeEntries, activeWorkspaceScope, previewTabs.selectedTabId, previewTabs.visibleTabs, selectWorkspacePath, selectedPath]);
 
   const openAttachmentFnRef = useRef<(attachment: ChatMessageAttachment) => void>(() => {});
   openAttachmentFnRef.current = (attachment: ChatMessageAttachment) => {
@@ -996,14 +935,8 @@ function App() {
 
   useEffect(() => {
     if (!selectedEntry || selectedEntry.type !== 'file' || !selectedPath) return;
-    const tab: PreviewTab = {
-      id: previewTabId(activeWorkspaceScope, activeProjectWorkspaceId, selectedPath),
-      workspaceScope: activeWorkspaceScope,
-      projectId: activeProjectWorkspaceId,
-      path: selectedPath,
-    };
-    setPreviewTabs((current) => current.some((item) => item.id === tab.id) ? current : [tab, ...current].slice(0, 12));
-  }, [activeProjectWorkspaceId, activeWorkspaceScope, selectedEntry?.path, selectedEntry?.type, selectedPath]);
+    previewTabs.openTab(activeWorkspaceScope, activeProjectWorkspaceId, selectedPath);
+  }, [activeProjectWorkspaceId, activeWorkspaceScope, previewTabs, selectedEntry?.path, selectedEntry?.type, selectedPath]);
 
   useEffect(() => {
     setReferencedFiles([]);
@@ -2238,7 +2171,7 @@ function App() {
     closeSelectedTextContextMenu();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - SIDEBAR_CONTEXT_MENU_MAX_HEIGHT - VIEWPORT_EDGE_GAP);
-    setPreviewTabContextMenu({
+    previewTabs.setContextMenu({
       x: Math.max(VIEWPORT_EDGE_GAP, menuX),
       y: Math.max(VIEWPORT_EDGE_GAP, menuY),
       tabId,
@@ -2246,7 +2179,7 @@ function App() {
   }
 
   function closePreviewTabContextMenu() {
-    setPreviewTabContextMenu(null);
+    previewTabs.closeContextMenu();
   }
 
   function openSelectedTextContextMenu(event: React.MouseEvent) {
@@ -3469,68 +3402,16 @@ function App() {
 
       {editorPanelOpen ? (
       <section className="editor-panel">
-        <div className="editor-header">
-          {visiblePreviewTabs.length > 0 ? (
-            <div className="editor-tab-strip" role="tablist" aria-label="预览历史">
-              {visiblePreviewTabs.map((tab) => {
-                const active = tab.id === selectedTabId;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    className={`editor-tab${active ? ' active' : ''}`}
-                    role="tab"
-                    aria-selected={active}
-                    title={tab.path}
-                    onClick={() => selectWorkspacePath(tab.workspaceScope, tab.projectId, tab.path)}
-                    onContextMenu={(event) => openPreviewTabContextMenu(event, tab.id)}
-                  >
-                    <span>{basename(tab.path)}</span>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className="editor-tab__close"
-                      aria-label={`关闭 ${basename(tab.path)}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closePreviewTab(tab.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          closePreviewTab(tab.id);
-                        }
-                      }}
-                    >
-                      <X size={12} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {selectedEntry?.type === 'file' && /\.(md|markdown)$/i.test(selectedEntry.path) ? (
-            <div className="editor-inline-tools">
-              <div className="markdown-mode-switch" role="tablist" aria-label="Markdown 视图">
-                <button
-                  type="button"
-                  className={selectedMarkdownMode === 'edit' ? 'active' : ''}
-                  onClick={() => selectedTabId && setMarkdownModesByPath((current) => ({ ...current, [selectedTabId]: 'edit' }))}
-                >
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  className={selectedMarkdownMode === 'preview' ? 'active' : ''}
-                  onClick={() => selectedTabId && setMarkdownModesByPath((current) => ({ ...current, [selectedTabId]: 'preview' }))}
-                >
-                  预览
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <EditorHeader
+          tabs={previewTabs.visibleTabs}
+          selectedTabId={previewTabs.selectedTabId}
+          selectedMarkdownMode={previewTabs.selectedMarkdownMode}
+          showMarkdownModeSwitch={selectedEntry?.type === 'file' && /\.(md|markdown)$/i.test(selectedEntry.path)}
+          onSelectTab={previewTabs.selectTab}
+          onCloseTab={previewTabs.closeTab}
+          onOpenTabContextMenu={openPreviewTabContextMenu}
+          onSetMarkdownMode={previewTabs.setSelectedMarkdownMode}
+        />
 
         <div className="editor-scroll" onContextMenu={openSelectedTextContextMenu}>
               {!selectedEntry ? (
@@ -3581,7 +3462,7 @@ function App() {
                     fileError,
                     rawPreviewUrl,
                     workspaceEntries: activeEntries,
-                    markdownMode: selectedMarkdownMode,
+                    markdownMode: previewTabs.selectedMarkdownMode,
                     onChange: (content: string) => {
                       setFileContent(content);
                       setSaveState('idle');
@@ -4061,19 +3942,19 @@ function App() {
           </button>
         </div>
       ) : null}
-      {previewTabContextMenu ? (
-        <div
-          className="sidebar-context-menu"
-          style={{ left: previewTabContextMenu.x, top: previewTabContextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <button type="button" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'left'); closePreviewTabContextMenu(); }}>关闭左侧</button>
-          <button type="button" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'right'); closePreviewTabContextMenu(); }}>关闭右侧</button>
-          <button type="button" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'others'); closePreviewTabContextMenu(); }}>关闭其它</button>
-          <div className="context-menu-separator" />
-          <button type="button" className="danger-item" onClick={() => { closePreviewTabsByMode(previewTabContextMenu.tabId, 'all'); closePreviewTabContextMenu(); }}>关闭全部</button>
-        </div>
+      {previewTabs.contextMenu ? (
+        <ContextMenu
+          x={previewTabs.contextMenu.x}
+          y={previewTabs.contextMenu.y}
+          onClose={previewTabs.closeContextMenu}
+          items={[
+            { label: '关闭左侧', onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'left') },
+            { label: '关闭右侧', onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'right') },
+            { label: '关闭其它', onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'others') },
+            { separator: true },
+            { label: '关闭全部', danger: true, onClick: () => previewTabs.closeTabsByMode(previewTabs.contextMenu?.tabId ?? '', 'all') },
+          ]}
+        />
       ) : null}
       {selectedTextContextMenu ? (
         <div
@@ -4147,10 +4028,6 @@ function HarnessStandalonePage(): JSX.Element {
 
 function isSupportedTextFile(path: string): boolean {
   return TEXT_FILE_PATTERN.test(path);
-}
-
-function previewTabId(workspaceScope: WorkspaceScope, projectId: string | null, path: string): string {
-  return `${workspaceScope}:${projectId ?? 'global'}:${path}`;
 }
 
 function encodeWorkspacePath(path: string): string {
