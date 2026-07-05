@@ -1,9 +1,12 @@
 import type { ChatSessionStore } from '../chat/chatSessionStore';
+import type { RunBus } from '../runs/runBus';
+import type { RunService } from '../runs/runService';
 import type { WechatIlinkClient } from '../wechat/wechatIlinkClient';
 import type { WechatStore } from '../wechat/wechatStore';
+import { createWechatSendContext } from '../wechat/wechatStore';
 import type { ScheduleStore } from './scheduleStore';
 import { computeNextRunAt } from './scheduleTime';
-import type { ScheduledTask } from '@viwork/shared';
+import type { ChatMessage, ScheduledTask, StreamEvent } from '@viwork/shared';
 
 export type ScheduleService = {
   createTask(input: {
@@ -21,6 +24,7 @@ export type ScheduleService = {
   runDueNow(): Promise<void>;
   start(): void;
   stop(): void;
+  setRunService(runService: RunService, runBus: RunBus): void;
 };
 
 const TICK_MS = 15_000;
@@ -34,6 +38,8 @@ export function createScheduleService(input: {
   const { scheduleStore, chatSessionStore, wechatStore, ilinkClient } = input;
   let timer: NodeJS.Timeout | null = null;
   let running = false;
+  let runService: RunService | null = null;
+  let runBus: RunBus | null = null;
 
   async function tick(): Promise<void> {
     if (running) return;
@@ -60,8 +66,14 @@ export function createScheduleService(input: {
         throw new Error('WeChat is not connected');
       }
 
-      const contextToken = await wechatStore.getIlinkContextToken(status.connection.externalUserId) ?? '';
-      await ilinkClient.sendText({ to: status.connection.externalUserId, text: current.action.message, contextToken });
+      const runResult = await executeTaskAsChatMessage(current, {
+        chatSessionStore,
+        runService,
+        runBus,
+        wechatStore,
+        ilinkClient,
+        model: resolveScheduleChatModel(),
+      });
       const now = new Date();
       const nextRunAt = computeNextRunAt(current, now);
       const nextRunPatch = nextRunAt ? { nextRunAt } : {};
@@ -73,18 +85,7 @@ export function createScheduleService(input: {
         lastError: undefined,
       }));
 
-      await chatSessionStore.appendMessage(current.sessionId, {
-        id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        role: 'assistant',
-        content: `定时任务已执行，并已发送微信消息：${current.action.message}`,
-        createdAt: now.toISOString(),
-        attachments: [],
-        referencedFiles: [],
-        referencedSnippets: [],
-        streamEvents: [],
-        status: 'success',
-        events: [],
-      });
+      await chatSessionStore.appendMessage(current.sessionId, runResult.message);
       return updated;
     } catch (error) {
       return await scheduleStore.updateTask(taskId, (task) => ({
@@ -103,7 +104,7 @@ export function createScheduleService(input: {
       const task = await scheduleStore.createTask({
         projectId,
         sessionId,
-        title: title?.trim() || buildTaskTitle(schedule.frequency, action.message),
+        title: title?.trim() || buildTaskTitle(schedule.frequency, getActionPrompt(action)),
         sourcePrompt,
         status: 'active',
         schedule,
@@ -111,7 +112,7 @@ export function createScheduleService(input: {
         nextRunAt,
       });
 
-      const reply = `已创建定时任务「${task.title}」，下次执行时间：${formatDateTime(task.nextRunAt)}。执行时会向已绑定微信发送：${task.action.message}`;
+      const reply = `已创建定时任务「${task.title}」，下次执行时间：${formatDateTime(task.nextRunAt)}。执行时会按任务要求实时生成内容并发送到已绑定微信。`;
       return { task, reply };
     },
 
@@ -140,12 +141,121 @@ export function createScheduleService(input: {
       timer = null;
       console.info('[schedule] scheduler stopped');
     },
+
+    setRunService(service, bus) {
+      runService = service;
+      runBus = bus;
+    },
   };
 }
 
-function buildTaskTitle(frequency: ScheduledTask['schedule']['frequency'], message: string): string {
+async function executeTaskAsChatMessage(task: ScheduledTask, context: {
+  chatSessionStore: ChatSessionStore;
+  runService: RunService | null;
+  runBus: RunBus | null;
+  wechatStore: WechatStore;
+  ilinkClient: WechatIlinkClient;
+  model?: string;
+}): Promise<{ message: ChatMessage }> {
+  const prompt = getActionPrompt(task.action);
+  if (!context.runService || !context.runBus) {
+    throw new Error('Schedule run service is not configured');
+  }
+
+  const userMessageContent = buildScheduleUserMessage(task, prompt);
+  await context.chatSessionStore.appendMessage(task.sessionId, {
+    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    role: 'user',
+    content: userMessageContent,
+    createdAt: new Date().toISOString(),
+    attachments: [],
+    referencedFiles: [],
+    referencedSnippets: [],
+    streamEvents: [],
+    status: 'success',
+    events: [],
+  });
+
+  const { run } = await context.runService.createRun({
+    projectId: task.projectId,
+    sessionId: task.sessionId,
+    prompt: userMessageContent,
+    model: context.model,
+    source: 'schedule',
+    wechat: createWechatSendContext({ wechatStore: context.wechatStore, ilinkClient: context.ilinkClient }),
+  });
+
+  const collected = await collectRunText(context.runBus, run.id);
+  return { message: createScheduleAssistantMessage(collected.text, collected.events, collected.status) };
+}
+
+function resolveScheduleChatModel(): string | undefined {
+  return process.env.VIWORK_WECHAT_CHAT_MODEL
+    || process.env.VIWORK_AIGC_HUB_WECHAT_MODEL
+    || 'minimax/minimax-m2.7';
+}
+
+function buildTaskTitle(frequency: ScheduledTask['schedule']['frequency'], prompt: string): string {
   const prefix = frequency === 'once' ? '一次提醒' : frequency === 'weekly' ? '每周提醒' : frequency === 'daily' ? '每日提醒' : '循环提醒';
-  return `${prefix}: ${message.slice(0, 24)}`;
+  return `${prefix}: ${prompt.slice(0, 24)}`;
+}
+
+function getActionPrompt(action: ScheduledTask['action']): string {
+  return action.prompt || action.message || '生成定时任务提醒内容';
+}
+
+function buildScheduleUserMessage(task: ScheduledTask, prompt: string): string {
+  return [
+    '这是一个定时任务执行请求。请按普通会话消息处理，但它来自系统定时触发。',
+    '请根据当前会话上下文和项目资料，实时生成本次要发送到微信的内容，并调用 send_wechat_message 工具发送。',
+    '发送完成后，在会话里简短说明本次定时任务已执行以及发送内容概要。',
+    `任务标题：${task.title}`,
+    `创建依据：${task.sourcePrompt}`,
+    `本次生成要求：${prompt}`,
+  ].join('\n');
+}
+
+function createScheduleAssistantMessage(content: string, events: StreamEvent[], status: 'success' | 'error'): ChatMessage {
+  return {
+    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    role: 'assistant',
+    content,
+    createdAt: new Date().toISOString(),
+    attachments: [],
+    referencedFiles: [],
+    referencedSnippets: [],
+    streamEvents: events,
+    status,
+    events: [],
+  };
+}
+
+async function collectRunText(runBus: RunBus, runId: string): Promise<{ text: string; events: StreamEvent[]; status: 'success' | 'error' }> {
+  return await new Promise((resolve) => {
+    const parts: string[] = [];
+    const events: StreamEvent[] = [];
+    let done = false;
+    const finish = (result: { text: string; status: 'success' | 'error' }) => {
+      if (done) return;
+      done = true;
+      unsubscribe();
+      clearTimeout(timeout);
+      resolve({ text: result.text.trim() || '定时任务已触发，但未生成有效内容。', events, status: result.status });
+    };
+    const unsubscribe = runBus.subscribe(runId, (event) => {
+      events.push(event);
+      if (event.type === 'text.delta') parts.push(event.delta);
+      if (event.type === 'run.end') {
+        if (event.status === 'error') {
+          finish({ text: `定时任务内容生成失败：${event.errorMessage ?? '未知错误'}`, status: 'error' });
+        } else {
+          finish({ text: parts.join(''), status: 'success' });
+        }
+      }
+    });
+    const timeout = setTimeout(() => finish({ text: parts.join('') || '定时任务内容仍在生成中，请稍后查看工作台。', status: 'success' }), 5 * 60_000);
+    timeout.unref?.();
+  });
 }
 
 function formatDateTime(iso: string): string {

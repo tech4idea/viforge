@@ -134,6 +134,7 @@ export type ApiClient = {
   listAigcHubModels(): Promise<AigcHubModelListResponse>;
   createImageGeneration(input: ImageGenerationRequest): Promise<ImageGenerationResponse>;
   listSessionScheduledTasks(sessionId: string): Promise<ScheduledTask[]>;
+  listProjectScheduledTasks(projectId: string): Promise<ScheduledTask[]>;
   runScheduledTaskNow(taskId: string): Promise<ScheduledTask>;
   pauseScheduledTask(taskId: string): Promise<ScheduledTask>;
   resumeScheduledTask(taskId: string): Promise<ScheduledTask>;
@@ -492,6 +493,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     listSessionScheduledTasks: (sessionId) =>
       request<ScheduledTask[]>(fetcher, baseUrl, `/api/chat-sessions/${encodePathSegment(sessionId)}/schedules`),
+    listProjectScheduledTasks: (projectId) =>
+      request<ScheduledTask[]>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/schedules`),
     runScheduledTaskNow: (taskId) =>
       request<ScheduledTask>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/run-now`, { method: 'POST' }),
     pauseScheduledTask: (taskId) =>

@@ -77,6 +77,7 @@ export type WechatStore = {
   setIlinkPollCursor(cursor: string): Promise<void>;
   getIlinkContextToken(externalUserId: string): Promise<string | null>;
   setIlinkContextToken(externalUserId: string, token: string): Promise<void>;
+  getIlinkSendTarget(): Promise<{ externalUserId: string; contextToken: string } | null>;
   setIlinkPollerEnabled(enabled: boolean): Promise<void>;
   isIlinkPollerEnabled(): Promise<boolean>;
   getPendingSessionAction(externalUserId: string): Promise<PendingSessionAction | null>;
@@ -84,6 +85,31 @@ export type WechatStore = {
   /** Clear connection + ilink state for rebinding */
   disconnect(): Promise<void>;
 };
+
+export function createWechatSendContext(input: {
+  wechatStore: WechatStore;
+  ilinkClient: import('./wechatIlinkClient').WechatIlinkClient;
+}): import('../runs/runService').WechatSendContext {
+  const { wechatStore, ilinkClient } = input;
+  const resolveTarget = async () => {
+    const target = await wechatStore.getIlinkSendTarget();
+    if (!target) {
+      throw new Error('WeChat send target is not ready; send a message to the bot first');
+    }
+    return target;
+  };
+
+  return {
+    async sendText({ text }) {
+      const target = await resolveTarget();
+      await ilinkClient.sendText({ to: target.externalUserId, text, contextToken: target.contextToken });
+    },
+    async sendFile({ bytes, name, mimeType }) {
+      const target = await resolveTarget();
+      await ilinkClient.sendFile({ to: target.externalUserId, bytes, name, mimeType, contextToken: target.contextToken });
+    },
+  };
+}
 
 export function createWechatStore(statePath: string): WechatStore {
   let writeQueue = Promise.resolve();
@@ -251,9 +277,16 @@ export function createWechatStore(statePath: string): WechatStore {
 
     async checkAndRecordInbound(externalMessageId, externalUserId) {
       const s = await readState();
-      if (!s.connection || s.connection.externalUserId !== externalUserId) return { accepted: false };
+      if (!s.connection) return { accepted: false };
+      const connectionMatches = s.connection.externalUserId === externalUserId;
+      const placeholderConnection = s.connection.externalUserId.startsWith('ilink:');
+      if (!connectionMatches && !placeholderConnection) return { accepted: false };
       if (s.inboundMessageIds.includes(externalMessageId)) return { accepted: true };
-      await writeState({ ...s, inboundMessageIds: [...s.inboundMessageIds, externalMessageId] });
+      await writeState({
+        ...s,
+        connection: placeholderConnection ? { ...s.connection, externalUserId } : s.connection,
+        inboundMessageIds: [...s.inboundMessageIds, externalMessageId],
+      });
       return { accepted: true };
     },
 
@@ -291,7 +324,28 @@ export function createWechatStore(statePath: string): WechatStore {
     },
     async setIlinkContextToken(externalUserId, token) {
       const s = await readState();
-      await writeState({ ...s, ilink: { ...s.ilink, contextTokens: { ...s.ilink.contextTokens, [externalUserId]: token } } });
+      const connection = s.connection && s.connection.externalUserId.startsWith('ilink:')
+        ? { ...s.connection, externalUserId }
+        : s.connection;
+      await writeState({
+        ...s,
+        connection,
+        ilink: { ...s.ilink, contextTokens: { ...s.ilink.contextTokens, [externalUserId]: token } },
+      });
+    },
+
+    async getIlinkSendTarget() {
+      const s = await readState();
+      if (!s.connection) return null;
+
+      const connectedToken = s.ilink.contextTokens[s.connection.externalUserId];
+      if (connectedToken) {
+        return { externalUserId: s.connection.externalUserId, contextToken: connectedToken };
+      }
+
+      const [externalUserId, contextToken] = Object.entries(s.ilink.contextTokens).find(([, value]) => Boolean(value)) ?? [];
+      if (!externalUserId || !contextToken) return null;
+      return { externalUserId, contextToken };
     },
 
     async setIlinkPollerEnabled(enabled) {

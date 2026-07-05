@@ -112,7 +112,9 @@ export type ScheduledTaskFrequency = 'once' | 'minutes' | 'hourly' | 'daily' | '
 
 export type ScheduledTaskAction = {
   type: 'wechat_message';
-  message: string;
+  prompt?: string;
+  /** @deprecated Older scheduled tasks stored a fixed message. New tasks generate content at execution time from prompt. */
+  message?: string;
 };
 
 export type ScheduledTask = {

@@ -28,6 +28,7 @@ export function createScheduleRoutes(scheduleStore: ScheduleStore, scheduleServi
   routes.post('/schedules/:taskId/run-now', async (context) => {
     const task = await scheduleService.executeTask(context.req.param('taskId'));
     if (!task) return context.json({ error: 'Schedule not found' }, 404);
+    if (task.status === 'error') return context.json({ error: task.lastError ?? 'Schedule execution failed', task }, 500);
     return context.json(task);
   });
 

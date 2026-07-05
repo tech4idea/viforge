@@ -398,7 +398,7 @@ describe('langgraph run service', () => {
                   sourcePrompt: '每天上午9点微信提醒我检查故事大纲',
                   nextRunAt: '2026-07-06T01:00:00.000Z',
                   schedule: { frequency: 'daily', timeOfDay: '09:00', timezone: 'Asia/Shanghai' },
-                  wechatMessage: '检查故事大纲',
+                  messagePrompt: '根据当前会话进展生成检查故事大纲的微信提醒',
                 }, {} as never);
                 return {
                   fullStream: asyncGenerator([
@@ -428,7 +428,7 @@ describe('langgraph run service', () => {
       projectId: project.id,
       sessionId: 'session-schedule',
       title: '每日检查大纲',
-      action: { type: 'wechat_message', message: '检查故事大纲' },
+      action: { type: 'wechat_message', prompt: '根据当前会话进展生成检查故事大纲的微信提醒' },
     })]);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'tool_use.start', toolName: 'create_scheduled_task' }),

@@ -94,9 +94,11 @@ export function createScheduleStore(statePath: string): ScheduleStore {
 function isScheduledTask(value: unknown): value is ScheduledTask {
   if (!value || typeof value !== 'object') return false;
   const task = value as Partial<ScheduledTask>;
+  const action = task.action as Partial<ScheduledTask['action']> | undefined;
   return typeof task.id === 'string'
     && typeof task.projectId === 'string'
     && typeof task.sessionId === 'string'
     && typeof task.nextRunAt === 'string'
-    && task.action?.type === 'wechat_message';
+    && action?.type === 'wechat_message'
+    && (typeof action.prompt === 'string' || typeof action.message === 'string');
 }

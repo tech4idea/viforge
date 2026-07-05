@@ -19,14 +19,18 @@ let root: string;
 let app: Hono;
 let runBus: RunBus;
 let sentImages: Array<{ to: string; bytes: Buffer; name: string; mimeType: string; contextToken: string }>;
+let sentTexts: Array<{ to: string; text: string; contextToken: string }>;
 
 function createMockIlinkClient() {
   sentImages = [];
+  sentTexts = [];
   return {
     getQrCode: async () => { throw new Error('ilink unavailable'); },
     checkQrCodeStatus: async () => ({ status: 'pending' as const }),
     getUpdates: async () => ({ cursor: '', updates: [] }),
-    sendText: async () => {},
+    sendText: async (input: { to: string; text: string; contextToken: string }) => {
+      sentTexts.push(input);
+    },
     sendImage: async (input: { to: string; bytes: Buffer; name: string; mimeType: string; contextToken: string }) => {
       sentImages.push(input);
     },
@@ -143,7 +147,7 @@ describe('wechat routes', () => {
 
     const inboundResponse = await app.request('/api/wechat/inbound', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-viwork-wechat-context-token': 'context-token' },
       body: JSON.stringify({
         externalMessageId: 'msg-create',
         externalUserId: 'writer-openid',
@@ -170,7 +174,7 @@ describe('wechat routes', () => {
 
     const inboundResponse = await app.request('/api/wechat/inbound', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-viwork-wechat-context-token': 'context-token' },
       body: JSON.stringify({
         externalMessageId: 'msg-image',
         externalUserId: 'writer-openid',
@@ -183,6 +187,39 @@ describe('wechat routes', () => {
     expect(sentImages.length).toBeGreaterThan(0);
     expect(sentImages[0]?.to).toBe('writer-openid');
     expect(sentImages[0]?.mimeType.startsWith('image/')).toBe(true);
+  });
+
+  it('uses the real inbound wechat user as send target after placeholder QR connection', async () => {
+    const setupResponse = await app.request('/api/wechat/setup-sessions', { method: 'POST' });
+    const setup = await setupResponse.json() as { sessionId: string };
+
+    await app.request(`/api/wechat/setup-sessions/${setup.sessionId}/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '编剧微信', externalUserId: 'ilink:qrcode-placeholder' }),
+    });
+
+    const inboundResponse = await app.request('/api/wechat/inbound', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-viwork-wechat-context-token': 'context-token' },
+      body: JSON.stringify({
+        externalMessageId: 'msg-real-user',
+        externalUserId: 'writer-openid',
+        displayName: '编剧微信',
+        text: '/状态',
+      }),
+    });
+    expect(inboundResponse.status).toBe(202);
+
+    const notifyResponse = await app.request('/api/wechat/notify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'success' }),
+    });
+
+    expect(notifyResponse.status).toBe(200);
+    expect(await notifyResponse.json()).toEqual({ sent: true });
+    expect(sentTexts.at(-1)).toMatchObject({ to: 'writer-openid' });
   });
 
   it('supports /帮助 command without connection', async () => {

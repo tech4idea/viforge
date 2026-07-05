@@ -70,7 +70,6 @@ export function createApp(): Hono {
   const ilinkClient: WechatIlinkClient = createWechatIlinkClient();
   const scheduleStore = createScheduleStore(path.join(WORKSPACES_ROOT, '..', 'scheduled-tasks.json'));
   const scheduleService = createScheduleService({ scheduleStore, chatSessionStore, wechatStore, ilinkClient });
-  scheduleService.start();
 
   const langGraphRunService = createLangGraphRunService(workspaceStore, runBus, {
     gitService,
@@ -78,7 +77,9 @@ export function createApp(): Hono {
     harnessStore,
     scheduleService,
   });
-  app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore));
+  scheduleService.setRunService(langGraphRunService, runBus);
+  scheduleService.start();
+  app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore, { store: wechatStore, ilinkClient }));
   app.route('/api', createRunEventsRoutes(runBus));
   app.route('/api', createHarnessRoutes(harnessStore));
 

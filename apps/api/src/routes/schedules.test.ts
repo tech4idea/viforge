@@ -9,6 +9,7 @@ import { createChatSessionStore } from '../chat/chatSessionStore';
 import { createWechatStore } from '../wechat/wechatStore';
 import { createScheduleService } from '../schedules/scheduleService';
 import { createScheduleStore } from '../schedules/scheduleStore';
+import { createRunBus } from '../runs/runBus';
 import { createScheduleRoutes } from './schedules';
 
 let root: string;
@@ -22,59 +23,108 @@ afterEach(async () => {
 });
 
 describe('schedule routes', () => {
-  it('executes due tasks by sending a WeChat message and completing one-off tasks', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date('2026-07-05T02:00:00.000Z'));
-      const sent: Array<{ to: string; text: string }> = [];
+  it('executes due tasks through the bound chat session and lets the agent send WeChat', async () => {
       const chatStore = createChatSessionStore(path.join(root, 'chat-sessions.json'));
       const scheduleStore = createScheduleStore(path.join(root, 'scheduled-tasks.json'));
+      const bus = createRunBus();
       const wechatStore = createWechatStore(path.join(root, 'wechat.json'));
       const setup = await wechatStore.createSetupSession();
       await wechatStore.completeSetupSession(setup.sessionId, { displayName: '编剧微信', externalUserId: 'writer-openid' });
+      await wechatStore.setIlinkContextToken('writer-openid', 'context-token');
       const scheduleService = createScheduleService({
         scheduleStore,
         chatSessionStore: chatStore,
         wechatStore,
-        ilinkClient: {
-          sendText: async (input: { to: string; text: string }) => { sent.push({ to: input.to, text: input.text }); },
-        } as any,
+        ilinkClient: { sendText: vi.fn() } as any,
       });
+      let capturedPrompt = '';
+      let capturedWechat: unknown = null;
+      scheduleService.setRunService({
+        async createRun(input) {
+          capturedPrompt = input.prompt;
+          capturedWechat = input.wechat;
+          const run = {
+            id: 'run-schedule-generated',
+            projectId: input.projectId,
+            sessionId: input.sessionId,
+            prompt: input.prompt,
+            referencedFiles: [],
+            referencedSnippets: [],
+            source: 'schedule' as const,
+            status: 'running' as const,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          setTimeout(() => {
+            bus.publish({ type: 'text.delta', runId: run.id, emittedAt: new Date().toISOString(), delta: '定时任务已执行，已通过微信发送第一集大纲提醒。', sequence: 1 });
+            bus.publish({ type: 'run.end', runId: run.id, emittedAt: new Date().toISOString(), status: 'success', errorMessage: null });
+          }, 0);
+          return { run };
+        },
+      }, bus);
       const session = await chatStore.createSession('project-1');
       const { task } = await scheduleService.createTask({
         projectId: 'project-1',
         sessionId: session.id,
         sourcePrompt: '1分钟后微信提醒我检查第一集大纲',
-        nextRunAt: '2026-07-05T02:01:00.000Z',
+        nextRunAt: new Date(Date.now() - 1_000).toISOString(),
         schedule: { frequency: 'once', timezone: 'Asia/Shanghai' },
-        action: { type: 'wechat_message', message: '检查第一集大纲' },
+        action: { type: 'wechat_message', prompt: '根据会话进展生成检查第一集大纲的提醒' },
       });
 
       expect(task.status).toBe('active');
-      vi.setSystemTime(new Date('2026-07-05T02:01:01.000Z'));
       await scheduleService.runDueNow();
 
-      expect(sent).toEqual([{ to: 'writer-openid', text: '检查第一集大纲' }]);
+      expect(capturedPrompt).toContain('系统定时触发');
+      expect(capturedPrompt).toContain('调用 send_wechat_message 工具发送');
+      expect(capturedWechat).toMatchObject({
+        sendText: expect.any(Function),
+        sendFile: expect.any(Function),
+      });
+      expect(capturedWechat).not.toHaveProperty('userId');
+      expect(capturedWechat).not.toHaveProperty('contextToken');
       const tasks = await scheduleStore.listTasks({ sessionId: session.id });
       expect(tasks[0]?.status).toBe('completed');
-    } finally {
-      vi.useRealTimers();
-    }
+      const messages = (await chatStore.getSession(session.id))?.messages ?? [];
+      expect(messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+      expect(messages[1]?.content).toContain('已通过微信发送');
   });
 
   it('runs, pauses, resumes, and deletes tasks through the board actions API', async () => {
-    const sent: string[] = [];
     const chatStore = createChatSessionStore(path.join(root, 'chat-sessions.json'));
     const scheduleStore = createScheduleStore(path.join(root, 'scheduled-tasks.json'));
     const wechatStore = createWechatStore(path.join(root, 'wechat.json'));
+    const bus = createRunBus();
     const setup = await wechatStore.createSetupSession();
     await wechatStore.completeSetupSession(setup.sessionId, { displayName: '编剧微信', externalUserId: 'writer-openid' });
+    await wechatStore.setIlinkContextToken('writer-openid', 'context-token');
     const scheduleService = createScheduleService({
       scheduleStore,
       chatSessionStore: chatStore,
       wechatStore,
-      ilinkClient: { sendText: async (input: { text: string }) => { sent.push(input.text); } } as any,
+      ilinkClient: { sendText: vi.fn() } as any,
     });
+    scheduleService.setRunService({
+      async createRun(input) {
+        const run = {
+          id: 'run-board-action',
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          prompt: input.prompt,
+          referencedFiles: [],
+          referencedSnippets: [],
+          source: 'schedule' as const,
+          status: 'running' as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        setTimeout(() => {
+          bus.publish({ type: 'text.delta', runId: run.id, emittedAt: new Date().toISOString(), delta: '看板动作验证完成', sequence: 1 });
+          bus.publish({ type: 'run.end', runId: run.id, emittedAt: new Date().toISOString(), status: 'success', errorMessage: null });
+        }, 0);
+        return { run };
+      },
+    }, bus);
     const app = new Hono().route('/api', createScheduleRoutes(scheduleStore, scheduleService));
     const session = await chatStore.createSession('project-1');
     const { task } = await scheduleService.createTask({
@@ -83,12 +133,11 @@ describe('schedule routes', () => {
       sourcePrompt: 'board action test',
       nextRunAt: new Date(Date.now() + 60_000).toISOString(),
       schedule: { frequency: 'daily', timeOfDay: '09:00', timezone: 'Asia/Shanghai' },
-      action: { type: 'wechat_message', message: '看板动作验证' },
+      action: { type: 'wechat_message', prompt: '看板动作验证' },
     });
 
     const runNow = await app.request(`/api/schedules/${task.id}/run-now`, { method: 'POST' });
     expect(runNow.status).toBe(200);
-    expect(sent).toEqual(['看板动作验证']);
 
     const pause = await app.request(`/api/schedules/${task.id}/cancel`, { method: 'POST' });
     expect(pause.status).toBe(200);
