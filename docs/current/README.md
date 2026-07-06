@@ -124,6 +124,7 @@ VIWORK_WEB_PORT=8080 VIWORK_API_PORT=3001 docker compose up -d --build
 - [17 Agent Harness 使用说明与流程校验](./17-agent-harness-usage.md)
 - [18 单机桌面版落地方案](./18-standalone-desktop-plan.md)
 - [19 单机桌面版构建与发布教程](./19-desktop-release-guide.md)
+- [20 私有 GitHub 二进制资源仓库与 Actions 打包方案](./20-private-binary-bundle-github-actions.md)
 
 ## 主要代码入口
 

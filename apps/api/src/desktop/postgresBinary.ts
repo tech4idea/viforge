@@ -140,7 +140,9 @@ function registerEmbeddedPostgresShutdown(pgCtl: string, dataDir: string): void 
 
 async function ensureDatabase(input: { createdb: string; psql: string; port: number; user: string; database: string; password: string }): Promise<void> {
   const baseArgs = ['-h', '127.0.0.1', '-p', String(input.port), '-U', input.user];
-  await runCommand(input.createdb, [...baseArgs, input.database], { ignoreStderrIncludes: 'already exists' });
+  if (!(await databaseExists({ psql: input.psql, baseArgs, database: input.database }))) {
+    await runCommand(input.createdb, [...baseArgs, input.database]);
+  }
   await runCommand(input.psql, [...baseArgs, '-d', 'postgres', '-c', `ALTER USER ${quoteIdentifier(input.user)} WITH PASSWORD '${escapeSqlLiteral(input.password)}'`]);
   if (!(await pgvectorExtensionAvailable(input.psql))) {
     process.env.VIWORK_PGVECTOR_AVAILABLE = '0';
@@ -156,6 +158,12 @@ async function ensureDatabase(input: { createdb: string; psql: string; port: num
   if (!vectorReady) {
     console.warn('[desktop] pgvector extension is not available in the embedded PostgreSQL bundle; LangGraph memory will use PostgreSQL text search only.');
   }
+}
+
+async function databaseExists(input: { psql: string; baseArgs: string[]; database: string }): Promise<boolean> {
+  const query = `SELECT 1 FROM pg_database WHERE datname = '${escapeSqlLiteral(input.database)}'`;
+  const output = await runCommand(input.psql, [...input.baseArgs, '-d', 'postgres', '-tAc', query], { captureStdout: true });
+  return typeof output === 'string' && output.trim() === '1';
 }
 
 async function pgvectorExtensionAvailable(psql: string): Promise<boolean> {
@@ -199,7 +207,9 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
-function runCommand(command: string, args: string[], options: { ignoreStderrIncludes?: string; allowFailure?: boolean } = {}): Promise<boolean> {
+function runCommand(command: string, args: string[], options: { ignoreStderrIncludes?: string; allowFailure?: boolean; captureStdout: true }): Promise<string>;
+function runCommand(command: string, args: string[], options?: { ignoreStderrIncludes?: string; allowFailure?: boolean; captureStdout?: false }): Promise<boolean>;
+function runCommand(command: string, args: string[], options: { ignoreStderrIncludes?: string; allowFailure?: boolean; captureStdout?: boolean } = {}): Promise<boolean | string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: 'pipe', env: postgresProcessEnv(command) });
     const timeout = setTimeout(() => {
@@ -222,7 +232,7 @@ function runCommand(command: string, args: string[], options: { ignoreStderrIncl
       if (settled) return;
       settled = true;
       if (code === 0 || (options.ignoreStderrIncludes && stderr.includes(options.ignoreStderrIncludes))) {
-        resolve(true);
+        resolve(options.captureStdout ? stdout : true);
         return;
       }
       if (options.allowFailure) {
