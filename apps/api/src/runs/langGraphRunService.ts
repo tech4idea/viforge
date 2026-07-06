@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viwork/shared';
 import { z } from 'zod';
 
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
+import { LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -980,15 +980,16 @@ async function detectChoiceRequest(
     return;
   }
 
-  if (!AIGC_HUB_API_KEY) {
+  const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  if (!apiKey) {
     appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.unconfigured', runId });
     return;
   }
 
   try {
-    const baseUrl = AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+    const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
     const model = 'minimax/minimax-m2.7';
-    const headers = buildAigcHubHeaders({ apiKey: AIGC_HUB_API_KEY, contentType: 'application/json' });
+    const headers = buildAigcHubHeaders({ apiKey, contentType: 'application/json' });
 
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',

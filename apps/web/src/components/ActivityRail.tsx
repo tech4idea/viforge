@@ -7,6 +7,7 @@ import {
   Clock,
   Moon,
   Palette,
+  Settings,
   Smartphone,
   Sun,
 } from './icons';
@@ -32,6 +33,7 @@ export function ActivityRail({
   onOpenGitSync,
   onOpenHarness,
   onOpenSchedules,
+  onOpenSettings,
 }: {
   sidebarOpen: boolean;
   editorOpen: boolean;
@@ -45,6 +47,7 @@ export function ActivityRail({
   onOpenGitSync: () => void;
   onOpenHarness: () => void;
   onOpenSchedules: () => void;
+  onOpenSettings: () => void;
 }): JSX.Element {
   return (
     <nav className="activity-rail" aria-label="主导航">
@@ -122,6 +125,16 @@ export function ActivityRail({
         title="Harness"
       >
         <Diamond size={20} />
+      </button>
+
+      <button
+        type="button"
+        className="rail-button"
+        onClick={onOpenSettings}
+        aria-label="运行设置"
+        title="运行设置"
+      >
+        <Settings size={20} />
       </button>
 
       <button

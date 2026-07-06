@@ -170,7 +170,7 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 - `PostgresSaver`，schema 为 `langgraph`，用于 LangGraph checkpoint 表。
 - `PostgresStore`，schema 为 `langgraph_store`，用于 LangGraph Store 表。
 
-如果未设置 `DATABASE_URL`，本地开发和测试使用 `MemorySaver` + `InMemoryStore`，API 可以正常启动和运行，但进程重启后 LangGraph 记忆不会保留。生产或 Docker Compose 部署应配置 `DATABASE_URL`。
+运行态必须配置 PostgreSQL：桌面单机模式由 API 启动内置 PostgreSQL binary 并写入 `DATABASE_URL`，服务模式应通过外部 PostgreSQL 或 Docker Compose 注入 `DATABASE_URL`。`MemorySaver` + `InMemoryStore` 只作为自动化测试后备，需显式设置 `VIWORK_LANGGRAPH_ALLOW_IN_MEMORY=1`，不作为产品运行模式暴露。
 
 项目长期记忆由 viwork 自己的工具层实现：
 

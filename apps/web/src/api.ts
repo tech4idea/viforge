@@ -36,6 +36,8 @@ import type {
   ReferencedChatSnippet,
   ReferencedFile,
   RetrievalPolicy,
+  RuntimeConfig,
+  UpdateRuntimeConfigInput,
   EvalFixture,
   EvalRun,
   SkillSnapshot,
@@ -86,6 +88,8 @@ export type {
   ReferencedChatSnippet,
   ReferencedFile,
   RetrievalPolicy,
+  RuntimeConfig,
+  UpdateRuntimeConfigInput,
   EvalFixture,
   EvalRun,
   SkillSnapshot,
@@ -100,6 +104,8 @@ export type {
 
 export type ApiClient = {
   getProductProfile(): Promise<ProductProfile>;
+  getRuntimeConfig(): Promise<RuntimeConfig>;
+  updateRuntimeConfig(input: UpdateRuntimeConfigInput): Promise<RuntimeConfig>;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
   readGlobalWorkspaceFile(path: string): Promise<WorkspaceFile>;
   writeGlobalWorkspaceFile(path: string, content: string): Promise<WorkspaceFile>;
@@ -343,10 +349,11 @@ type ImportMetaWithViteEnv = ImportMeta & {
   };
 };
 
-const defaultBaseUrl = (import.meta as ImportMetaWithViteEnv).env?.VITE_API_BASE_URL ?? '';
+const desktopToken = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('desktopToken') ?? '';
+const defaultBaseUrl = trimTrailingSlashes((import.meta as ImportMetaWithViteEnv).env?.VITE_API_BASE_URL ?? '');
 
 export function resolveApiUrl(path: string): string {
-  return `${trimTrailingSlashes(defaultBaseUrl)}${path}`;
+  return withDesktopToken(`${defaultBaseUrl}${path}`);
 }
 
 export const apiClient = createApiClient();
@@ -357,6 +364,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 
   return {
     getProductProfile: () => request<ProductProfile>(fetcher, baseUrl, '/api/product-profile'),
+    getRuntimeConfig: () => request<RuntimeConfig>(fetcher, baseUrl, '/api/runtime-config'),
+    updateRuntimeConfig: (input) =>
+      request<RuntimeConfig>(fetcher, baseUrl, '/api/runtime-config', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }),
     listGlobalWorkspaceEntries: () => request<WorkspaceEntry[]>(fetcher, baseUrl, '/api/global/files'),
     readGlobalWorkspaceFile: (path) =>
       request<WorkspaceFile>(fetcher, baseUrl, `/api/global/files/${encodeWorkspacePath(path)}`),
@@ -521,7 +534,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     getRunEventSnapshot: (runId) =>
       request<{ events: StreamEvent[] }>(fetcher, baseUrl, `/api/runs/${encodePathSegment(runId)}/events/snapshot`),
     streamRunEvents: (runId, handlers) => {
-      const source = new EventSource(`${baseUrl}/api/runs/${encodePathSegment(runId)}/events`);
+      const source = new EventSource(withDesktopToken(`${baseUrl}/api/runs/${encodePathSegment(runId)}/events`));
       let closedAfterTerminalEvent = false;
       let reconnectWarningTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -758,7 +771,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 }
 
 async function request<T>(fetcher: typeof fetch, baseUrl: string, path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetcher(`${baseUrl}${path}`, {
+  const response = await fetcher(withDesktopToken(`${baseUrl}${path}`), {
     ...init,
     method: init.method ?? 'GET',
     headers: {
@@ -827,4 +840,10 @@ function versionDiffQuery(input: GetVersionDiffInput): string {
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
+}
+
+function withDesktopToken(baseUrl: string): string {
+  if (!desktopToken) return baseUrl;
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}desktopToken=${encodeURIComponent(desktopToken)}`;
 }

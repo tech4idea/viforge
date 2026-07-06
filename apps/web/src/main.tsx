@@ -27,6 +27,8 @@ import {
   type Project,
   type ReferencedChatSnippet,
   type ReferencedFile,
+  type RuntimeConfig,
+  type UpdateRuntimeConfigInput,
   type RunEvent,
   type ScheduledTask,
   type StreamEvent,
@@ -431,7 +433,9 @@ function App() {
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | 'settings' | null>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [runtimeConfigState, setRuntimeConfigState] = useState<LoadState>('idle');
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
@@ -896,6 +900,9 @@ function App() {
     if (activeToolPanel === 'wechat') {
       void loadWechatStatus();
     }
+    if (activeToolPanel === 'settings') {
+      void loadRuntimeConfig();
+    }
   }, [activeToolPanel]);
 
   useEffect(() => {
@@ -1101,6 +1108,32 @@ function App() {
       setImageModel((current) => current || preferredModelId(response.models, 'image') || response.models[0]?.id || '');
     } catch (error) {
       setAigcHubModelError(errorToMessage(error));
+    }
+  }
+
+  async function loadRuntimeConfig() {
+    setRuntimeConfigState('loading');
+    try {
+      const config = await apiClient.getRuntimeConfig();
+      setRuntimeConfig(config);
+      setRuntimeConfigState('idle');
+    } catch (error) {
+      setRuntimeConfigState('error');
+      showToast(`读取运行设置失败：${errorToMessage(error)}`, 'error');
+    }
+  }
+
+  async function saveRuntimeConfig(input: UpdateRuntimeConfigInput) {
+    setRuntimeConfigState('loading');
+    try {
+      const config = await apiClient.updateRuntimeConfig(input);
+      setRuntimeConfig(config);
+      setRuntimeConfigState('idle');
+      showToast(config.restartRequired ? '运行设置已保存，部分数据库设置重启后生效' : '运行设置已保存', 'success');
+      await loadAigcHubModels();
+    } catch (error) {
+      setRuntimeConfigState('error');
+      showToast(`保存运行设置失败：${errorToMessage(error)}`, 'error');
     }
   }
 
@@ -3298,6 +3331,7 @@ function App() {
         onOpenGitSync={() => setActiveToolPanel('git')}
         onOpenHarness={openHarnessStandalone}
         onOpenSchedules={() => void openScheduleOverview()}
+        onOpenSettings={() => setActiveToolPanel('settings')}
       />
 
       <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
@@ -4081,8 +4115,8 @@ function App() {
           <section className="modal-panel" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">{activeToolPanel === 'git' ? 'Version Control' : 'Remote WeChat'}</p>
-                <h2>{activeToolPanel === 'git' ? '版本管理与安全备份' : '远程微信接入'}</h2>
+                <p className="eyebrow">{toolPanelEyebrow(activeToolPanel)}</p>
+                <h2>{toolPanelTitle(activeToolPanel)}</h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
             </div>
@@ -4106,6 +4140,15 @@ function App() {
                 apiClient={apiClient}
                 projects={projects}
                 selectedProjectId={selectedProjectId}
+              />
+            ) : null}
+
+            {activeToolPanel === 'settings' ? (
+              <RuntimeSettingsPanel
+                config={runtimeConfig}
+                state={runtimeConfigState}
+                onReload={() => void loadRuntimeConfig()}
+                onSave={(input) => void saveRuntimeConfig(input)}
               />
             ) : null}
 
@@ -5679,6 +5722,125 @@ function upsertScheduledTask(tasks: ScheduledTask[], task: ScheduledTask): Sched
 function formatScheduleNextRun(task: ScheduledTask): string {
   if (task.status === 'completed') return task.lastRunAt ? `完成于 ${formatChatTime(task.lastRunAt)}` : '已完成';
   return `下次 ${formatChatTime(task.nextRunAt)}`;
+}
+
+function toolPanelEyebrow(panel: 'wechat' | 'git' | 'harness' | 'settings' | null): string {
+  if (panel === 'git') return 'Version Control';
+  if (panel === 'settings') return 'Runtime';
+  return 'Remote WeChat';
+}
+
+function toolPanelTitle(panel: 'wechat' | 'git' | 'harness' | 'settings' | null): string {
+  if (panel === 'git') return '版本管理与安全备份';
+  if (panel === 'settings') return '运行设置';
+  return '远程微信接入';
+}
+
+function RuntimeSettingsPanel({
+  config,
+  state,
+  onReload,
+  onSave,
+}: {
+  config: RuntimeConfig | null;
+  state: LoadState;
+  onReload: () => void;
+  onSave: (input: UpdateRuntimeConfigInput) => void;
+}): JSX.Element {
+  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [chatModel, setChatModel] = useState('');
+  const [imageModel, setImageModel] = useState('');
+  const [embeddingModel, setEmbeddingModel] = useState('');
+  const [embeddingDims, setEmbeddingDims] = useState('1024');
+  const [databaseMode, setDatabaseMode] = useState<RuntimeConfig['database']['mode']>('embedded-postgres');
+  const [connectionString, setConnectionString] = useState('');
+  const [customAdapter, setCustomAdapter] = useState('');
+  const [vectorStore, setVectorStore] = useState<NonNullable<RuntimeConfig['database']['vectorStore']>>('pgvector');
+
+  useEffect(() => {
+    if (!config) return;
+    setBaseUrl(config.modelProvider.baseUrl ?? '');
+    setChatModel(config.modelProvider.chatModel ?? '');
+    setImageModel(config.modelProvider.imageModel ?? '');
+    setEmbeddingModel(config.modelProvider.embeddingModel ?? '');
+    setEmbeddingDims(String(config.modelProvider.embeddingDims ?? 1024));
+    setDatabaseMode(config.database.mode);
+    setConnectionString('');
+    setCustomAdapter(config.database.customAdapter ?? '');
+    setVectorStore(config.database.vectorStore ?? 'pgvector');
+    setApiKey('');
+  }, [config]);
+
+  const busy = state === 'loading';
+
+  return (
+    <div className="runtime-settings-panel">
+      <div className="runtime-settings-toolbar">
+        <div>
+          <strong>{config?.desktop.enabled ? '桌面单机模式' : '服务模式'}</strong>
+          <span>{config?.desktop.dataRoot ?? '使用当前运行目录'}</span>
+        </div>
+        <button type="button" onClick={onReload} disabled={busy}>刷新</button>
+      </div>
+
+      <section className="runtime-settings-section">
+        <h3>OpenAI 协议模型</h3>
+        <div className="runtime-settings-grid">
+          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label><span>API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
+          <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="gpt-4.1 或兼容模型 id" /></label>
+          <label><span>图片模型</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>
+          <label><span>Embedding 模型</span><input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} placeholder="text-embedding-3-large" /></label>
+          <label><span>Embedding 维度</span><input inputMode="numeric" value={embeddingDims} onChange={(event) => setEmbeddingDims(event.target.value)} /></label>
+        </div>
+      </section>
+
+      <section className="runtime-settings-section">
+        <h3>LangGraph 存储</h3>
+        <div className="runtime-settings-grid">
+          <label><span>数据库模式</span><select value={databaseMode} onChange={(event) => setDatabaseMode(event.target.value as RuntimeConfig['database']['mode'])}>
+            <option value="embedded-postgres">内置 PostgreSQL</option>
+            <option value="external-postgres">外部 PostgreSQL</option>
+            <option value="custom">自定义适配器</option>
+          </select></label>
+          <label><span>向量存储</span><select value={vectorStore} onChange={(event) => setVectorStore(event.target.value as NonNullable<RuntimeConfig['database']['vectorStore']>)}>
+            <option value="pgvector">PostgreSQL / pgvector</option>
+            <option value="external">外部向量库</option>
+          </select></label>
+          <label className="runtime-settings-wide"><span>连接字符串</span><input value={connectionString} onChange={(event) => setConnectionString(event.target.value)} placeholder={config?.database.connectionStringConfigured ? '已配置，留空则不修改' : 'postgresql://user:password@host:5432/db'} /></label>
+          <label className="runtime-settings-wide"><span>自定义适配器</span><input value={customAdapter} onChange={(event) => setCustomAdapter(event.target.value)} placeholder="保留给 LangGraph 未来官方适配器" /></label>
+        </div>
+        <p className="runtime-settings-status">{config?.database.statusMessage ?? '正在读取数据库状态...'}</p>
+      </section>
+
+      <div className="runtime-settings-actions">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            const nextConnectionString = connectionString.trim();
+            onSave({
+              modelProvider: {
+                baseUrl,
+                ...(apiKey.trim() ? { apiKey } : {}),
+                chatModel,
+                imageModel,
+                embeddingModel,
+                embeddingDims: Number(embeddingDims) || 1024,
+              },
+              database: {
+                mode: databaseMode,
+                ...(nextConnectionString ? { connectionString: nextConnectionString } : {}),
+                customAdapter,
+                vectorStore,
+              },
+            });
+          }}
+        >保存设置</button>
+      </div>
+    </div>
+  );
 }
 
 function Root(): JSX.Element {

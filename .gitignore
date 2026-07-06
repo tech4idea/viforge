@@ -62,6 +62,7 @@ typings/
 
 # Build artifacts
 dist/
+release/
 *.tsbuildinfo
 
 # Local app data and tool state
@@ -76,3 +77,6 @@ apps/api/data/
 .worktrees/
 .qoder/
 var/
+
+# Desktop PostgreSQL binary bundles are prepared during release packaging.
+apps/desktop/resources/postgres/*/

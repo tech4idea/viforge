@@ -14,7 +14,7 @@ import { z } from 'zod';
 import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MODEL, PRODUCT_PROFILE } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, PRODUCT_PROFILE } from '../env';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -34,6 +34,10 @@ let postgresMemoryBackend: Promise<LangGraphMemoryBackend> | null = null;
 async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
   const databaseUrl = process.env.DATABASE_URL ?? '';
   if (!databaseUrl) {
+    if (process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY !== '1') {
+      throw new Error('LangGraph PostgreSQL is not configured. Start embedded PostgreSQL in desktop mode or set DATABASE_URL for service mode.');
+    }
+
     const key = process.env.VITEST_WORKER_ID ?? 'default';
     let backend = inMemoryBackends.get(key);
     if (!backend) {
@@ -64,6 +68,7 @@ async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promis
 }
 
 function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0]['index'] | undefined {
+  if (process.env.VIWORK_PGVECTOR_AVAILABLE === '0') return undefined;
   if (!process.env.VIWORK_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
 
   return {
@@ -77,7 +82,7 @@ function createMemoryEmbeddings(): OpenAIEmbeddings {
   const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
   const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
-    model: EMBEDDING_MODEL,
+    model: process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
     apiKey,
     configuration: {
       baseURL: trimTrailingSlashes(baseUrl),
