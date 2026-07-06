@@ -299,11 +299,12 @@ async function finalizeStreamingTaskRun(task: ScheduledTask, assistantMessageId:
 
   const now = new Date();
   const nextRunAt = computeNextRunAt(task, now);
-  const nextRunPatch = nextRunAt ? { nextRunAt } : {};
   await context.scheduleStore.updateTask(task.id, (current) => ({
     ...current,
-    status: nextRunAt ? 'active' : 'completed',
-    ...nextRunPatch,
+    status: current.status === 'active'
+      ? nextRunAt ? 'active' : 'completed'
+      : current.status,
+    ...(current.status === 'active' && nextRunAt ? { nextRunAt } : {}),
     lastRunAt: now.toISOString(),
     lastError: undefined,
   }));

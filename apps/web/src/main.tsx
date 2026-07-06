@@ -1011,6 +1011,19 @@ function App() {
   }, [activeChatSessionId]);
 
   useEffect(() => {
+    autoScrollRef.current = true;
+    setShowScrollBottom(false);
+
+    const thread = chatThreadRef.current;
+    if (!thread) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      thread.scrollTop = thread.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeChatSession?.id]);
+
+  useEffect(() => {
     if (!autoScrollRef.current) {
       return;
     }
@@ -1049,9 +1062,10 @@ function App() {
       }
     }
 
+    handleScroll();
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [activeChatSession?.id, chatPanelOpen]);
   async function loadProjects() {
     setProjectLoadState('loading');
     setProjectLoadError(null);
@@ -1122,18 +1136,11 @@ function App() {
         ...sessions,
       ]);
       setChatSessionsProjectId(projectId);
-      const stored = readStoredActiveChatSession();
-      const preferredSession = pickPreferredChatSession(sessions, stored.projectSessionIds[projectId] ?? null, chatSessionView);
+      const preferredSession = pickPreferredChatSession(sessions, null, chatSessionView);
       if (preferredSession) {
         setChatSessionView(preferredSession.archivedAt ? 'archived' : 'active');
       }
-      setActiveChatSessionId((currentId) => {
-        const currentSession = currentId ? sessions.find((session) => session.id === currentId) : null;
-        if (currentSession && sessionMatchesView(currentSession, chatSessionView)) {
-          return currentSession.id;
-        }
-        return preferredSession?.id ?? null;
-      });
+      setActiveChatSessionId(preferredSession?.id ?? null);
     } catch (error) {
       setRunError(errorToMessage(error));
       setChatSessionsProjectId(projectId);
@@ -1164,7 +1171,7 @@ function App() {
       const storedActive = readStoredActiveChatSession();
       const storedSessionId = storedActive.temporarySessionId ?? storedTemporary?.sessionId ?? null;
       const modeSessions = sessions.filter((session) => getSessionKind(session) === chatMode);
-      const preferredSession = pickPreferredChatSession(modeSessions, chatMode === 'assistant' ? storedSessionId : null, chatSessionView);
+      const preferredSession = pickPreferredChatSession(modeSessions, null, chatSessionView);
 
       if (!options.activate) {
         const latestSession = preferredSession ?? pickPreferredChatSession(modeSessions, null, 'active') ?? pickPreferredChatSession(sessions, null, 'active');
