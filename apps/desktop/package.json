@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build-api-bundle.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/build-api-bundle.mjs && node scripts/prepare-icons.mjs",
     "dev": "pnpm build && electron .",
     "build:postgres": "node scripts/build-postgres-from-source.mjs",
     "build:pgvector": "node scripts/build-pgvector-from-source.mjs",
@@ -23,6 +23,7 @@
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.21.5",
+    "sharp": "^0.34.5",
     "typescript": "^5.5.3"
   },
   "build": {
@@ -35,6 +36,7 @@
     },
     "files": [
       "dist/**/*",
+      "build/**/*",
       "package.json"
     ],
     "extraResources": [
@@ -58,7 +60,8 @@
       }
     ],
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": true,
@@ -66,10 +69,12 @@
       "allowToChangeInstallationDirectory": false
     },
     "mac": {
-      "target": ["dmg"]
+      "target": ["dmg"],
+      "icon": "build/icon.png"
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": ["AppImage"],
+      "icon": "build/icon.png"
     }
   }
 }

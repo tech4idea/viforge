@@ -5,7 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import net from 'node:net';
 
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, Menu } from 'electron';
 import started from 'electron-squirrel-startup';
 
 if (started) {
@@ -20,18 +20,22 @@ const apiOutputTail: string[] = [];
 
 async function createWindow(): Promise<void> {
   const apiUrl = await startApiServer();
+  Menu.setApplicationMenu(null);
   const window = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1100,
     minHeight: 720,
     title: 'viwork',
+    icon: resolveWindowIcon(process.resourcesPath),
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
+  window.setMenuBarVisibility(false);
 
   await window.loadURL(`${apiUrl}/?desktopToken=${encodeURIComponent(desktopAccessToken)}`);
 }
@@ -121,6 +125,17 @@ function resolveResourceRoots(resourcesPath: string): { postgres: string; web: s
     web: path.resolve(root, 'apps', 'web', 'dist'),
     productPrompts: path.resolve(root, 'apps', 'desktop', 'dist', 'api', 'product-profiles'),
   };
+}
+
+function resolveWindowIcon(resourcesPath: string): string {
+  if (app.isPackaged) {
+    return process.platform === 'win32'
+      ? path.join(resourcesPath, 'app.asar', 'build', 'icon.ico')
+      : path.join(resourcesPath, 'app.asar', 'build', 'icon.png');
+  }
+  return process.platform === 'win32'
+    ? path.resolve(projectRoot(), 'apps', 'desktop', 'build', 'icon.ico')
+    : path.resolve(projectRoot(), 'apps', 'desktop', 'build', 'icon.png');
 }
 
 function projectRoot(): string {

@@ -80,3 +80,4 @@ var/
 
 # Desktop PostgreSQL binary bundles are prepared during release packaging.
 apps/desktop/resources/postgres/*/
+apps/desktop/build/
