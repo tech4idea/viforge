@@ -370,14 +370,16 @@ async function collectRunText(runBus: RunBus, runId: string): Promise<{ text: st
     const parts: string[] = [];
     const events: StreamEvent[] = [];
     let done = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: () => void = () => {};
     const finish = (result: { text: string; status: 'success' | 'error' }) => {
       if (done) return;
       done = true;
       unsubscribe();
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       resolve({ text: result.text.trim() || '定时任务已触发，但未生成有效内容。', events, status: result.status });
     };
-    const unsubscribe = runBus.subscribe(runId, (event) => {
+    unsubscribe = runBus.subscribe(runId, (event) => {
       events.push(event);
       if (event.type === 'text.delta') parts.push(event.delta);
       if (event.type === 'run.end') {
@@ -388,7 +390,7 @@ async function collectRunText(runBus: RunBus, runId: string): Promise<{ text: st
         }
       }
     });
-    const timeout = setTimeout(() => finish({ text: parts.join('') || '定时任务内容仍在生成中，请稍后查看工作台。', status: 'success' }), 5 * 60_000);
+    timeout = setTimeout(() => finish({ text: parts.join('') || '定时任务内容仍在生成中，请稍后查看工作台。', status: 'success' }), 5 * 60_000);
     timeout.unref?.();
   });
 }
