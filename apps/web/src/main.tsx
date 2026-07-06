@@ -96,13 +96,14 @@ const VIEWPORT_EDGE_GAP = 8;
 const WORKSPACE_PANEL_MIN_WIDTH = 180;
 const WORKSPACE_PANEL_MAX_WIDTH = 420;
 const CHAT_PANEL_MIN_WIDTH = 240;
-const CHAT_PANEL_MAX_WIDTH = 560;
+const CHAT_PANEL_FALLBACK_MAX_WIDTH = 960;
 const CHAT_READING_MODE_STORAGE_KEY = 'viwork.chatReadingMode.v1';
 const SELECTED_PROJECT_STORAGE_KEY = 'viwork.selectedProjectId.v1';
 const TEMPORARY_CHAT_SESSION_STORAGE_KEY = 'viwork.temporaryChatSession.v1';
 const CHAT_SCOPE_STORAGE_KEY = 'viwork.chatScope.v1';
 const WORKSPACE_SELECTION_STORAGE_KEY = 'viwork.workspaceSelection.v1';
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'viwork.activeChatSession.v1';
+const PANEL_VISIBILITY_STORAGE_KEY = 'viwork.panelVisibility.v1';
 const THEME_MODE_STORAGE_KEY = 'viwork.themeMode.v1';
 const TEMPORARY_CHAT_SCOPE_ID = '__temporary__';
 const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
@@ -354,9 +355,9 @@ function App() {
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(initState.activeChatSessionId);
   const [chatSessionView, setChatSessionView] = useState<ChatSessionView>(initState.chatSessionView);
   const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, editor: false, chat: false });
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [chatPanelOpen, setChatPanelOpen] = useState(true);
-  const [editorPanelOpen, setEditorPanelOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(initState.sidebarOpen);
+  const [chatPanelOpen, setChatPanelOpen] = useState(initState.chatPanelOpen);
+  const [editorPanelOpen, setEditorPanelOpen] = useState(initState.editorPanelOpen);
   const [panelWidths, setPanelWidths] = useState({ workspace: 238, chat: 340 });
   const [themeMode, setThemeMode] = useState<ThemeMode>(initState.themeMode);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'error' }>>([]);
@@ -839,6 +840,10 @@ function App() {
   useEffect(() => {
     writeStoredActiveChatSessionView(chatSessionView);
   }, [chatSessionView]);
+
+  useEffect(() => {
+    writeStoredPanelVisibility({ sidebarOpen, editorPanelOpen, chatPanelOpen });
+  }, [chatPanelOpen, editorPanelOpen, sidebarOpen]);
 
   useEffect(() => {
     if (!activeChatSessionId) {
@@ -2587,6 +2592,9 @@ function App() {
     event.preventDefault();
     const startX = event.clientX;
     const startWidths = { ...panelWidths };
+    const chatMaxWidth = typeof window === 'undefined'
+      ? CHAT_PANEL_FALLBACK_MAX_WIDTH
+      : Math.max(CHAT_PANEL_MIN_WIDTH, window.innerWidth - 96);
 
     function handlePointerMove(moveEvent: PointerEvent) {
       const deltaX = moveEvent.clientX - startX;
@@ -2600,7 +2608,7 @@ function App() {
 
         return {
           ...current,
-          chat: clamp(startWidths.chat - deltaX, CHAT_PANEL_MIN_WIDTH, CHAT_PANEL_MAX_WIDTH),
+          chat: clamp(startWidths.chat - deltaX, CHAT_PANEL_MIN_WIDTH, chatMaxWidth),
         };
       });
     }
@@ -4875,6 +4883,33 @@ function writeStoredActiveChatSession(value: StoredActiveChatSession): void {
   }
 }
 
+function readStoredPanelVisibility(): { sidebarOpen: boolean; editorPanelOpen: boolean; chatPanelOpen: boolean } {
+  const fallback = { sidebarOpen: false, editorPanelOpen: true, chatPanelOpen: true };
+  if (typeof window === 'undefined') return fallback;
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PANEL_VISIBILITY_STORAGE_KEY) ?? 'null') as Partial<typeof fallback> | null;
+    if (!parsed) return fallback;
+    return {
+      sidebarOpen: typeof parsed.sidebarOpen === 'boolean' ? parsed.sidebarOpen : fallback.sidebarOpen,
+      editorPanelOpen: typeof parsed.editorPanelOpen === 'boolean' ? parsed.editorPanelOpen : fallback.editorPanelOpen,
+      chatPanelOpen: typeof parsed.chatPanelOpen === 'boolean' ? parsed.chatPanelOpen : fallback.chatPanelOpen,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredPanelVisibility(value: { sidebarOpen: boolean; editorPanelOpen: boolean; chatPanelOpen: boolean }): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(PANEL_VISIBILITY_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures; panel toggles still work for the current session.
+  }
+}
+
 function writeStoredProjectActiveChatSession(projectId: string, sessionId: string): void {
   const stored = readStoredActiveChatSession();
   writeStoredActiveChatSession({
@@ -5231,6 +5266,9 @@ function readInitialStoredState(): {
   chatScope: ChatScope;
   activeChatSessionId: string | null;
   chatSessionView: ChatSessionView;
+  sidebarOpen: boolean;
+  editorPanelOpen: boolean;
+  chatPanelOpen: boolean;
   themeMode: ThemeMode;
 } {
   // Read all localStorage in one shot to avoid ~16 sync getItem calls during mount
@@ -5255,6 +5293,7 @@ function readInitialStoredState(): {
       ? (selectedProjectId ? activeChatSession.projectSessionIds[selectedProjectId] ?? null : null)
       : activeChatSession.temporarySessionId ?? temporarySession?.sessionId ?? null,
     chatSessionView: activeChatSession.chatSessionView,
+    ...readStoredPanelVisibility(),
     themeMode: readStoredThemeMode(),
   };
 }
