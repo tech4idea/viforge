@@ -155,6 +155,10 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
 
     const { externalMessageId, externalUserId, displayName } = parsed.data;
     let text = parsed.data.text;
+    const inboundContextToken = context.req.header('x-viwork-wechat-context-token')?.trim();
+    if (inboundContextToken) {
+      await wechatStore.setIlinkContextToken(externalUserId, inboundContextToken);
+    }
     const { accepted } = await wechatStore.checkAndRecordInbound(externalMessageId, externalUserId);
     if (!accepted) return context.json({ accepted: false, reply: null }, 403);
 
@@ -206,7 +210,10 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
         runInput: result.input, externalUserId, displayName, userMessageText: text,
       });
 
-      const contextToken = await wechatStore.getIlinkContextToken(externalUserId) ?? '';
+      const sendTarget = await wechatStore.getIlinkSendTarget();
+      const sendContextToken = sendTarget?.externalUserId === externalUserId
+        ? sendTarget.contextToken
+        : await wechatStore.getIlinkContextToken(externalUserId) ?? '';
       for (const attachment of attachments.filter((item) => item.kind === 'generated-image')) {
         try {
           const asset = await workspaceStore.readWorkspaceFileBytes(attachment.projectId, attachment.path);
@@ -215,7 +222,7 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
             bytes: asset.bytes,
             name: attachment.name,
             mimeType: attachment.mimeType,
-            contextToken,
+            contextToken: sendContextToken,
           });
         } catch (error) {
           console.error('[wechat] failed to send generated image from inbound route', {
@@ -247,15 +254,17 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
       return context.json({ sent: false, reason: 'not_connected' });
     }
 
-    const { externalUserId } = wechatStatus.connection;
-    const contextToken = await wechatStore.getIlinkContextToken(externalUserId) ?? '';
+    const sendTarget = await wechatStore.getIlinkSendTarget();
+    if (!sendTarget) {
+      return context.json({ sent: false, reason: 'send_target_not_ready' });
+    }
     const message = status === 'error' ? '❌ 创作任务执行失败' : '✅ 创作任务已完成';
 
     try {
-      await ilinkClient.sendText({ to: externalUserId, text: message, contextToken });
+      await ilinkClient.sendText({ to: sendTarget.externalUserId, text: message, contextToken: sendTarget.contextToken });
       return context.json({ sent: true });
     } catch (error) {
-      console.error('[wechat] notify send failed', { externalUserId, error });
+      console.error('[wechat] notify send failed', { externalUserId: sendTarget.externalUserId, error });
       return context.json({ sent: false, reason: 'send_failed' });
     }
   });

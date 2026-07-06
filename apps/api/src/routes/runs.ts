@@ -37,7 +37,11 @@ const createRunSchema = z.object({
   ).optional().default([]),
 });
 
-export function createRunsRoutes(service: RunService, bus?: RunBus, harnessStore?: HarnessStore): Hono {
+export function createRunsRoutes(
+  service: RunService,
+  bus?: RunBus,
+  harnessStore?: HarnessStore,
+): Hono {
   const routes = new Hono();
 
   routes.post('/runs', async (context) => {
@@ -76,7 +80,13 @@ export function createRunsRoutes(service: RunService, bus?: RunBus, harnessStore
             referencedSnippets: parsed.data.referencedSnippets,
           })
         : undefined;
-      const result = await service.createRun({ ...parsed.data, runId, inputSnapshotId: snapshot?.id, source: 'web', traceId });
+      const result = await service.createRun({
+        ...parsed.data,
+        runId,
+        inputSnapshotId: snapshot?.id,
+        source: 'web',
+        traceId,
+      });
       appendJsonLog('api-runs.jsonl', {
         scope: 'runs.route',
         stage: 'response.created',
@@ -131,6 +141,12 @@ export function createRunsRoutes(service: RunService, bus?: RunBus, harnessStore
     if (!bus) return context.json({ error: 'Run bus not available' }, 500);
     bus.abortRun(runId);
     return context.json({ cancelled: true });
+  });
+
+  routes.get('/runs/:runId/events/snapshot', (context) => {
+    const runId = context.req.param('runId');
+    if (!bus) return context.json({ error: 'Run bus not available' }, 500);
+    return context.json({ events: bus.getEvents(runId) });
   });
 
   return routes;

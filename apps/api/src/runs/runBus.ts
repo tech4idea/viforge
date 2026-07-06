@@ -13,6 +13,7 @@ type RunBuffer = {
 export type RunBus = {
   publish(event: StreamEvent): void;
   subscribe(runId: string, subscriber: Subscriber): () => void;
+  getEvents(runId: string): StreamEvent[];
   getAbortSignal(runId: string): AbortSignal;
   abortRun(runId: string): void;
 };
@@ -58,6 +59,10 @@ class InMemoryRunBus implements RunBus {
         this.subscribers.delete(runId);
       }
     };
+  }
+
+  getEvents(runId: string): StreamEvent[] {
+    return [...(this.buffers.get(runId)?.events ?? [])];
   }
 
   getAbortSignal(runId: string): AbortSignal {

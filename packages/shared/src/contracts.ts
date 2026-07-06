@@ -59,6 +59,7 @@ export type AgentRun = {
 
 export type ChatMessage = {
   id: string;
+  runId?: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
@@ -104,6 +105,39 @@ export type ChatSession = {
   updatedAt: string;
   archivedAt?: string | null;
   messages: ChatMessage[];
+};
+
+export type ScheduledTaskStatus = 'active' | 'paused' | 'completed' | 'cancelled' | 'error';
+
+export type ScheduledTaskFrequency = 'once' | 'minutes' | 'hourly' | 'daily' | 'weekly';
+
+export type ScheduledTaskAction = {
+  type: 'wechat_message';
+  prompt?: string;
+  /** @deprecated Older scheduled tasks stored a fixed message. New tasks generate content at execution time from prompt. */
+  message?: string;
+};
+
+export type ScheduledTask = {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  title: string;
+  sourcePrompt: string;
+  status: ScheduledTaskStatus;
+  schedule: {
+    frequency: ScheduledTaskFrequency;
+    intervalMinutes?: number;
+    timeOfDay?: string;
+    dayOfWeek?: number;
+    timezone: string;
+  };
+  action: ScheduledTaskAction;
+  nextRunAt: string;
+  lastRunAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type GeminiImageModel = 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview';

@@ -18,10 +18,13 @@ import { createBehaviorRulesRoutes } from './routes/behaviorRules';
 import { createSkillsRoutes } from './routes/skills';
 import { createWechatRoutes } from './routes/wechat';
 import { createGitRoutes } from './routes/git';
+import { createScheduleRoutes } from './routes/schedules';
 import { createGitService } from './storage/gitService';
 import { createGitConfigStore } from './storage/gitConfigStore';
 import { createSkillStore } from './skills/skillStore';
 import { createHarnessStore } from './harness/harnessStore';
+import { createScheduleStore } from './schedules/scheduleStore';
+import { createScheduleService } from './schedules/scheduleService';
 import { createWechatStore } from './wechat/wechatStore';
 import { createWechatCommandService } from './wechat/wechatCommandService';
 import { createAssistantChatBridge } from './wechat/assistantChatBridge';
@@ -63,11 +66,19 @@ export function createApp(): Hono {
     asyncEvalRuns: true,
   });
 
+  const wechatCommandService = createWechatCommandService(wechatStore, workspaceStore, chatSessionStore);
+  const ilinkClient: WechatIlinkClient = createWechatIlinkClient();
+  const scheduleStore = createScheduleStore(path.join(WORKSPACES_ROOT, '..', 'scheduled-tasks.json'));
+  const scheduleService = createScheduleService({ scheduleStore, chatSessionStore, wechatStore, ilinkClient });
+
   const langGraphRunService = createLangGraphRunService(workspaceStore, runBus, {
     gitService,
     gitConfigStore,
     harnessStore,
+    scheduleService,
   });
+  scheduleService.setRunService(langGraphRunService, runBus);
+  scheduleService.start();
   app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore));
   app.route('/api', createRunEventsRoutes(runBus));
   app.route('/api', createHarnessRoutes(harnessStore));
@@ -80,8 +91,6 @@ export function createApp(): Hono {
 
   app.route('/api', createGitRoutes(gitService, gitConfigStore, workspaceStore));
 
-  const wechatCommandService = createWechatCommandService(wechatStore, workspaceStore, chatSessionStore);
-  const ilinkClient: WechatIlinkClient = createWechatIlinkClient();
   const assistantChatBridge = createAssistantChatBridge(chatSessionStore, langGraphRunService, runBus, wechatStore, ilinkClient);
   const sessionRouter: WechatSessionRouter = createWechatSessionRouter(wechatStore, chatSessionStore, workspaceStore);
 
@@ -258,6 +267,7 @@ export function createApp(): Hono {
     poller: wechatPoller,
     sessionRouter,
   }));
+  app.route('/api', createScheduleRoutes(scheduleStore, scheduleService));
 
   return app;
 }

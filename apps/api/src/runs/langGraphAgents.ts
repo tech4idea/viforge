@@ -1008,7 +1008,23 @@ export function createWorkspaceTools(
   };
 
   if (options.wechat) {
-    const { ilinkClient, userId, contextToken } = options.wechat;
+    const wechat = options.wechat;
+    tools.send_wechat_message = createTool({
+      id: 'send_wechat_message',
+      description: [
+        '向已绑定的用户微信发送一条文本消息。',
+        '当用户明确要求通过微信接收通知、提醒、摘要或定时任务执行结果时使用。',
+        '由你根据当前上下文生成最终要发送的正文，再调用本工具发送；不要让外层系统替你发送。',
+      ].join('\n'),
+      inputSchema: z.object({
+        message: z.string().min(1).describe('要发送到微信的最终文本正文'),
+      }),
+      execute: async ({ message }) => {
+        await wechat.sendText({ text: message });
+        return { sent: true, channel: 'wechat', textLength: message.length };
+      },
+    });
+
     tools.send_wechat_file = createTool({
       id: 'send_wechat_file',
       description: [
@@ -1021,12 +1037,10 @@ export function createWorkspaceTools(
       }),
       execute: async ({ path: filePath }) => {
         const asset = await store.readWorkspaceFileBytes(projectId, filePath);
-        await ilinkClient.sendFile({
-          to: userId,
+        await wechat.sendFile({
           bytes: asset.bytes,
           name: asset.path.split('/').pop() ?? asset.path,
           mimeType: asset.mimeType,
-          contextToken,
         });
         publish({ type: 'wechat.file_sent', runId, emittedAt: emittedAt(), path: asset.path, mimeType: asset.mimeType });
         return { sent: true, path: asset.path, mimeType: asset.mimeType };

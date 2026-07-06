@@ -28,6 +28,7 @@ import {
   type ReferencedChatSnippet,
   type ReferencedFile,
   type RunEvent,
+  type ScheduledTask,
   type StreamEvent,
   type WechatSetupSession,
   type WechatStatus,
@@ -95,13 +96,14 @@ const VIEWPORT_EDGE_GAP = 8;
 const WORKSPACE_PANEL_MIN_WIDTH = 180;
 const WORKSPACE_PANEL_MAX_WIDTH = 420;
 const CHAT_PANEL_MIN_WIDTH = 240;
-const CHAT_PANEL_MAX_WIDTH = 560;
+const CHAT_PANEL_FALLBACK_MAX_WIDTH = 960;
 const CHAT_READING_MODE_STORAGE_KEY = 'viwork.chatReadingMode.v1';
 const SELECTED_PROJECT_STORAGE_KEY = 'viwork.selectedProjectId.v1';
 const TEMPORARY_CHAT_SESSION_STORAGE_KEY = 'viwork.temporaryChatSession.v1';
 const CHAT_SCOPE_STORAGE_KEY = 'viwork.chatScope.v1';
 const WORKSPACE_SELECTION_STORAGE_KEY = 'viwork.workspaceSelection.v1';
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'viwork.activeChatSession.v1';
+const PANEL_VISIBILITY_STORAGE_KEY = 'viwork.panelVisibility.v1';
 const THEME_MODE_STORAGE_KEY = 'viwork.themeMode.v1';
 const TEMPORARY_CHAT_SCOPE_ID = '__temporary__';
 const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
@@ -109,6 +111,12 @@ const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
 const RUN_NOTIFY_STORAGE_KEY = 'viwork.runNotify.v1';
 
 type RunNotifyMode = 'off' | 'sound' | 'wechat' | 'both';
+type RunStreamBinding = {
+  runId: string;
+  sessionId: string;
+  messageId: string;
+  projectId: string;
+};
 
 function readStoredRunNotifyMode(): RunNotifyMode {
   try {
@@ -274,6 +282,8 @@ function App() {
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeStreamCloseRef = useRef<(() => void) | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const runStreamBindingRef = useRef<RunStreamBinding | null>(null);
+  const seenRunStreamEventsRef = useRef<Map<string, Set<string>>>(new Map());
   const initState = useMemo(() => readInitialStoredState(), []);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initState.selectedProjectId);
@@ -336,14 +346,18 @@ function App() {
   const [imageReferenceDrafts, setImageReferenceDrafts] = useState<ImageReferenceDraft[]>([]);
   const [chatSessions, setChatSessionsState] = useState<ChatSession[]>([]);
   const chatSessionsRef = useRef<ChatSession[]>([]);
+  const [scheduledTasksBySession, setScheduledTasksBySession] = useState<Record<string, ScheduledTask[]>>({});
+  const [scheduledTaskState, setScheduledTaskState] = useState<LoadState>('idle');
+  const [scheduledTaskBusyId, setScheduledTaskBusyId] = useState<string | null>(null);
+  const [scheduleOverviewOpen, setScheduleOverviewOpen] = useState(false);
   const [chatScope, setChatScope] = useState<ChatScope>(initState.chatScope);
   const [chatSessionsProjectId, setChatSessionsProjectId] = useState<string | null>(null);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(initState.activeChatSessionId);
   const [chatSessionView, setChatSessionView] = useState<ChatSessionView>(initState.chatSessionView);
   const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, editor: false, chat: false });
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [chatPanelOpen, setChatPanelOpen] = useState(true);
-  const [editorPanelOpen, setEditorPanelOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(initState.sidebarOpen);
+  const [chatPanelOpen, setChatPanelOpen] = useState(initState.chatPanelOpen);
+  const [editorPanelOpen, setEditorPanelOpen] = useState(initState.editorPanelOpen);
   const [panelWidths, setPanelWidths] = useState({ workspace: 238, chat: 340 });
   const [themeMode, setThemeMode] = useState<ThemeMode>(initState.themeMode);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'error' }>>([]);
@@ -549,6 +563,20 @@ function App() {
   );
   const activeChatLastMessage = activeChatSession?.messages[activeChatSession.messages.length - 1] ?? null;
   const activeChatSessionArchived = Boolean(activeChatSession?.archivedAt);
+  const allScheduledTasks = useMemo(
+    () => {
+      const allowedSessionIds = new Set(
+        chatSessions
+          .filter((session) => selectedProjectId ? session.projectId === selectedProjectId : session.id === activeChatSession?.id)
+          .map((session) => session.id),
+      );
+      return Object.entries(scheduledTasksBySession)
+        .filter(([sessionId]) => allowedSessionIds.has(sessionId))
+        .flatMap(([, tasks]) => tasks)
+        .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt));
+    },
+    [activeChatSession?.id, chatSessions, scheduledTasksBySession, selectedProjectId],
+  );
   const visibleEntries = useMemo(
     () => filterVisibleWorkspaceEntries(selectedProjectId && entriesProjectId === selectedProjectId ? entries : [], collapsedDirectoriesByProject[selectedProjectId ?? ''] ?? []),
     [collapsedDirectoriesByProject, entries, entriesProjectId, selectedProjectId],
@@ -716,6 +744,28 @@ function App() {
   }, [runNotifyMode]);
 
   useEffect(() => {
+    if (!activeChatSession || getSessionKind(activeChatSession) !== 'assistant') {
+      setScheduledTaskState('idle');
+      return;
+    }
+    void loadScheduledTasks(activeChatSession.id);
+  }, [activeChatSession?.id]);
+
+  useEffect(() => {
+    if (!activeChatSession || getSessionKind(activeChatSession) !== 'assistant') return;
+    const runningMessage = [...activeChatSession.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && message.status === 'running' && message.runId);
+    if (!runningMessage?.runId || activeRunIdRef.current === runningMessage.runId) return;
+    attachRunStream({
+      runId: runningMessage.runId,
+      sessionId: activeChatSession.id,
+      messageId: runningMessage.id,
+      projectId: activeChatSession.projectId,
+    });
+  }, [activeChatSession?.id, activeChatSession?.messages]);
+
+  useEffect(() => {
     writeStoredThemeMode(themeMode);
     document.documentElement.dataset.theme = themeMode;
     document.documentElement.style.colorScheme = themeMode === 'dark' ? 'dark' : 'light';
@@ -790,6 +840,10 @@ function App() {
   useEffect(() => {
     writeStoredActiveChatSessionView(chatSessionView);
   }, [chatSessionView]);
+
+  useEffect(() => {
+    writeStoredPanelVisibility({ sidebarOpen, editorPanelOpen, chatPanelOpen });
+  }, [chatPanelOpen, editorPanelOpen, sidebarOpen]);
 
   useEffect(() => {
     if (!activeChatSessionId) {
@@ -957,6 +1011,19 @@ function App() {
   }, [activeChatSessionId]);
 
   useEffect(() => {
+    autoScrollRef.current = true;
+    setShowScrollBottom(false);
+
+    const thread = chatThreadRef.current;
+    if (!thread) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      thread.scrollTop = thread.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeChatSession?.id]);
+
+  useEffect(() => {
     if (!autoScrollRef.current) {
       return;
     }
@@ -995,9 +1062,10 @@ function App() {
       }
     }
 
+    handleScroll();
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [activeChatSession?.id, chatPanelOpen]);
   async function loadProjects() {
     setProjectLoadState('loading');
     setProjectLoadError(null);
@@ -1068,18 +1136,11 @@ function App() {
         ...sessions,
       ]);
       setChatSessionsProjectId(projectId);
-      const stored = readStoredActiveChatSession();
-      const preferredSession = pickPreferredChatSession(sessions, stored.projectSessionIds[projectId] ?? null, chatSessionView);
+      const preferredSession = pickPreferredChatSession(sessions, null, chatSessionView);
       if (preferredSession) {
         setChatSessionView(preferredSession.archivedAt ? 'archived' : 'active');
       }
-      setActiveChatSessionId((currentId) => {
-        const currentSession = currentId ? sessions.find((session) => session.id === currentId) : null;
-        if (currentSession && sessionMatchesView(currentSession, chatSessionView)) {
-          return currentSession.id;
-        }
-        return preferredSession?.id ?? null;
-      });
+      setActiveChatSessionId(preferredSession?.id ?? null);
     } catch (error) {
       setRunError(errorToMessage(error));
       setChatSessionsProjectId(projectId);
@@ -1110,7 +1171,7 @@ function App() {
       const storedActive = readStoredActiveChatSession();
       const storedSessionId = storedActive.temporarySessionId ?? storedTemporary?.sessionId ?? null;
       const modeSessions = sessions.filter((session) => getSessionKind(session) === chatMode);
-      const preferredSession = pickPreferredChatSession(modeSessions, chatMode === 'assistant' ? storedSessionId : null, chatSessionView);
+      const preferredSession = pickPreferredChatSession(modeSessions, null, chatSessionView);
 
       if (!options.activate) {
         const latestSession = preferredSession ?? pickPreferredChatSession(modeSessions, null, 'active') ?? pickPreferredChatSession(sessions, null, 'active');
@@ -1653,6 +1714,63 @@ function App() {
     await loadWechatStatus();
   }
 
+  function attachRunStream(binding: RunStreamBinding) {
+    if (activeRunIdRef.current === binding.runId) return;
+
+    activeStreamCloseRef.current?.();
+    activeRunIdRef.current = binding.runId;
+    runStreamBindingRef.current = binding;
+    seedSeenStreamEvents(binding);
+    setRunState('running');
+    setRunError(null);
+
+    void apiClient.getRunEventSnapshot(binding.runId)
+      .then((snapshot) => {
+        if (runStreamBindingRef.current?.runId !== binding.runId) return;
+        replayMissingStreamEvents(binding, snapshot.events);
+      })
+      .catch(() => {
+        // The live SSE stream remains authoritative; a missing snapshot only means there is nothing to replay.
+      });
+
+    activeStreamCloseRef.current = apiClient.streamRunEvents(binding.runId, {
+      onEvent: (event) => replayMissingStreamEvents(binding, [event]),
+      onError: (error) => {
+        if (runStreamBindingRef.current?.runId !== binding.runId) return;
+        activeStreamCloseRef.current = null;
+        activeRunIdRef.current = null;
+        runStreamBindingRef.current = null;
+        updateMessageInSession(binding.sessionId, binding.messageId, (message) => ({
+          ...message,
+          status: 'error',
+          content: message.content || `运行失败：${userFacingRunError(error)}`,
+        }));
+      },
+    });
+  }
+
+  function replayMissingStreamEvents(binding: RunStreamBinding, events: StreamEvent[]) {
+    if (events.length === 0) return;
+    const existingEventKeys = seenRunStreamEventsRef.current.get(binding.runId) ?? seedSeenStreamEvents(binding);
+
+    for (const event of events) {
+      if (existingEventKeys.has(streamEventKey(event))) continue;
+      existingEventKeys.add(streamEventKey(event));
+      handleRunStreamEvent(binding.sessionId, binding.messageId, binding.projectId, event);
+    }
+  }
+
+  function seedSeenStreamEvents(binding: RunStreamBinding): Set<string> {
+    const existingEventKeys = new Set<string>();
+    const session = chatSessionsRef.current.find((item) => item.id === binding.sessionId);
+    const message = session?.messages.find((item) => item.id === binding.messageId);
+    for (const event of message?.streamEvents ?? []) {
+      existingEventKeys.add(streamEventKey(event));
+    }
+    seenRunStreamEventsRef.current.set(binding.runId, existingEventKeys);
+    return existingEventKeys;
+  }
+
   async function completeWechatSetup() {
     if (!wechatSetup) return;
     const status = await apiClient.completeWechatSetupSession(wechatSetup.sessionId, {
@@ -1824,23 +1942,14 @@ function App() {
           referencedFiles: response.run.referencedFiles,
           referencedSnippets: response.run.referencedSnippets ?? [],
           status: 'running',
+          runId: response.run.id,
         });
         appendMessageToSession(session.id, assistantMessage);
-        activeRunIdRef.current = response.run.id;
-        activeStreamCloseRef.current = apiClient.streamRunEvents(response.run.id, {
-          onEvent: (event) => handleRunStreamEvent(session.id, assistantMessage.id, runProjectId, event),
-          onError: (error) => {
-            activeStreamCloseRef.current = null;
-            activeRunIdRef.current = null;
-            const message = userFacingRunError(error);
-            setRunState('error');
-            setRunError(message);
-            updateMessageInSession(session.id, assistantMessage.id, (message) => ({
-              ...message,
-              status: 'error',
-              content: message.content || `运行失败：${userFacingRunError(error)}`,
-            }));
-          },
+        attachRunStream({
+          runId: response.run.id,
+          sessionId: session.id,
+          messageId: assistantMessage.id,
+          projectId: runProjectId,
         });
       }
     } catch (error) {
@@ -1856,11 +1965,138 @@ function App() {
     }
   }
 
+  async function loadScheduledTasks(sessionId: string) {
+    setScheduledTaskState('loading');
+    try {
+      const tasks = await apiClient.listSessionScheduledTasks(sessionId);
+      setScheduledTasksBySession((current) => ({ ...current, [sessionId]: tasks }));
+      setScheduledTaskState('idle');
+    } catch (error) {
+      setScheduledTaskState('error');
+      setRunError(errorToMessage(error));
+    }
+  }
+
+  async function loadProjectScheduledTasks(projectId: string) {
+    setScheduledTaskState('loading');
+    try {
+      const tasks = await apiClient.listProjectScheduledTasks(projectId);
+      setScheduledTasksBySession((current) => {
+        const next = { ...current };
+        const sessionIds = new Set(tasks.map((task) => task.sessionId));
+        for (const task of tasks) {
+          next[task.sessionId] = upsertScheduledTask(next[task.sessionId] ?? [], task);
+        }
+        for (const session of chatSessionsRef.current.filter((item) => item.projectId === projectId)) {
+          if (!sessionIds.has(session.id)) next[session.id] = [];
+        }
+        return next;
+      });
+      setScheduledTaskState('idle');
+    } catch (error) {
+      setScheduledTaskState('error');
+      setRunError(errorToMessage(error));
+    }
+  }
+
+  async function openScheduleOverview() {
+    setScheduleOverviewOpen(true);
+    if (selectedProjectId) {
+      await loadProjectScheduledTasks(selectedProjectId);
+      return;
+    }
+    const sessionId = activeChatSession?.id;
+    if (sessionId) await loadScheduledTasks(sessionId);
+  }
+
+  async function runScheduledTaskNow(taskId: string, sessionId = activeChatSession?.id) {
+    if (!sessionId) return;
+    setScheduledTaskBusyId(taskId);
+    showToast('正在执行定时任务', 'info');
+    try {
+      const response = await apiClient.runScheduledTaskNow(taskId);
+      setScheduledTasksBySession((current) => ({
+        ...current,
+        [sessionId]: upsertScheduledTask(current[sessionId] ?? [], response.task),
+      }));
+      if (response.userMessage && response.assistantMessage) {
+        appendServerMessagesToSession(sessionId, [response.userMessage, response.assistantMessage]);
+      }
+      if (response.run && response.assistantMessage) {
+        attachRunStream({
+          runId: response.run.id,
+          sessionId,
+          messageId: response.assistantMessage.id,
+          projectId: response.task.projectId,
+        });
+      }
+      const session = chatSessionsRef.current.find((item) => item.id === sessionId);
+      if (session) {
+        if (isTemporaryProjectId(session.projectId)) {
+          await loadTemporaryChatSessions();
+        } else {
+          await loadProjectChatSessions(session.projectId);
+        }
+      }
+      showToast('定时任务已立即执行', 'success');
+    } catch (error) {
+      showToast(`立即执行失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
+  async function pauseScheduledTask(taskId: string, sessionId = activeChatSession?.id) {
+    if (!sessionId) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.pauseScheduledTask(taskId);
+      await loadScheduledTasks(sessionId);
+      showToast('定时任务已停止', 'success');
+    } catch (error) {
+      showToast(`停止任务失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
+  async function resumeScheduledTask(taskId: string, sessionId = activeChatSession?.id) {
+    if (!sessionId) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.resumeScheduledTask(taskId);
+      await loadScheduledTasks(sessionId);
+      showToast('定时任务已恢复', 'success');
+    } catch (error) {
+      showToast(`恢复任务失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
+  async function deleteScheduledTask(taskId: string, sessionId = activeChatSession?.id) {
+    if (!sessionId) return;
+    const confirmed = await showConfirm({ title: '删除定时任务', message: '删除后无法恢复。', danger: true, confirmLabel: '删除' });
+    if (!confirmed) return;
+    setScheduledTaskBusyId(taskId);
+    try {
+      await apiClient.deleteScheduledTask(taskId);
+      await loadScheduledTasks(sessionId);
+      showToast('定时任务已删除', 'success');
+    } catch (error) {
+      showToast(`删除任务失败：${errorToMessage(error)}`, 'error');
+    } finally {
+      setScheduledTaskBusyId(null);
+    }
+  }
+
   async function stopRun() {
     const runId = activeRunIdRef.current;
     const closeStream = activeStreamCloseRef.current;
     activeRunIdRef.current = null;
     activeStreamCloseRef.current = null;
+    runStreamBindingRef.current = null;
+    if (runId) seenRunStreamEventsRef.current.delete(runId);
     closeStream?.();
     if (runId) {
       try {
@@ -2007,6 +2243,8 @@ function App() {
     if (event.type === 'run.end') {
       activeStreamCloseRef.current = null;
       activeRunIdRef.current = null;
+      runStreamBindingRef.current = null;
+      seenRunStreamEventsRef.current.delete(event.runId);
       if (streamFlushTimerRef.current) {
         clearTimeout(streamFlushTimerRef.current);
         streamFlushTimerRef.current = null;
@@ -2090,6 +2328,15 @@ function App() {
                 }
               } else if (event.type === 'run.end' && event.status === 'error' && !content) {
                 content = `运行失败：${userFacingRunError(event.errorMessage)}`;
+              }
+              if (event.type === 'tool_use.end') {
+                const task = scheduledTaskFromToolEvent(event);
+                if (task) {
+                  setScheduledTasksBySession((current) => ({
+                    ...current,
+                    [session.id]: upsertScheduledTask(current[session.id] ?? [], task),
+                  }));
+                }
               }
               if (event.type === 'run.end') {
                 finalStatus = event.status === 'error' ? 'error' : 'success';
@@ -2352,6 +2599,9 @@ function App() {
     event.preventDefault();
     const startX = event.clientX;
     const startWidths = { ...panelWidths };
+    const chatMaxWidth = typeof window === 'undefined'
+      ? CHAT_PANEL_FALLBACK_MAX_WIDTH
+      : Math.max(CHAT_PANEL_MIN_WIDTH, window.innerWidth - 96);
 
     function handlePointerMove(moveEvent: PointerEvent) {
       const deltaX = moveEvent.clientX - startX;
@@ -2365,7 +2615,7 @@ function App() {
 
         return {
           ...current,
-          chat: clamp(startWidths.chat - deltaX, CHAT_PANEL_MIN_WIDTH, CHAT_PANEL_MAX_WIDTH),
+          chat: clamp(startWidths.chat - deltaX, CHAT_PANEL_MIN_WIDTH, chatMaxWidth),
         };
       });
     }
@@ -2862,6 +3112,22 @@ function App() {
     );
   }
 
+  function appendServerMessagesToSession(sessionId: string, messages: ChatMessage[]) {
+    setChatSessions((currentSessions) =>
+      currentSessions.map((session) => {
+        if (session.id !== sessionId) return session;
+        const existingIds = new Set(session.messages.map((message) => message.id));
+        const nextMessages = messages.filter((message) => !existingIds.has(message.id));
+        if (nextMessages.length === 0) return session;
+        return {
+          ...session,
+          updatedAt: nextMessages[nextMessages.length - 1]?.createdAt ?? new Date().toISOString(),
+          messages: [...session.messages, ...nextMessages],
+        };
+      }),
+    );
+  }
+
   function markLatestRunningAssistantMessage(sessionId: string, content: string) {
     setChatSessions((currentSessions) =>
       currentSessions.map((session) => {
@@ -3031,6 +3297,7 @@ function App() {
         onOpenWechat={() => setActiveToolPanel('wechat')}
         onOpenGitSync={() => setActiveToolPanel('git')}
         onOpenHarness={openHarnessStandalone}
+        onOpenSchedules={() => void openScheduleOverview()}
       />
 
       <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
@@ -3053,6 +3320,15 @@ function App() {
                 <FolderUp size={14} />
               </button>
             </div>
+          </div>
+          <div className="sidebar-schedule-entry">
+            <button type="button" onClick={() => void openScheduleOverview()}>
+              <span>
+                <strong>定时任务</strong>
+                <small>{allScheduledTasks.length} 个任务</small>
+              </span>
+              <span className="scheduled-task-count">{scheduledTaskState === 'loading' ? '...' : allScheduledTasks.length}</span>
+            </button>
           </div>
           <div className="sidebar-scroll">
 
@@ -3615,8 +3891,14 @@ function App() {
                   <ChatMessageItem
                     key={message.id}
                     message={message}
+                    scheduledTasks={scheduledTasksBySession[activeChatSession.id] ?? []}
+                    busyTaskId={scheduledTaskBusyId}
                     onTextSelection={handleChatTextSelection}
                     onOpenAttachment={handleOpenChatAttachment}
+                    onRunScheduledTask={(taskId) => void runScheduledTaskNow(taskId, activeChatSession.id)}
+                    onPauseScheduledTask={(taskId) => void pauseScheduledTask(taskId, activeChatSession.id)}
+                    onResumeScheduledTask={(taskId) => void resumeScheduledTask(taskId, activeChatSession.id)}
+                    onDeleteScheduledTask={(taskId) => void deleteScheduledTask(taskId, activeChatSession.id)}
                     onChoiceSelect={(option) => { setPrompt((prev) => prev.trim() ? `${prev}\n${option}` : option); }}
                   />
                 ))
@@ -3827,6 +4109,44 @@ function App() {
               />
             ) : null}
 
+          </section>
+        </div>
+      ) : null}
+
+      {scheduleOverviewOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setScheduleOverviewOpen(false)}>
+          <section className="schedule-overview-modal" role="dialog" aria-modal="true" aria-labelledby="schedule-overview-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="schedule-overview-heading">
+              <div>
+                <p className="eyebrow">Scheduled Work</p>
+                <h2 id="schedule-overview-title">定时任务</h2>
+                <span>{selectedProjectId ? projectName(projects, selectedProjectId) : '当前工作区'} · {allScheduledTasks.length} 个任务</span>
+              </div>
+              <div className="schedule-overview-actions">
+                <button type="button" className="confirm-dialog__btn" onClick={() => selectedProjectId ? void loadProjectScheduledTasks(selectedProjectId) : activeChatSession ? void loadScheduledTasks(activeChatSession.id) : undefined}>刷新</button>
+                <button type="button" className="confirm-dialog__btn" onClick={() => setScheduleOverviewOpen(false)}>关闭</button>
+              </div>
+            </div>
+
+            <ScheduleOverviewBody
+              tasks={allScheduledTasks}
+              sessions={chatSessions}
+              projects={projects}
+              busyTaskId={scheduledTaskBusyId}
+              onRunNow={(task) => void runScheduledTaskNow(task.id, task.sessionId)}
+              onPause={(task) => void pauseScheduledTask(task.id, task.sessionId)}
+              onResume={(task) => void resumeScheduledTask(task.id, task.sessionId)}
+              onDelete={(task) => void deleteScheduledTask(task.id, task.sessionId)}
+              onOpenSession={(task) => {
+                const session = chatSessions.find((item) => item.id === task.sessionId);
+                if (session) {
+                  setChatScope(isTemporaryProjectId(session.projectId) ? 'temporary' : 'project');
+                  if (!isTemporaryProjectId(session.projectId)) setSelectedProjectId(session.projectId);
+                  openChatSession(session.id);
+                }
+                setScheduleOverviewOpen(false);
+              }}
+            />
           </section>
         </div>
       ) : null}
@@ -4128,17 +4448,30 @@ function CollapsibleSnippet({ snippet, index }: { snippet: ReferencedChatSnippet
 
 const ChatMessageItem = memo(function ChatMessageItem({
   message,
+  scheduledTasks,
+  busyTaskId,
   onTextSelection,
   onOpenAttachment,
+  onRunScheduledTask,
+  onPauseScheduledTask,
+  onResumeScheduledTask,
+  onDeleteScheduledTask,
   onChoiceSelect,
 }: {
   message: ChatMessage;
+  scheduledTasks: ScheduledTask[];
+  busyTaskId: string | null;
   onTextSelection: ChatMessageTextSelectionHandler;
   onOpenAttachment: (attachment: ChatMessageAttachment) => void;
+  onRunScheduledTask: (taskId: string) => void;
+  onPauseScheduledTask: (taskId: string) => void;
+  onResumeScheduledTask: (taskId: string) => void;
+  onDeleteScheduledTask: (taskId: string) => void;
   onChoiceSelect?: (option: string) => void;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
   const canCopy = message.content.trim().length > 0;
+  const messageScheduledTasks = useMemo(() => scheduledTasksFromMessage(message, scheduledTasks), [message, scheduledTasks]);
 
   async function copyMessageContent() {
     if (!canCopy) {
@@ -4214,6 +4547,22 @@ const ChatMessageItem = memo(function ChatMessageItem({
             </div>
           ) : null}
         </div>
+        {messageScheduledTasks.length > 0 ? (
+          <div className="chat-schedule-card-list">
+            {messageScheduledTasks.map((task) => (
+              <ScheduledTaskCard
+                key={`${message.id}-${task.id}`}
+                task={task}
+                busy={busyTaskId === task.id}
+                variant="message"
+                onRunNow={onRunScheduledTask}
+                onPause={onPauseScheduledTask}
+                onResume={onResumeScheduledTask}
+                onDelete={onDeleteScheduledTask}
+              />
+            ))}
+          </div>
+        ) : null}
         {message.role === 'assistant' && message.events && message.events.length > 0 ? (
           <details className="chat-events">
             <summary>执行详情</summary>
@@ -4541,6 +4890,33 @@ function writeStoredActiveChatSession(value: StoredActiveChatSession): void {
   }
 }
 
+function readStoredPanelVisibility(): { sidebarOpen: boolean; editorPanelOpen: boolean; chatPanelOpen: boolean } {
+  const fallback = { sidebarOpen: false, editorPanelOpen: true, chatPanelOpen: true };
+  if (typeof window === 'undefined') return fallback;
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PANEL_VISIBILITY_STORAGE_KEY) ?? 'null') as Partial<typeof fallback> | null;
+    if (!parsed) return fallback;
+    return {
+      sidebarOpen: typeof parsed.sidebarOpen === 'boolean' ? parsed.sidebarOpen : fallback.sidebarOpen,
+      editorPanelOpen: typeof parsed.editorPanelOpen === 'boolean' ? parsed.editorPanelOpen : fallback.editorPanelOpen,
+      chatPanelOpen: typeof parsed.chatPanelOpen === 'boolean' ? parsed.chatPanelOpen : fallback.chatPanelOpen,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredPanelVisibility(value: { sidebarOpen: boolean; editorPanelOpen: boolean; chatPanelOpen: boolean }): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(PANEL_VISIBILITY_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures; panel toggles still work for the current session.
+  }
+}
+
 function writeStoredProjectActiveChatSession(projectId: string, sessionId: string): void {
   const stored = readStoredActiveChatSession();
   writeStoredActiveChatSession({
@@ -4773,10 +5149,12 @@ function createChatMessage(
     streamEvents?: StreamEvent[];
     attachments?: ChatMessageAttachment[];
     status?: RunState;
+    runId?: string;
   } = {},
 ): ChatMessage {
   return {
     id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    runId: options.runId,
     role,
     content,
     createdAt: new Date().toISOString(),
@@ -4895,6 +5273,9 @@ function readInitialStoredState(): {
   chatScope: ChatScope;
   activeChatSessionId: string | null;
   chatSessionView: ChatSessionView;
+  sidebarOpen: boolean;
+  editorPanelOpen: boolean;
+  chatPanelOpen: boolean;
   themeMode: ThemeMode;
 } {
   // Read all localStorage in one shot to avoid ~16 sync getItem calls during mount
@@ -4919,6 +5300,7 @@ function readInitialStoredState(): {
       ? (selectedProjectId ? activeChatSession.projectSessionIds[selectedProjectId] ?? null : null)
       : activeChatSession.temporarySessionId ?? temporarySession?.sessionId ?? null,
     chatSessionView: activeChatSession.chatSessionView,
+    ...readStoredPanelVisibility(),
     themeMode: readStoredThemeMode(),
   };
 }
@@ -4975,6 +5357,329 @@ const WechatPanelBody = memo(function WechatPanelBody({
     </>
   );
 });
+
+const ScheduleOverviewBody = memo(function ScheduleOverviewBody({
+  tasks,
+  sessions,
+  projects,
+  busyTaskId,
+  onRunNow,
+  onPause,
+  onResume,
+  onDelete,
+  onOpenSession,
+}: {
+  tasks: ScheduledTask[];
+  sessions: ChatSession[];
+  projects: Project[];
+  busyTaskId: string | null;
+  onRunNow: (task: ScheduledTask) => void;
+  onPause: (task: ScheduledTask) => void;
+  onResume: (task: ScheduledTask) => void;
+  onDelete: (task: ScheduledTask) => void;
+  onOpenSession: (task: ScheduledTask) => void;
+}): JSX.Element {
+  const groups = useMemo(() => groupScheduledTasks(tasks, sessions, projects), [projects, sessions, tasks]);
+  if (tasks.length === 0) return <p className="scheduled-task-empty schedule-overview-empty">暂无定时任务</p>;
+
+  return (
+    <div className="schedule-overview-body">
+      {groups.map((project) => (
+        <details key={project.projectId} className="schedule-project-group">
+          <summary className="schedule-group-heading">
+            <strong>{project.projectName}</strong>
+            <span>{project.tasks.length} 个任务</span>
+          </summary>
+          {project.sessions.map((session) => (
+            <details key={session.sessionId} className="schedule-session-group">
+              <summary className="schedule-session-heading">
+                <span>{session.sessionTitle}</span>
+                <small>{session.tasks.length} 个任务</small>
+              </summary>
+              <button type="button" className="schedule-open-session" onClick={() => onOpenSession(session.tasks[0])}>打开会话</button>
+              <div className="schedule-overview-card-grid">
+                {session.tasks.map((task) => (
+                  <ScheduledTaskCard
+                    key={task.id}
+                    task={task}
+                    busy={busyTaskId === task.id}
+                    variant="overview"
+                    onRunNow={() => onRunNow(task)}
+                    onPause={() => onPause(task)}
+                    onResume={() => onResume(task)}
+                    onDelete={() => onDelete(task)}
+                  />
+                ))}
+              </div>
+            </details>
+          ))}
+        </details>
+      ))}
+    </div>
+  );
+});
+
+const ScheduledTaskBoard = memo(function ScheduledTaskBoard({
+  tasks,
+  state,
+  busyTaskId,
+  onRefresh,
+  onRunNow,
+  onPause,
+  onResume,
+  onDelete,
+}: {
+  tasks: ScheduledTask[];
+  state: LoadState;
+  busyTaskId: string | null;
+  onRefresh: () => void;
+  onRunNow: (taskId: string) => void;
+  onPause: (taskId: string) => void;
+  onResume: (taskId: string) => void;
+  onDelete: (taskId: string) => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`scheduled-task-board ${open ? 'open' : ''}`}>
+      <button
+        type="button"
+        className="scheduled-task-board__trigger"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-label="展开定时任务看板"
+      >
+        <span>定时任务</span>
+        <span className="scheduled-task-count">{state === 'loading' ? '...' : tasks.length}</span>
+      </button>
+      {open ? (
+        <div className="scheduled-task-board__body">
+          <div className="scheduled-task-toolbar">
+            <button type="button" className="scheduled-task-icon" onClick={onRefresh} title="刷新" aria-label="刷新定时任务">
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          {tasks.length > 0 ? tasks.map((task) => {
+            return (
+              <ScheduledTaskCard
+                key={task.id}
+                task={task}
+                busy={busyTaskId === task.id}
+                onRunNow={onRunNow}
+                onPause={onPause}
+                onResume={onResume}
+                onDelete={onDelete}
+              />
+            );
+          }) : (
+            <p className="scheduled-task-empty">当前会话暂无定时任务</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+const ScheduledTaskCard = memo(function ScheduledTaskCard({
+  task,
+  busy,
+  variant = 'compact',
+  onRunNow,
+  onPause,
+  onResume,
+  onDelete,
+}: {
+  task: ScheduledTask;
+  busy: boolean;
+  variant?: 'compact' | 'message' | 'overview';
+  onRunNow: (taskId: string) => void;
+  onPause: (taskId: string) => void;
+  onResume: (taskId: string) => void;
+  onDelete: (taskId: string) => void;
+}): JSX.Element {
+  const paused = task.status === 'paused' || task.status === 'cancelled';
+  const prompt = scheduledTaskPrompt(task);
+  const showLabels = variant === 'message' || variant === 'overview';
+  return (
+    <article className={`scheduled-task-card scheduled-task-card--${variant} ${task.status}`}>
+      <div className="scheduled-task-card__main">
+        <span className="scheduled-task-title" title={task.title}>{task.title}</span>
+        <span className="scheduled-task-meta">{scheduledTaskStatusLabel(task.status)} · {formatScheduleNextRun(task)}</span>
+        <span className="scheduled-task-message" title={prompt}>{prompt}</span>
+      </div>
+      <div className="scheduled-task-actions">
+        <button
+          type="button"
+          className="scheduled-task-icon"
+          disabled={busy}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseUp={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRunNow(task.id);
+          }}
+          title="立即执行"
+          aria-label="立即执行定时任务"
+        >
+          <Send size={13} />
+          {showLabels ? <span>{variant === 'overview' ? '执行' : '立即执行'}</span> : null}
+        </button>
+        <button
+          type="button"
+          className="scheduled-task-icon"
+          disabled={busy || task.status === 'completed'}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseUp={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            paused ? onResume(task.id) : onPause(task.id);
+          }}
+          title={paused ? '恢复' : '停止'}
+          aria-label={paused ? '恢复定时任务' : '停止定时任务'}
+        >
+          {paused ? <RefreshCw size={13} /> : <Square size={13} />}
+          {showLabels ? <span>{paused ? '恢复' : '停止'}</span> : null}
+        </button>
+        <button
+          type="button"
+          className="scheduled-task-icon danger"
+          disabled={busy}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseUp={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDelete(task.id);
+          }}
+          title="删除"
+          aria-label="删除定时任务"
+        >
+          <Trash2 size={13} />
+          {showLabels ? <span>删除</span> : null}
+        </button>
+      </div>
+      {busy ? <div className="scheduled-task-busy">处理中...</div> : null}
+    </article>
+  );
+});
+
+function projectName(projects: Project[], projectId: string): string {
+  return projects.find((project) => project.id === projectId)?.name ?? (isTemporaryProjectId(projectId) ? '临时工作区' : projectId);
+}
+
+function groupScheduledTasks(tasks: ScheduledTask[], sessions: ChatSession[], projects: Project[]): Array<{
+  projectId: string;
+  projectName: string;
+  tasks: ScheduledTask[];
+  sessions: Array<{ sessionId: string; sessionTitle: string; tasks: ScheduledTask[] }>;
+}> {
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const projectGroups = new Map<string, { projectId: string; projectName: string; tasks: ScheduledTask[]; sessions: Map<string, { sessionId: string; sessionTitle: string; tasks: ScheduledTask[] }> }>();
+  for (const task of tasks) {
+    const session = sessionsById.get(task.sessionId);
+    const projectId = session?.projectId ?? task.projectId;
+    const projectGroup = projectGroups.get(projectId) ?? {
+      projectId,
+      projectName: projectName(projects, projectId),
+      tasks: [] as ScheduledTask[],
+      sessions: new Map(),
+    };
+    projectGroup.tasks.push(task);
+    const sessionGroup = projectGroup.sessions.get(task.sessionId) ?? {
+      sessionId: task.sessionId,
+      sessionTitle: session?.title ?? task.sessionId,
+      tasks: [] as ScheduledTask[],
+    };
+    sessionGroup.tasks.push(task);
+    projectGroup.sessions.set(task.sessionId, sessionGroup);
+    projectGroups.set(projectId, projectGroup);
+  }
+  return [...projectGroups.values()].map((group) => ({
+    projectId: group.projectId,
+    projectName: group.projectName,
+    tasks: group.tasks.sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt)),
+    sessions: [...group.sessions.values()].map((session) => ({
+      ...session,
+      tasks: session.tasks.sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt)),
+    })),
+  }));
+}
+
+function scheduledTaskStatusLabel(status: ScheduledTask['status']): string {
+  switch (status) {
+    case 'active': return '运行中';
+    case 'paused': return '已停止';
+    case 'completed': return '已完成';
+    case 'cancelled': return '已取消';
+    case 'error': return '异常';
+    default: return status satisfies never;
+  }
+}
+
+function scheduledTaskPrompt(task: ScheduledTask): string {
+  return task.action.prompt ?? task.action.message ?? '执行时实时生成微信消息';
+}
+
+function scheduledTasksFromMessage(message: ChatMessage, sessionTasks: ScheduledTask[]): ScheduledTask[] {
+  if (message.role !== 'assistant' || message.streamEvents.length === 0) return [];
+  const byId = new Map(sessionTasks.map((task) => [task.id, task]));
+  const tasks: ScheduledTask[] = [];
+  for (const event of message.streamEvents) {
+    if (event.type !== 'tool_use.end') continue;
+    const task = scheduledTaskFromToolEvent(event);
+    if (!task) continue;
+    const latest = byId.get(task.id) ?? task;
+    if (!tasks.some((item) => item.id === latest.id)) tasks.push(latest);
+  }
+  return tasks;
+}
+
+function streamEventKey(event: StreamEvent): string {
+  const sequence = 'sequence' in event ? event.sequence ?? '' : '';
+  const toolCallId = 'toolCallId' in event ? event.toolCallId ?? '' : '';
+  const emittedAt = 'emittedAt' in event ? event.emittedAt ?? '' : '';
+  return `${event.type}:${event.runId}:${sequence}:${toolCallId}:${emittedAt}:${JSON.stringify(event)}`;
+}
+
+function scheduledTaskFromToolEvent(event: Extract<StreamEvent, { type: 'tool_use.end' }>): ScheduledTask | null {
+  if (event.status !== 'succeeded' || !event.outputText) return null;
+  const parsed = parseJsonObject(event.outputText);
+  const task = parsed?.task;
+  return isScheduledTask(task) ? task : null;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function isScheduledTask(value: unknown): value is ScheduledTask {
+  if (!value || typeof value !== 'object') return false;
+  const task = value as Partial<ScheduledTask>;
+  return typeof task.id === 'string'
+    && typeof task.projectId === 'string'
+    && typeof task.sessionId === 'string'
+    && typeof task.title === 'string'
+    && typeof task.nextRunAt === 'string'
+    && task.action?.type === 'wechat_message';
+}
+
+function upsertScheduledTask(tasks: ScheduledTask[], task: ScheduledTask): ScheduledTask[] {
+  const next = tasks.some((item) => item.id === task.id)
+    ? tasks.map((item) => item.id === task.id ? task : item)
+    : [task, ...tasks];
+  return next.sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt));
+}
+
+function formatScheduleNextRun(task: ScheduledTask): string {
+  if (task.status === 'completed') return task.lastRunAt ? `完成于 ${formatChatTime(task.lastRunAt)}` : '已完成';
+  return `下次 ${formatChatTime(task.nextRunAt)}`;
+}
 
 function Root(): JSX.Element {
   return isHarnessStandaloneRoute() ? <HarnessStandalonePage /> : <App />;

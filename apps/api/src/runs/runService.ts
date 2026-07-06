@@ -1,10 +1,8 @@
 import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunImageGenerationOptions, RunSource } from '@viwork/shared';
-import type { WechatIlinkClient } from '../wechat/wechatIlinkClient';
 
 export type WechatSendContext = {
-  ilinkClient: WechatIlinkClient;
-  userId: string;
-  contextToken: string;
+  sendText(input: { text: string }): Promise<void>;
+  sendFile(input: { bytes: Buffer; name: string; mimeType: string }): Promise<void>;
 };
 
 export type CreateRunInput = {

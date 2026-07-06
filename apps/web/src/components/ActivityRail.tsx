@@ -4,6 +4,7 @@ import {
   GitBranch,
   LayoutPanelLeft,
   MessageCircle,
+  Clock,
   Moon,
   Palette,
   Smartphone,
@@ -30,6 +31,7 @@ export function ActivityRail({
   onOpenWechat,
   onOpenGitSync,
   onOpenHarness,
+  onOpenSchedules,
 }: {
   sidebarOpen: boolean;
   editorOpen: boolean;
@@ -42,6 +44,7 @@ export function ActivityRail({
   onOpenWechat: () => void;
   onOpenGitSync: () => void;
   onOpenHarness: () => void;
+  onOpenSchedules: () => void;
 }): JSX.Element {
   return (
     <nav className="activity-rail" aria-label="主导航">
@@ -80,6 +83,16 @@ export function ActivityRail({
       </button>
 
       <div className="rail-spacer" />
+
+      <button
+        type="button"
+        className="rail-button"
+        onClick={onOpenSchedules}
+        aria-label="定时任务"
+        title="定时任务"
+      >
+        <Clock size={20} />
+      </button>
 
       <button
         type="button"

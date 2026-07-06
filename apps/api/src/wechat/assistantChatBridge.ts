@@ -3,6 +3,7 @@ import type { RunBus } from '../runs/runBus';
 import type { CreateRunInput, RunService } from '../runs/runService';
 import type { ChatMessageAttachment, StreamEvent } from '@viwork/shared';
 import type { WechatStore } from './wechatStore';
+import { createWechatSendContext } from './wechatStore';
 import type { WechatIlinkClient } from './wechatIlinkClient';
 
 export type AssistantChatBridge = {
@@ -73,10 +74,7 @@ export function createAssistantChatBridge(
       // 3. Start LangGraph run with source: 'wechat'
       let replyText = '';
       try {
-        const contextToken = await wechatStore.getIlinkContextToken(externalUserId);
-        const wechatContext = contextToken
-          ? { ilinkClient, userId: externalUserId, contextToken }
-          : undefined;
+        const wechatContext = createWechatSendContext({ wechatStore, ilinkClient });
 
         const { run } = await runService.createRun({
           ...runInput,
