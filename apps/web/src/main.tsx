@@ -110,6 +110,12 @@ const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
 const RUN_NOTIFY_STORAGE_KEY = 'viwork.runNotify.v1';
 
 type RunNotifyMode = 'off' | 'sound' | 'wechat' | 'both';
+type RunStreamBinding = {
+  runId: string;
+  sessionId: string;
+  messageId: string;
+  projectId: string;
+};
 
 function readStoredRunNotifyMode(): RunNotifyMode {
   try {
@@ -275,6 +281,8 @@ function App() {
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeStreamCloseRef = useRef<(() => void) | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const runStreamBindingRef = useRef<RunStreamBinding | null>(null);
+  const seenRunStreamEventsRef = useRef<Map<string, Set<string>>>(new Map());
   const initState = useMemo(() => readInitialStoredState(), []);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initState.selectedProjectId);
@@ -741,6 +749,20 @@ function App() {
     }
     void loadScheduledTasks(activeChatSession.id);
   }, [activeChatSession?.id]);
+
+  useEffect(() => {
+    if (!activeChatSession || getSessionKind(activeChatSession) !== 'assistant') return;
+    const runningMessage = [...activeChatSession.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && message.status === 'running' && message.runId);
+    if (!runningMessage?.runId || activeRunIdRef.current === runningMessage.runId) return;
+    attachRunStream({
+      runId: runningMessage.runId,
+      sessionId: activeChatSession.id,
+      messageId: runningMessage.id,
+      projectId: activeChatSession.projectId,
+    });
+  }, [activeChatSession?.id, activeChatSession?.messages]);
 
   useEffect(() => {
     writeStoredThemeMode(themeMode);
@@ -1680,6 +1702,63 @@ function App() {
     await loadWechatStatus();
   }
 
+  function attachRunStream(binding: RunStreamBinding) {
+    if (activeRunIdRef.current === binding.runId) return;
+
+    activeStreamCloseRef.current?.();
+    activeRunIdRef.current = binding.runId;
+    runStreamBindingRef.current = binding;
+    seedSeenStreamEvents(binding);
+    setRunState('running');
+    setRunError(null);
+
+    void apiClient.getRunEventSnapshot(binding.runId)
+      .then((snapshot) => {
+        if (runStreamBindingRef.current?.runId !== binding.runId) return;
+        replayMissingStreamEvents(binding, snapshot.events);
+      })
+      .catch(() => {
+        // The live SSE stream remains authoritative; a missing snapshot only means there is nothing to replay.
+      });
+
+    activeStreamCloseRef.current = apiClient.streamRunEvents(binding.runId, {
+      onEvent: (event) => replayMissingStreamEvents(binding, [event]),
+      onError: (error) => {
+        if (runStreamBindingRef.current?.runId !== binding.runId) return;
+        activeStreamCloseRef.current = null;
+        activeRunIdRef.current = null;
+        runStreamBindingRef.current = null;
+        updateMessageInSession(binding.sessionId, binding.messageId, (message) => ({
+          ...message,
+          status: 'error',
+          content: message.content || `运行失败：${userFacingRunError(error)}`,
+        }));
+      },
+    });
+  }
+
+  function replayMissingStreamEvents(binding: RunStreamBinding, events: StreamEvent[]) {
+    if (events.length === 0) return;
+    const existingEventKeys = seenRunStreamEventsRef.current.get(binding.runId) ?? seedSeenStreamEvents(binding);
+
+    for (const event of events) {
+      if (existingEventKeys.has(streamEventKey(event))) continue;
+      existingEventKeys.add(streamEventKey(event));
+      handleRunStreamEvent(binding.sessionId, binding.messageId, binding.projectId, event);
+    }
+  }
+
+  function seedSeenStreamEvents(binding: RunStreamBinding): Set<string> {
+    const existingEventKeys = new Set<string>();
+    const session = chatSessionsRef.current.find((item) => item.id === binding.sessionId);
+    const message = session?.messages.find((item) => item.id === binding.messageId);
+    for (const event of message?.streamEvents ?? []) {
+      existingEventKeys.add(streamEventKey(event));
+    }
+    seenRunStreamEventsRef.current.set(binding.runId, existingEventKeys);
+    return existingEventKeys;
+  }
+
   async function completeWechatSetup() {
     if (!wechatSetup) return;
     const status = await apiClient.completeWechatSetupSession(wechatSetup.sessionId, {
@@ -1851,23 +1930,14 @@ function App() {
           referencedFiles: response.run.referencedFiles,
           referencedSnippets: response.run.referencedSnippets ?? [],
           status: 'running',
+          runId: response.run.id,
         });
         appendMessageToSession(session.id, assistantMessage);
-        activeRunIdRef.current = response.run.id;
-        activeStreamCloseRef.current = apiClient.streamRunEvents(response.run.id, {
-          onEvent: (event) => handleRunStreamEvent(session.id, assistantMessage.id, runProjectId, event),
-          onError: (error) => {
-            activeStreamCloseRef.current = null;
-            activeRunIdRef.current = null;
-            const message = userFacingRunError(error);
-            setRunState('error');
-            setRunError(message);
-            updateMessageInSession(session.id, assistantMessage.id, (message) => ({
-              ...message,
-              status: 'error',
-              content: message.content || `运行失败：${userFacingRunError(error)}`,
-            }));
-          },
+        attachRunStream({
+          runId: response.run.id,
+          sessionId: session.id,
+          messageId: assistantMessage.id,
+          projectId: runProjectId,
         });
       }
     } catch (error) {
@@ -1932,8 +2002,22 @@ function App() {
     setScheduledTaskBusyId(taskId);
     showToast('正在执行定时任务', 'info');
     try {
-      await apiClient.runScheduledTaskNow(taskId);
-      await loadScheduledTasks(sessionId);
+      const response = await apiClient.runScheduledTaskNow(taskId);
+      setScheduledTasksBySession((current) => ({
+        ...current,
+        [sessionId]: upsertScheduledTask(current[sessionId] ?? [], response.task),
+      }));
+      if (response.userMessage && response.assistantMessage) {
+        appendServerMessagesToSession(sessionId, [response.userMessage, response.assistantMessage]);
+      }
+      if (response.run && response.assistantMessage) {
+        attachRunStream({
+          runId: response.run.id,
+          sessionId,
+          messageId: response.assistantMessage.id,
+          projectId: response.task.projectId,
+        });
+      }
       const session = chatSessionsRef.current.find((item) => item.id === sessionId);
       if (session) {
         if (isTemporaryProjectId(session.projectId)) {
@@ -1999,6 +2083,8 @@ function App() {
     const closeStream = activeStreamCloseRef.current;
     activeRunIdRef.current = null;
     activeStreamCloseRef.current = null;
+    runStreamBindingRef.current = null;
+    if (runId) seenRunStreamEventsRef.current.delete(runId);
     closeStream?.();
     if (runId) {
       try {
@@ -2145,6 +2231,8 @@ function App() {
     if (event.type === 'run.end') {
       activeStreamCloseRef.current = null;
       activeRunIdRef.current = null;
+      runStreamBindingRef.current = null;
+      seenRunStreamEventsRef.current.delete(event.runId);
       if (streamFlushTimerRef.current) {
         clearTimeout(streamFlushTimerRef.current);
         streamFlushTimerRef.current = null;
@@ -3004,6 +3092,22 @@ function App() {
           title: title || session.title,
           updatedAt: messages[messages.length - 1]?.createdAt ?? new Date().toISOString(),
           messages: [...session.messages, ...messages],
+        };
+      }),
+    );
+  }
+
+  function appendServerMessagesToSession(sessionId: string, messages: ChatMessage[]) {
+    setChatSessions((currentSessions) =>
+      currentSessions.map((session) => {
+        if (session.id !== sessionId) return session;
+        const existingIds = new Set(session.messages.map((message) => message.id));
+        const nextMessages = messages.filter((message) => !existingIds.has(message.id));
+        if (nextMessages.length === 0) return session;
+        return {
+          ...session,
+          updatedAt: nextMessages[nextMessages.length - 1]?.createdAt ?? new Date().toISOString(),
+          messages: [...session.messages, ...nextMessages],
         };
       }),
     );
@@ -5003,10 +5107,12 @@ function createChatMessage(
     streamEvents?: StreamEvent[];
     attachments?: ChatMessageAttachment[];
     status?: RunState;
+    runId?: string;
   } = {},
 ): ChatMessage {
   return {
     id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    runId: options.runId,
     role,
     content,
     createdAt: new Date().toISOString(),
@@ -5481,6 +5587,13 @@ function scheduledTasksFromMessage(message: ChatMessage, sessionTasks: Scheduled
     if (!tasks.some((item) => item.id === latest.id)) tasks.push(latest);
   }
   return tasks;
+}
+
+function streamEventKey(event: StreamEvent): string {
+  const sequence = 'sequence' in event ? event.sequence ?? '' : '';
+  const toolCallId = 'toolCallId' in event ? event.toolCallId ?? '' : '';
+  const emittedAt = 'emittedAt' in event ? event.emittedAt ?? '' : '';
+  return `${event.type}:${event.runId}:${sequence}:${toolCallId}:${emittedAt}:${JSON.stringify(event)}`;
 }
 
 function scheduledTaskFromToolEvent(event: Extract<StreamEvent, { type: 'tool_use.end' }>): ScheduledTask | null {

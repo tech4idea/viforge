@@ -135,12 +135,13 @@ export type ApiClient = {
   createImageGeneration(input: ImageGenerationRequest): Promise<ImageGenerationResponse>;
   listSessionScheduledTasks(sessionId: string): Promise<ScheduledTask[]>;
   listProjectScheduledTasks(projectId: string): Promise<ScheduledTask[]>;
-  runScheduledTaskNow(taskId: string): Promise<ScheduledTask>;
+  runScheduledTaskNow(taskId: string): Promise<ScheduleRunNowResponse>;
   pauseScheduledTask(taskId: string): Promise<ScheduledTask>;
   resumeScheduledTask(taskId: string): Promise<ScheduledTask>;
   deleteScheduledTask(taskId: string): Promise<{ deleted: true }>;
   createRun(input: CreateRunInput): Promise<CreateRunResponse>;
   cancelRun(runId: string): Promise<void>;
+  getRunEventSnapshot(runId: string): Promise<{ events: StreamEvent[] }>;
   streamRunEvents(runId: string, handlers: StreamRunHandlers): () => void;
   listSkills(): Promise<TheaterSkill[]>;
   createSkill(input: CreateSkillInput): Promise<TheaterSkill>;
@@ -217,6 +218,13 @@ export type CreateRunInput = {
 export type CreateRunResponse = {
   run: AgentRun;
   events?: RunEvent[];
+};
+
+export type ScheduleRunNowResponse = {
+  task: ScheduledTask;
+  run?: AgentRun;
+  userMessage?: ChatMessage;
+  assistantMessage?: ChatMessage;
 };
 
 export type StreamRunHandlers = {
@@ -496,7 +504,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     listProjectScheduledTasks: (projectId) =>
       request<ScheduledTask[]>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/schedules`),
     runScheduledTaskNow: (taskId) =>
-      request<ScheduledTask>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/run-now`, { method: 'POST' }),
+      request<ScheduleRunNowResponse>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/run-now`, { method: 'POST' }),
     pauseScheduledTask: (taskId) =>
       request<ScheduledTask>(fetcher, baseUrl, `/api/schedules/${encodePathSegment(taskId)}/cancel`, { method: 'POST' }),
     resumeScheduledTask: (taskId) =>
@@ -510,15 +518,27 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     cancelRun: (runId) =>
       request(fetcher, baseUrl, `/api/runs/${encodePathSegment(runId)}/cancel`, { method: 'POST' }).then(() => {}),
+    getRunEventSnapshot: (runId) =>
+      request<{ events: StreamEvent[] }>(fetcher, baseUrl, `/api/runs/${encodePathSegment(runId)}/events/snapshot`),
     streamRunEvents: (runId, handlers) => {
       const source = new EventSource(`${baseUrl}/api/runs/${encodePathSegment(runId)}/events`);
       let closedAfterTerminalEvent = false;
+      let reconnectWarningTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearReconnectWarning = () => {
+        if (!reconnectWarningTimer) return;
+        clearTimeout(reconnectWarningTimer);
+        reconnectWarningTimer = null;
+      };
+
       source.onmessage = (event) => {
         try {
+          clearReconnectWarning();
           const streamEvent = JSON.parse(event.data) as StreamEvent;
           handlers.onEvent(streamEvent);
           if (streamEvent.type === 'run.end') {
             closedAfterTerminalEvent = true;
+            clearReconnectWarning();
             source.close();
           }
         } catch (error) {
@@ -527,13 +547,19 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       };
       source.onerror = () => {
         if (closedAfterTerminalEvent) {
+          clearReconnectWarning();
           source.close();
           return;
         }
-        handlers.onError?.(new Error('Run event stream interrupted'));
+        reconnectWarningTimer ??= setTimeout(() => {
+          console.warn('[runs] event stream is still reconnecting', { runId });
+          reconnectWarningTimer = null;
+        }, 30_000);
+      };
+      return () => {
+        clearReconnectWarning();
         source.close();
       };
-      return () => source.close();
     },
     listSkills: () => request<TheaterSkill[]>(fetcher, baseUrl, '/api/skills'),
     createSkill: (input) =>

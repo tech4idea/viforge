@@ -30,10 +30,10 @@ export function createScheduleRoutes(scheduleStore: ScheduleStore, scheduleServi
     const current = (await scheduleStore.listTasks()).find((item) => item.id === taskId);
     if (!current) return context.json({ error: 'Schedule not found' }, 404);
     if (current.status !== 'active') return context.json({ error: 'Schedule is not active', task: current }, 409);
-    const task = await scheduleService.executeTaskNow(taskId);
-    if (!task) return context.json({ error: 'Schedule not found' }, 404);
-    if (task.status === 'error') return context.json({ error: task.lastError ?? 'Schedule execution failed', task }, 500);
-    return context.json(task);
+    const result = await scheduleService.executeTaskNow(taskId);
+    if (!result) return context.json({ error: 'Schedule not found' }, 404);
+    if (result.task.status === 'error') return context.json({ error: result.task.lastError ?? 'Schedule execution failed', task: result.task }, 500);
+    return context.json(result);
   });
 
   routes.delete('/schedules/:taskId', async (context) => {

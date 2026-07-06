@@ -59,6 +59,7 @@ export type AgentRun = {
 
 export type ChatMessage = {
   id: string;
+  runId?: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;

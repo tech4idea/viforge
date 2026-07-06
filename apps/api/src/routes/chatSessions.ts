@@ -25,6 +25,7 @@ const chatMessageAttachmentSchema = z.object({
 
 const chatMessageSchema = z.object({
   id: z.string().min(1),
+  runId: z.string().min(1).optional(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
   createdAt: z.string().min(1),

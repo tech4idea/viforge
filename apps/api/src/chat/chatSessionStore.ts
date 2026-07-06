@@ -262,6 +262,10 @@ function normalizeHistoryChatMessage(message: ChatMessage): ChatMessage {
     };
   }
 
+  if (normalized.runId) {
+    return normalized;
+  }
+
   return {
     ...normalized,
     status: 'error',

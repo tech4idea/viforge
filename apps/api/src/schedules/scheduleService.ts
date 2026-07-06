@@ -6,7 +6,14 @@ import type { WechatStore } from '../wechat/wechatStore';
 import { createWechatSendContext } from '../wechat/wechatStore';
 import type { ScheduleStore } from './scheduleStore';
 import { computeNextRunAt } from './scheduleTime';
-import type { ChatMessage, ScheduledTask, StreamEvent } from '@viwork/shared';
+import type { AgentRun, ChatMessage, ScheduledTask, StreamEvent } from '@viwork/shared';
+
+export type ScheduleRunNowResult = {
+  task: ScheduledTask;
+  run?: AgentRun;
+  userMessage?: ChatMessage;
+  assistantMessage?: ChatMessage;
+};
 
 export type ScheduleService = {
   createTask(input: {
@@ -19,7 +26,7 @@ export type ScheduleService = {
     nextRunAt: string;
   }): Promise<{ task: ScheduledTask; reply: string }>;
   executeTask(taskId: string): Promise<ScheduledTask | undefined>;
-  executeTaskNow(taskId: string): Promise<ScheduledTask | undefined>;
+  executeTaskNow(taskId: string): Promise<ScheduleRunNowResult | undefined>;
   pauseTask(taskId: string): Promise<ScheduledTask | undefined>;
   resumeTask(taskId: string): Promise<ScheduledTask | undefined>;
   runDueNow(): Promise<void>;
@@ -106,8 +113,46 @@ export function createScheduleService(input: {
     return executeTask(taskId, { force: true });
   }
 
-  async function executeTaskNow(taskId: string): Promise<ScheduledTask | undefined> {
-    return executeTask(taskId, { force: true });
+  async function executeTaskNow(taskId: string): Promise<ScheduleRunNowResult | undefined> {
+    const current = (await scheduleStore.listTasks()).find((task) => task.id === taskId);
+    if (!current) return undefined;
+    if (current.status !== 'active') return { task: current };
+
+    const status = await wechatStore.getStatus();
+    if (status.state !== 'connected' || !status.connection) {
+      const task = await scheduleStore.updateTask(taskId, (item) => ({
+        ...item,
+        status: 'error',
+        lastError: 'WeChat is not connected',
+      }));
+      return task ? { task } : undefined;
+    }
+
+    try {
+      const started = await startTaskAsStreamingChatRun(current, {
+        chatSessionStore,
+        runService,
+        runBus,
+        wechatStore,
+        ilinkClient,
+        model: resolveScheduleChatModel(),
+      });
+
+      void finalizeStreamingTaskRun(current, started.assistantMessage.id, started.run.id, {
+        chatSessionStore,
+        scheduleStore,
+        runBus: runBus!,
+      });
+
+      return { task: current, ...started };
+    } catch (error) {
+      const task = await scheduleStore.updateTask(taskId, (item) => ({
+        ...item,
+        status: 'error',
+        lastError: error instanceof Error ? error.message : 'Schedule execution failed',
+      }));
+      return task ? { task } : undefined;
+    }
   }
 
   return {
@@ -130,7 +175,7 @@ export function createScheduleService(input: {
       return { task, reply };
     },
 
-    executeTask: (taskId) => executeTaskNow(taskId),
+    executeTask: (taskId) => executeTask(taskId, { force: true }),
 
     executeTaskNow,
 
@@ -178,19 +223,9 @@ async function executeTaskAsChatMessage(task: ScheduledTask, context: {
     throw new Error('Schedule run service is not configured');
   }
 
-  const userMessageContent = buildScheduleUserMessage(task, prompt);
-  await context.chatSessionStore.appendMessage(task.sessionId, {
-    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    role: 'user',
-    content: userMessageContent,
-    createdAt: new Date().toISOString(),
-    attachments: [],
-    referencedFiles: [],
-    referencedSnippets: [],
-    streamEvents: [],
-    status: 'success',
-    events: [],
-  });
+  const userMessage = createScheduleUserMessage(buildScheduleUserMessage(task, prompt));
+  await context.chatSessionStore.appendMessage(task.sessionId, userMessage);
+  const userMessageContent = userMessage.content;
 
   const { run } = await context.runService.createRun({
     projectId: task.projectId,
@@ -203,6 +238,75 @@ async function executeTaskAsChatMessage(task: ScheduledTask, context: {
 
   const collected = await collectRunText(context.runBus, run.id);
   return { message: createScheduleAssistantMessage(collected.text, collected.events, collected.status) };
+}
+
+async function startTaskAsStreamingChatRun(task: ScheduledTask, context: {
+  chatSessionStore: ChatSessionStore;
+  runService: RunService | null;
+  runBus: RunBus | null;
+  wechatStore: WechatStore;
+  ilinkClient: WechatIlinkClient;
+  model?: string;
+}): Promise<{ run: AgentRun; userMessage: ChatMessage; assistantMessage: ChatMessage }> {
+  const prompt = getActionPrompt(task.action);
+  if (!context.runService || !context.runBus) {
+    throw new Error('Schedule run service is not configured');
+  }
+
+  const userMessageContent = buildScheduleUserMessage(task, prompt);
+  const userMessage = createScheduleUserMessage(userMessageContent);
+  const assistantMessage = createScheduleAssistantMessage('', [], 'success');
+  assistantMessage.status = 'running';
+
+  await context.chatSessionStore.appendMessage(task.sessionId, userMessage);
+  await context.chatSessionStore.appendMessage(task.sessionId, assistantMessage);
+
+  const { run } = await context.runService.createRun({
+    projectId: task.projectId,
+    sessionId: task.sessionId,
+    prompt: userMessageContent,
+    model: context.model,
+    source: 'schedule',
+    wechat: createWechatSendContext({ wechatStore: context.wechatStore, ilinkClient: context.ilinkClient }),
+  });
+
+  await context.chatSessionStore.updateMessage(task.sessionId, assistantMessage.id, { ...assistantMessage, runId: run.id });
+
+  return { run, userMessage, assistantMessage: { ...assistantMessage, runId: run.id } };
+}
+
+async function finalizeStreamingTaskRun(task: ScheduledTask, assistantMessageId: string, runId: string, context: {
+  chatSessionStore: ChatSessionStore;
+  scheduleStore: ScheduleStore;
+  runBus: RunBus;
+}): Promise<void> {
+  const collected = await collectRunText(context.runBus, runId);
+  const assistantMessage = createScheduleAssistantMessage(collected.text, collected.events, collected.status);
+  await context.chatSessionStore.updateMessage(task.sessionId, assistantMessageId, {
+    ...assistantMessage,
+    id: assistantMessageId,
+    runId,
+  });
+
+  if (collected.status === 'error') {
+    await context.scheduleStore.updateTask(task.id, (current) => ({
+      ...current,
+      status: 'error',
+      lastError: collected.text,
+    }));
+    return;
+  }
+
+  const now = new Date();
+  const nextRunAt = computeNextRunAt(task, now);
+  const nextRunPatch = nextRunAt ? { nextRunAt } : {};
+  await context.scheduleStore.updateTask(task.id, (current) => ({
+    ...current,
+    status: nextRunAt ? 'active' : 'completed',
+    ...nextRunPatch,
+    lastRunAt: now.toISOString(),
+    lastError: undefined,
+  }));
 }
 
 function resolveScheduleChatModel(): string | undefined {
@@ -229,6 +333,21 @@ function buildScheduleUserMessage(task: ScheduledTask, prompt: string): string {
     `创建依据：${task.sourcePrompt}`,
     `本次生成要求：${prompt}`,
   ].join('\n');
+}
+
+function createScheduleUserMessage(content: string): ChatMessage {
+  return {
+    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    role: 'user',
+    content,
+    createdAt: new Date().toISOString(),
+    attachments: [],
+    referencedFiles: [],
+    referencedSnippets: [],
+    streamEvents: [],
+    status: 'success',
+    events: [],
+  };
 }
 
 function createScheduleAssistantMessage(content: string, events: StreamEvent[], status: 'success' | 'error'): ChatMessage {

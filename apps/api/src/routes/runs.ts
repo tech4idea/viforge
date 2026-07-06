@@ -143,6 +143,12 @@ export function createRunsRoutes(
     return context.json({ cancelled: true });
   });
 
+  routes.get('/runs/:runId/events/snapshot', (context) => {
+    const runId = context.req.param('runId');
+    if (!bus) return context.json({ error: 'Run bus not available' }, 500);
+    return context.json({ events: bus.getEvents(runId) });
+  });
+
   return routes;
 }
 
