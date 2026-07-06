@@ -13,8 +13,10 @@ if (started) {
 }
 
 const PREFERRED_API_PORT = 3001;
+const API_START_TIMEOUT_MS = 120_000;
 let apiProcess: ChildProcessWithoutNullStreams | null = null;
 const desktopAccessToken = randomUUID();
+const apiOutputTail: string[] = [];
 
 async function createWindow(): Promise<void> {
   const apiUrl = await startApiServer();
@@ -59,21 +61,43 @@ async function startApiServer(): Promise<string> {
     stdio: 'pipe',
   });
 
-  apiProcess.stderr.on('data', (chunk) => console.error(`[api] ${String(chunk)}`));
-  apiProcess.stdout.on('data', (chunk) => console.info(`[api] ${String(chunk)}`));
+  apiProcess.stderr.on('data', (chunk) => appendApiOutput('stderr', chunk));
+  apiProcess.stdout.on('data', (chunk) => appendApiOutput('stdout', chunk));
   apiProcess.on('exit', (code) => {
     if (code !== 0) console.error(`[api] exited with code ${code ?? 'unknown'}`);
   });
 
   try {
-    await waitForApi(apiPort, desktopAccessToken, 30_000);
+    await waitForApi(apiPort, desktopAccessToken, API_START_TIMEOUT_MS);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'API server failed to start.';
+    const message = [
+      error instanceof Error ? error.message : 'API server failed to start.',
+      formatApiOutputTail(),
+    ].filter(Boolean).join('\n\n');
     await dialog.showMessageBox({ type: 'error', title: 'viwork 启动失败', message });
     throw error;
   }
 
   return `http://127.0.0.1:${apiPort}`;
+}
+
+function appendApiOutput(stream: 'stdout' | 'stderr', chunk: Buffer | string): void {
+  const text = String(chunk);
+  const prefixed = `[api:${stream}] ${text}`;
+  if (stream === 'stderr') {
+    console.error(prefixed);
+  } else {
+    console.info(prefixed);
+  }
+  for (const line of text.split(/\r?\n/).filter(Boolean)) {
+    apiOutputTail.push(`[${stream}] ${line}`);
+  }
+  while (apiOutputTail.length > 30) apiOutputTail.shift();
+}
+
+function formatApiOutputTail(): string {
+  if (apiOutputTail.length === 0) return '';
+  return `最近 API 日志:\n${apiOutputTail.join('\n')}`;
 }
 
 function resolveApiEntry(resourcesPath: string): string {
