@@ -555,8 +555,18 @@ function App() {
   const activeChatLastMessage = activeChatSession?.messages[activeChatSession.messages.length - 1] ?? null;
   const activeChatSessionArchived = Boolean(activeChatSession?.archivedAt);
   const allScheduledTasks = useMemo(
-    () => Object.values(scheduledTasksBySession).flat().sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt)),
-    [scheduledTasksBySession],
+    () => {
+      const allowedSessionIds = new Set(
+        chatSessions
+          .filter((session) => selectedProjectId ? session.projectId === selectedProjectId : session.id === activeChatSession?.id)
+          .map((session) => session.id),
+      );
+      return Object.entries(scheduledTasksBySession)
+        .filter(([sessionId]) => allowedSessionIds.has(sessionId))
+        .flatMap(([, tasks]) => tasks)
+        .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt));
+    },
+    [activeChatSession?.id, chatSessions, scheduledTasksBySession, selectedProjectId],
   );
   const visibleEntries = useMemo(
     () => filterVisibleWorkspaceEntries(selectedProjectId && entriesProjectId === selectedProjectId ? entries : [], collapsedDirectoriesByProject[selectedProjectId ?? ''] ?? []),

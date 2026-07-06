@@ -143,6 +143,9 @@ describe('schedule routes', () => {
     expect(pause.status).toBe(200);
     expect((await pause.json() as { status: string }).status).toBe('paused');
 
+    const pausedRunNow = await app.request(`/api/schedules/${task.id}/run-now`, { method: 'POST' });
+    expect(pausedRunNow.status).toBe(409);
+
     const resume = await app.request(`/api/schedules/${task.id}/resume`, { method: 'POST' });
     expect(resume.status).toBe(200);
     expect((await resume.json() as { status: string }).status).toBe('active');

@@ -79,7 +79,7 @@ export function createApp(): Hono {
   });
   scheduleService.setRunService(langGraphRunService, runBus);
   scheduleService.start();
-  app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore, { store: wechatStore, ilinkClient }));
+  app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore));
   app.route('/api', createRunEventsRoutes(runBus));
   app.route('/api', createHarnessRoutes(harnessStore));
 

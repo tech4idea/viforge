@@ -10,8 +10,6 @@ import { traceIdFromRequest } from '../aigcHubHeaders';
 import type { RunService } from '../runs/runService';
 import type { RunBus } from '../runs/runBus';
 import type { HarnessStore } from '../harness/harnessStore';
-import type { WechatIlinkClient } from '../wechat/wechatIlinkClient';
-import { createWechatSendContext, type WechatStore } from '../wechat/wechatStore';
 
 const createRunSchema = z.object({
   projectId: z.string().transform((projectId) => projectId.trim()).pipe(z.string().min(1)),
@@ -43,7 +41,6 @@ export function createRunsRoutes(
   service: RunService,
   bus?: RunBus,
   harnessStore?: HarnessStore,
-  wechat?: { store: WechatStore; ilinkClient: WechatIlinkClient },
 ): Hono {
   const routes = new Hono();
 
@@ -89,9 +86,6 @@ export function createRunsRoutes(
         inputSnapshotId: snapshot?.id,
         source: 'web',
         traceId,
-        wechat: wechat
-          ? createWechatSendContext({ wechatStore: wechat.store, ilinkClient: wechat.ilinkClient })
-          : undefined,
       });
       appendJsonLog('api-runs.jsonl', {
         scope: 'runs.route',

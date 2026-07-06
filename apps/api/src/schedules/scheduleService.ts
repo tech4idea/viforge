@@ -19,6 +19,7 @@ export type ScheduleService = {
     nextRunAt: string;
   }): Promise<{ task: ScheduledTask; reply: string }>;
   executeTask(taskId: string): Promise<ScheduledTask | undefined>;
+  executeTaskNow(taskId: string): Promise<ScheduledTask | undefined>;
   pauseTask(taskId: string): Promise<ScheduledTask | undefined>;
   resumeTask(taskId: string): Promise<ScheduledTask | undefined>;
   runDueNow(): Promise<void>;
@@ -47,7 +48,7 @@ export function createScheduleService(input: {
     try {
       const dueTasks = await scheduleStore.listTasks({ dueAt: new Date(), statuses: ['active'] });
       for (const task of dueTasks) {
-        await executeTask(task.id);
+        await executeDueTask(task.id);
       }
     } catch (error) {
       console.error('[schedule] tick failed', error);
@@ -58,7 +59,9 @@ export function createScheduleService(input: {
 
   async function executeTask(taskId: string, options: { force?: boolean } = {}): Promise<ScheduledTask | undefined> {
     const current = (await scheduleStore.listTasks()).find((task) => task.id === taskId);
-    if (!current || (!options.force && current.status !== 'active')) return current;
+    if (!current) return undefined;
+    if (current.status !== 'active') return current;
+    if (!options.force) return current;
 
     try {
       const status = await wechatStore.getStatus();
@@ -96,6 +99,17 @@ export function createScheduleService(input: {
     }
   }
 
+  async function executeDueTask(taskId: string): Promise<ScheduledTask | undefined> {
+    const current = (await scheduleStore.listTasks()).find((task) => task.id === taskId);
+    if (!current || current.status !== 'active') return current;
+    if (Date.parse(current.nextRunAt) > Date.now()) return current;
+    return executeTask(taskId, { force: true });
+  }
+
+  async function executeTaskNow(taskId: string): Promise<ScheduledTask | undefined> {
+    return executeTask(taskId, { force: true });
+  }
+
   return {
     async createTask({ projectId, sessionId, title, sourcePrompt, schedule, action, nextRunAt }) {
       const session = await chatSessionStore.getSession(sessionId);
@@ -116,7 +130,9 @@ export function createScheduleService(input: {
       return { task, reply };
     },
 
-    executeTask: (taskId) => executeTask(taskId, { force: true }),
+    executeTask: (taskId) => executeTaskNow(taskId),
+
+    executeTaskNow,
 
     pauseTask(taskId) {
       return scheduleStore.updateTask(taskId, (task) => ({ ...task, status: 'paused' }));
