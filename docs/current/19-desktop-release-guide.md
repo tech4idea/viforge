@@ -152,10 +152,11 @@ release/desktop/win-unpacked/
 1. 应用窗口能启动。
 2. 不需要用户安装 Node。
 3. 不需要用户手动启动浏览器。
-4. 首次启动会要求选择数据路径，取消选择时不会进入应用。
-5. 运行设置页面能打开，并显示当前数据路径。
-6. 默认数据库模式是内置 PostgreSQL。
-7. 填写 OpenAI 协议 Base URL、API Key、模型后能保存。
+4. 安装向导会要求选择数据路径，取消或留空时不能继续安装。
+5. 首次启动会读取安装向导写入的数据路径；目录版或旧安装包缺少该文件时，会兜底要求选择数据路径。
+6. 运行设置页面能打开，并显示当前数据路径。
+7. 默认数据库模式是内置 PostgreSQL。
+8. 填写 OpenAI 协议 Base URL、API Key、模型后能保存。
 
 ## 7. 构建 exe 安装包
 
@@ -171,7 +172,7 @@ pnpm desktop:dist
 release/desktop/
 ```
 
-Electron Builder 当前配置使用 NSIS `oneClick: false` 和 `allowToChangeInstallationDirectory: true`，安装向导会允许用户选择安装路径。项目、配置、日志和内置 PostgreSQL 数据路径不跟随安装目录，首次启动应用时单独强制选择。
+Electron Builder 当前配置使用 NSIS `oneClick: false`、`allowToChangeInstallationDirectory: true` 和自定义 `installer.nsh`。安装向导会允许用户选择安装路径，并强制选择数据路径。项目、配置、日志和内置 PostgreSQL 数据路径不跟随安装目录，会写入 Electron `userData/data-root.txt` 供应用启动时读取。
 
 ## 8. GitHub Actions 构建建议
 

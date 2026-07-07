@@ -5,11 +5,11 @@
 ## 产品形态
 
 - 桌面端使用 Electron，安装包内置 Chromium 与 Node runtime，用户不需要预装 Node。
-- Windows 安装包允许用户选择安装路径；首次启动时数据路径默认为空，必须选择一个目录后才会继续启动。
+- Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。
 - Electron 主进程启动本地 API 服务，再用内置 WebView 窗口加载 `http://127.0.0.1:<local-port>`。默认优先使用 `3001`，如端口被占用会在后续端口中寻找可用端口。
 - 桌面模式下 API 同时托管 `apps/web/dist` 静态资源，所以不需要单独 Vite dev server 或浏览器入口。
 - 桌面模式会生成一次性访问 token，Electron 首屏用 `desktopToken` 建立 HttpOnly cookie；未带 token 的本机浏览器请求会被 API 拒绝，避免“做了 WebView 但仍可当浏览器版访问”的产品形态混淆。
-- 本地数据放在用户首次启动时选择的目录下，包括工作区、日志、运行配置和内置 PostgreSQL 数据目录。该路径记录在 Electron `userData/data-root.txt`，运行设置页可以重新选择，修改后重启生效。
+- 本地数据放在安装向导中选择的目录下，包括工作区、日志、运行配置和内置 PostgreSQL 数据目录。该路径记录在 Electron `userData/data-root.txt`，运行设置页可以重新选择，修改后重启生效。目录版或旧安装包缺少该文件时，应用首次启动会兜底要求选择数据路径。
 
 ## 数据库策略
 
@@ -34,7 +34,7 @@
 
 - `electron` 提供内置 Chromium、Node runtime 和应用主进程。
 - `electron-builder` 生成 Windows NSIS 安装包、macOS DMG 和 Linux AppImage。
-- Windows 目标配置为 NSIS `oneClick: false`、`allowToChangeInstallationDirectory: true`，安装时允许选择安装路径；数据路径由应用首次启动单独选择。
+- Windows 目标配置为 NSIS `oneClick: false`、`allowToChangeInstallationDirectory: true`，安装时允许选择安装路径；自定义 `apps/desktop/build/installer.nsh` 会在安装向导中强制选择数据路径。
 - `apps/desktop/scripts/build-api-bundle.mjs` 会把 API 打成桌面专用 Node bundle，并复制产品 prompt 资源，安装包运行时不依赖用户机器上的 Node 或源码目录。
 
 PostgreSQL binary 不提交到仓库。打包前应把对应平台文件放到：
