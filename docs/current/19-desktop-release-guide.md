@@ -72,12 +72,40 @@ pnpm --filter @viwork/desktop build:postgres
 2. 或从官方 Windows 安装包安装到临时目录。
 3. 将安装后的 PostgreSQL 根目录复制到 `apps/desktop/resources/postgres/win32-x64/`。
 
-复制后运行检查：
+当前 `prepare:postgres` 也支持在资源目录缺失时自动从 GitHub Release 下载匹配的 PostgreSQL + pgvector bundle。默认仓库是：
+
+```text
+YukeonWayne/pg_pgvector_binary
+```
+
+Windows x64 默认会查找 release asset 名称里包含 `win32-x64` 的 `.zip`，例如：
+
+```text
+postgres-18.4-pgvector-0.8.3-win32-x64.zip
+```
+
+如果 GitHub Release asset 带有 `sha256:` digest，脚本会自动校验；也可以显式覆盖：
+
+```powershell
+$env:VIWORK_POSTGRES_BUNDLE_SHA256="dd3f5f..."
+```
+
+复制或自动下载后运行检查：
 
 ```powershell
 $env:VIWORK_POSTGRES_PLATFORM_ARCH="win32-x64"
 pnpm --filter @viwork/desktop prepare:postgres
 ```
+
+可选环境变量：
+
+```powershell
+$env:VIWORK_POSTGRES_BUNDLE_RELEASE_REPO="YukeonWayne/pg_pgvector_binary"
+$env:VIWORK_POSTGRES_BUNDLE_RELEASE_TAG="v18.4-pgvector0.8.3-win32-x64"
+$env:VIWORK_POSTGRES_BUNDLE_ASSET_NAME="postgres-18.4-pgvector-0.8.3-win32-x64.zip"
+```
+
+如果仓库或 release 是私有的，给构建环境设置 `VIWORK_POSTGRES_BUNDLE_GITHUB_TOKEN` 或 `GITHUB_TOKEN`，token 只需要 release 资源读取权限。
 
 ## 5. 准备 pgvector
 
@@ -156,7 +184,7 @@ Electron Builder 当前配置使用 NSIS `oneClick: false` 和 `allowToChangeIns
 关键问题是 PostgreSQL/pgvector bundle 的准备。不要在每次 CI 都从零手动处理一遍，建议二选一：
 
 1. 在 CI 中从官方源码编译 PostgreSQL 和 pgvector，然后打包。
-2. 预先把可信的 PostgreSQL/pgvector bundle 放到内部 release artifact，再由 CI 下载到 `apps/desktop/resources/postgres/<platform>-<arch>/`。
+2. 预先把可信的 PostgreSQL/pgvector bundle 放到 GitHub Release，再由 `prepare:postgres` 自动下载到 `apps/desktop/resources/postgres/<platform>-<arch>/`。
 
 CI 中至少运行：
 
@@ -167,6 +195,24 @@ pnpm --filter @viwork/web typecheck
 pnpm --filter @viwork/desktop build
 VIWORK_REQUIRE_PGVECTOR=1 pnpm --filter @viwork/desktop prepare:postgres
 pnpm desktop:dist
+```
+
+Windows GitHub Actions 可以直接使用：
+
+```yaml
+- name: Verify or download PostgreSQL bundle
+  run: pnpm --filter @viwork/desktop prepare:postgres
+  env:
+    VIWORK_POSTGRES_PLATFORM_ARCH: win32-x64
+    VIWORK_REQUIRE_PGVECTOR: '1'
+    VIWORK_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
+    VIWORK_POSTGRES_BUNDLE_RELEASE_TAG: v18.4-pgvector0.8.3-win32-x64
+
+- name: Build installer
+  run: pnpm desktop:dist
+  env:
+    VIWORK_POSTGRES_PLATFORM_ARCH: win32-x64
+    VIWORK_REQUIRE_PGVECTOR: '1'
 ```
 
 ## 9. 推送前检查清单
