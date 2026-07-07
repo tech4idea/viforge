@@ -112,6 +112,18 @@ const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
 const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
 const RUN_NOTIFY_STORAGE_KEY = 'viwork.runNotify.v1';
 
+declare global {
+  interface Window {
+    viworkDesktop?: {
+      selectDataRoot(): Promise<{
+        canceled: boolean;
+        dataRoot?: string;
+        restartRequired?: boolean;
+      }>;
+    };
+  }
+}
+
 type RunNotifyMode = 'off' | 'sound' | 'wechat' | 'both';
 type RunStreamBinding = {
   runId: string;
@@ -5757,6 +5769,8 @@ function RuntimeSettingsPanel({
   const [connectionString, setConnectionString] = useState('');
   const [customAdapter, setCustomAdapter] = useState('');
   const [vectorStore, setVectorStore] = useState<NonNullable<RuntimeConfig['database']['vectorStore']>>('pgvector');
+  const [localDataRoot, setLocalDataRoot] = useState('');
+  const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
 
   useEffect(() => {
     if (!config) return;
@@ -5770,19 +5784,46 @@ function RuntimeSettingsPanel({
     setCustomAdapter(config.database.customAdapter ?? '');
     setVectorStore(config.database.vectorStore ?? 'pgvector');
     setApiKey('');
+    setLocalDataRoot(config.desktop.dataRoot ?? '');
+    setDataRootRestartRequired(false);
   }, [config]);
 
   const busy = state === 'loading';
+  const canSelectDesktopDataRoot = Boolean(config?.desktop.enabled && window.viworkDesktop?.selectDataRoot);
 
   return (
     <div className="runtime-settings-panel">
       <div className="runtime-settings-toolbar">
         <div>
           <strong>{config?.desktop.enabled ? '桌面单机模式' : '服务模式'}</strong>
-          <span>{config?.desktop.dataRoot ?? '使用当前运行目录'}</span>
+          <span>{localDataRoot || '使用当前运行目录'}</span>
         </div>
         <button type="button" onClick={onReload} disabled={busy}>刷新</button>
       </div>
+
+      {config?.desktop.enabled ? (
+        <section className="runtime-settings-section">
+          <h3>本地数据路径</h3>
+          <div className="runtime-settings-grid">
+            <label className="runtime-settings-wide"><span>数据路径</span><input value={localDataRoot} readOnly placeholder="首次启动时必须选择" /></label>
+          </div>
+          <div className="runtime-settings-actions runtime-settings-actions-inline">
+            <button
+              type="button"
+              disabled={busy || !canSelectDesktopDataRoot}
+              onClick={async () => {
+                const result = await window.viworkDesktop?.selectDataRoot();
+                if (!result || result.canceled || !result.dataRoot) return;
+                setLocalDataRoot(result.dataRoot);
+                setDataRootRestartRequired(Boolean(result.restartRequired));
+              }}
+            >选择数据路径</button>
+          </div>
+          <p className="runtime-settings-status">
+            {dataRootRestartRequired ? '数据路径已更新，重启 viwork 后生效。' : '项目、配置、日志和内置 PostgreSQL 数据都会保存在此路径下。'}
+          </p>
+        </section>
+      ) : null}
 
       <section className="runtime-settings-section">
         <h3>OpenAI 协议模型</h3>

@@ -3,9 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 
-import { app, BrowserWindow, dialog, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import started from 'electron-squirrel-startup';
 
 if (started) {
@@ -17,6 +18,19 @@ const API_START_TIMEOUT_MS = 120_000;
 let apiProcess: ChildProcessWithoutNullStreams | null = null;
 const desktopAccessToken = randomUUID();
 const apiOutputTail: string[] = [];
+let currentDesktopDataRoot: string | null = null;
+
+ipcMain.handle('viwork:select-data-root', async () => {
+  const selected = await promptForDesktopDataRoot({ required: false });
+  if (!selected) return { canceled: true };
+
+  await writeDesktopDataRoot(selected);
+  return {
+    canceled: false,
+    dataRoot: selected,
+    restartRequired: selected !== currentDesktopDataRoot,
+  };
+});
 
 async function createWindow(): Promise<void> {
   const apiUrl = await startApiServer();
@@ -30,6 +44,7 @@ async function createWindow(): Promise<void> {
     icon: resolveWindowIcon(process.resourcesPath),
     autoHideMenuBar: true,
     webPreferences: {
+      preload: resolvePreloadEntry(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -42,7 +57,8 @@ async function createWindow(): Promise<void> {
 
 async function startApiServer(): Promise<string> {
   const resourcesPath = process.resourcesPath;
-  const dataRoot = path.join(app.getPath('userData'), 'data');
+  const dataRoot = await resolveDesktopDataRoot();
+  currentDesktopDataRoot = dataRoot;
   const apiEntry = resolveApiEntry(resourcesPath);
   const resourceRoots = resolveResourceRoots(resourcesPath);
   const apiPort = await findAvailableLocalPort(PREFERRED_API_PORT);
@@ -55,6 +71,7 @@ async function startApiServer(): Promise<string> {
       VIWORK_DESKTOP: '1',
       VIWORK_DESKTOP_ACCESS_TOKEN: desktopAccessToken,
       VIWORK_DESKTOP_DATA_ROOT: dataRoot,
+      VIWORK_DESKTOP_CONFIG_ROOT: app.getPath('userData'),
       VIWORK_DATABASE_MODE: process.env.VIWORK_DATABASE_MODE ?? 'embedded-postgres',
       VIWORK_POSTGRES_BIN_DIR: process.env.VIWORK_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin'),
       WORKSPACES_ROOT: path.join(dataRoot, 'workspaces'),
@@ -85,6 +102,61 @@ async function startApiServer(): Promise<string> {
   return `http://127.0.0.1:${apiPort}`;
 }
 
+async function resolveDesktopDataRoot(): Promise<string> {
+  const configured = await readDesktopDataRoot();
+  if (configured) return configured;
+
+  const selected = await promptForDesktopDataRoot({ required: true });
+  if (!selected) {
+    app.quit();
+    throw new Error('Desktop data root was not selected.');
+  }
+
+  await writeDesktopDataRoot(selected);
+  return selected;
+}
+
+async function promptForDesktopDataRoot(options: { required: boolean }): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    title: '选择 viwork 数据路径',
+    message: options.required
+      ? '首次启动需要选择 viwork 保存项目、配置和本地数据库的位置。未选择数据路径时应用不会继续启动。'
+      : '请选择 viwork 保存项目、配置和本地数据库的位置。修改后需要重启应用生效。',
+    buttonLabel: '使用此路径',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    if (options.required) {
+      await dialog.showMessageBox({
+        type: 'info',
+        title: '需要选择数据路径',
+        message: 'viwork 需要一个数据路径保存项目、配置和本地 PostgreSQL 数据。请重新启动应用后选择路径。',
+      });
+    }
+    return null;
+  }
+  return result.filePaths[0];
+}
+
+async function readDesktopDataRoot(): Promise<string | null> {
+  try {
+    const value = (await readFile(desktopDataRootFile(), 'utf8')).trim();
+    return value || null;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function writeDesktopDataRoot(dataRoot: string): Promise<void> {
+  await mkdir(app.getPath('userData'), { recursive: true });
+  await writeFile(desktopDataRootFile(), `${dataRoot}\n`, 'utf8');
+}
+
+function desktopDataRootFile(): string {
+  return path.join(app.getPath('userData'), 'data-root.txt');
+}
+
 function appendApiOutput(stream: 'stdout' | 'stderr', chunk: Buffer | string): void {
   const text = String(chunk);
   const prefixed = `[api:${stream}] ${text}`;
@@ -108,6 +180,10 @@ function resolveApiEntry(resourcesPath: string): string {
   const packagedEntry = path.join(resourcesPath, 'api', 'index.mjs');
   if (app.isPackaged) return packagedEntry;
   return path.resolve(projectRoot(), 'apps', 'desktop', 'dist', 'api', 'index.mjs');
+}
+
+function resolvePreloadEntry(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.js');
 }
 
 function resolveResourceRoots(resourcesPath: string): { postgres: string; web: string; productPrompts: string } {
