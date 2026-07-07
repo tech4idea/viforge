@@ -28,6 +28,7 @@ let startupWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let startupPromise: Promise<void> | null = null;
 let appQuitting = false;
+let cleanupStarted = false;
 let closingStartupWindow = false;
 let closeConfirmationOpen = false;
 
@@ -61,7 +62,6 @@ async function startDesktopAppOnce(): Promise<void> {
   ensureStartupWindow();
 
   try {
-    await assertSupportedLaunchContext();
     const apiUrl = await startApiServer();
     await createMainWindow(apiUrl);
     closingStartupWindow = true;
@@ -76,27 +76,6 @@ async function startDesktopAppOnce(): Promise<void> {
     app.quit();
     throw error;
   }
-}
-
-async function assertSupportedLaunchContext(): Promise<void> {
-  if (process.platform !== 'win32' || !(await isWindowsProcessElevated())) return;
-
-  await dialog.showMessageBox({
-    type: 'error',
-    title: 'viwork 无法以管理员权限启动',
-    message: '请用普通用户权限启动 viwork。',
-    detail: '内置 PostgreSQL 不允许在管理员权限下运行。请关闭当前窗口，从桌面图标或开始菜单正常打开 viwork。',
-    noLink: true,
-  });
-  throw new Error('viwork desktop cannot run embedded PostgreSQL as an elevated Windows process.');
-}
-
-function isWindowsProcessElevated(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn('net', ['session'], { stdio: 'ignore', windowsHide: true });
-    child.on('error', () => resolve(false));
-    child.on('close', (code) => resolve(code === 0));
-  });
 }
 
 async function createMainWindow(apiUrl: string): Promise<void> {
@@ -253,10 +232,12 @@ function showMainWindow(): void {
 }
 
 function quitApp(): void {
+  if (cleanupStarted) return;
   appQuitting = true;
   tray?.destroy();
   tray = null;
-  app.quit();
+  cleanupStarted = true;
+  void stopDesktopServices().finally(() => app.quit());
 }
 
 function launchDesktopApp(): void {
@@ -486,6 +467,55 @@ function appendPlaywriterOutput(stream: 'stdout' | 'stderr', chunk: Buffer | str
   }
 }
 
+async function stopDesktopServices(): Promise<void> {
+  await stopEmbeddedPostgresFromDesktop();
+  if (apiProcess?.exitCode === null) apiProcess.kill();
+  if (playwriterProcess?.exitCode === null) playwriterProcess.kill();
+}
+
+async function stopEmbeddedPostgresFromDesktop(): Promise<void> {
+  if (!currentDesktopDataRoot) return;
+  const resourceRoots = resolveResourceRoots(process.resourcesPath);
+  const binDir = process.env.VIWORK_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin');
+  const pgCtl = path.join(binDir, process.platform === 'win32' ? 'pg_ctl.exe' : 'pg_ctl');
+  const dataDir = path.join(currentDesktopDataRoot, 'postgres-data');
+  if (!fs.existsSync(pgCtl) || !fs.existsSync(dataDir)) return;
+
+  try {
+    await runCommand(pgCtl, ['-D', dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
+  } catch (error) {
+    console.warn(`Failed to stop embedded PostgreSQL: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function runCommand(command: string, args: string[], options: { allowFailure?: boolean } = {}): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: 'pipe', windowsHide: true });
+    let stderr = '';
+    let stdout = '';
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.on('error', (error) => {
+      if (options.allowFailure) {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(true);
+        return;
+      }
+      if (options.allowFailure) {
+        resolve(false);
+        return;
+      }
+      reject(new Error(`${path.basename(command)} exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
+    });
+  });
+}
+
 function formatApiOutputTail(): string {
   if (apiOutputTail.length === 0) return '';
   return `最近 API 日志:\n${apiOutputTail.join('\n')}`;
@@ -626,8 +656,8 @@ app.on('window-all-closed', () => {
   if (process.platform === 'darwin' && appQuitting) app.quit();
 });
 
-app.on('before-quit', () => {
-  appQuitting = true;
-  apiProcess?.kill();
-  playwriterProcess?.kill();
+app.on('before-quit', (event) => {
+  if (appQuitting) return;
+  event.preventDefault();
+  quitApp();
 });

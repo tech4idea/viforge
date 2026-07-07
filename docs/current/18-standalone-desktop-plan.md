@@ -6,7 +6,7 @@
 
 - 桌面端使用 Electron，安装包内置 Chromium 与 Node runtime，用户不需要预装 Node。
 - Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。升级安装时会优先从 `HKCU\\Software\\viwork\\InstallLocation` 读取既有安装路径，从 `HKCU\\Software\\viwork\\DataRoot` 读取既有数据路径，其次兼容旧版 `AppData\\Roaming\\viwork\\data-root.txt`。
-- Windows 安装包不会在结束页自动启动 viwork，主程序 manifest 使用普通用户权限启动。内置 PostgreSQL 不允许管理员权限运行，因此桌面主进程如果检测到管理员权限启动，会直接提示用户用普通用户权限重新打开。
+- Windows 安装包不会在结束页自动启动 viwork，主程序 manifest 使用调用方权限启动。内置 PostgreSQL 通过 `pg_ctl start` 托管，兼容 Administrator 账户启动场景；viwork 完全退出时会主动 `pg_ctl stop` 回收本次数据目录对应的 PostgreSQL 进程。
 - Electron 主进程启动本地 API 服务，再用内置 WebView 窗口加载 `http://127.0.0.1:<local-port>`。默认优先使用 `3001`，如端口被占用会在后续端口中寻找可用端口。
 - 启动 API 期间会先显示一个“viwork 正在打开”的占位窗口，避免用户以为没有响应。内置 PostgreSQL 在 API 进程内后台启动，运行设置页会展示其状态。桌面端使用 Electron 单实例锁，重复点击桌面图标只会聚焦当前启动窗口或主窗口，不会再拉起一套 API/PostgreSQL。
 - 桌面模式下 API 同时托管 `apps/web/dist` 静态资源，所以不需要单独 Vite dev server 或浏览器入口。
@@ -76,7 +76,7 @@ VIWORK_PGVECTOR_SOURCE_DIR=/path/to/pgvector-0.8.0 pnpm --filter @viwork/desktop
 
 `build:pgvector` 会使用 bundled PostgreSQL 的 `bin/pg_config` 编译并安装 `vector.so` / `vector.control` 到同一个资源目录。打包前 `prepare:postgres` 会检查 pgvector 是否存在；默认缺失时只告警并退化为 PostgreSQL 文本检索，发布正式安装包时建议设置 `VIWORK_REQUIRE_PGVECTOR=1` 让缺失 pgvector 直接失败。
 
-内置 PostgreSQL 启动时会优先使用 `VIWORK_EMBEDDED_POSTGRES_PORT`，默认 `15432`。如果端口被占用，API 会在后续端口中寻找可用端口并写入实际 `DATABASE_URL`，避免和用户机器已有 PostgreSQL 冲突。桌面模式不再用 `pg_ctl start` 启动守护进程，而是由 API 直接 `spawn postgres`，让 PostgreSQL 成为 viwork API 的子进程；退出时先用 `pg_ctl stop -m fast -w` 优雅停止，再兜底结束子进程。若同一数据目录已有旧的 PostgreSQL 服务运行，启动前会先尝试停止它，避免残留进程脱离 viwork 管理。
+内置 PostgreSQL 启动时会优先使用 `VIWORK_EMBEDDED_POSTGRES_PORT`，默认 `15432`。如果端口被占用，API 会在后续端口中寻找可用端口并写入实际 `DATABASE_URL`，避免和用户机器已有 PostgreSQL 冲突。桌面模式使用 `pg_ctl start` 启动本地数据目录对应的 PostgreSQL；API 进程和 Electron 主进程退出时都会尝试 `pg_ctl stop -m fast -w`，确保完全退出 viwork 时回收内置 PostgreSQL。若同一数据目录已有旧的 PostgreSQL 服务运行，启动前会先尝试停止它，避免残留进程脱离 viwork 管理。
 
 打包命令会先执行 `pnpm --filter @viwork/desktop prepare:postgres` 检查这些文件。若希望从外部目录复制，可设置：
 

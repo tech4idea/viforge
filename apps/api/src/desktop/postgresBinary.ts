@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -18,7 +18,6 @@ type EmbeddedPostgresRuntime = {
   connectionString: string;
   dataDir: string;
   port: number;
-  process?: ChildProcessWithoutNullStreams;
 };
 
 const DEFAULT_DATABASE = 'viwork';
@@ -41,9 +40,7 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   const binDir = options.binDir ?? resolveBundledPostgresBinDir();
   const initdb = executablePath(binDir, 'initdb');
   const pgCtl = executablePath(binDir, 'pg_ctl');
-  const postgres = executablePath(binDir, 'postgres');
   const createdb = executablePath(binDir, 'createdb');
-  const pgIsReady = executablePath(binDir, 'pg_isready');
   const psql = executablePath(binDir, 'psql');
   const preferredPort = options.port ?? Number(process.env.VIWORK_EMBEDDED_POSTGRES_PORT ?? '15432');
   const database = options.database ?? DEFAULT_DATABASE;
@@ -52,9 +49,7 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
 
   await assertExecutable(initdb, 'initdb');
   await assertExecutable(pgCtl, 'pg_ctl');
-  await assertExecutable(postgres, 'postgres');
   await assertExecutable(createdb, 'createdb');
-  await assertExecutable(pgIsReady, 'pg_isready');
   await assertExecutable(psql, 'psql');
   await mkdir(dataRoot, { recursive: true });
 
@@ -67,16 +62,21 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   await stopExistingDataDirServer(pgCtl, dataDir);
 
   const port = await findAvailableLocalPort(preferredPort);
-  const postgresProcess = spawnPostgres({ postgres, dataDir, port });
-  await waitForPostgresReady({ pgIsReady, port, user, process: postgresProcess });
+  await runCommand(pgCtl, [
+    '-D', dataDir,
+    '-l', path.join(dataRoot, 'postgres.log'),
+    '-o', `-p ${port} -h 127.0.0.1`,
+    '-w',
+    'start',
+  ]);
 
   await ensureDatabase({ createdb, psql, port, user, database, password });
 
   const connectionString = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@127.0.0.1:${port}/${database}`;
   process.env.DATABASE_URL = connectionString;
-  registerEmbeddedPostgresShutdown({ pgCtl, dataDir, process: postgresProcess });
+  registerEmbeddedPostgresShutdown(pgCtl, dataDir);
 
-  return { connectionString, dataDir, port, process: postgresProcess };
+  return { connectionString, dataDir, port };
 }
 
 async function isDataDirServerRunning(pgCtl: string, dataDir: string): Promise<boolean> {
@@ -103,39 +103,9 @@ async function findAvailableLocalPort(preferredPort: number): Promise<number> {
   throw new Error(`No available local PostgreSQL port found near ${preferredPort}.`);
 }
 
-function spawnPostgres(input: { postgres: string; dataDir: string; port: number }): ChildProcessWithoutNullStreams {
-  const child = spawn(input.postgres, ['-D', input.dataDir, '-p', String(input.port), '-h', '127.0.0.1'], {
-    stdio: 'pipe',
-    env: postgresProcessEnv(input.postgres),
-  });
-  child.stdout.on('data', (chunk) => console.info(`[postgres:stdout] ${String(chunk)}`));
-  child.stderr.on('data', (chunk) => console.info(`[postgres:stderr] ${String(chunk)}`));
-  child.on('error', (error) => console.error('[postgres] failed to start', error));
-  child.on('exit', (code) => {
-    if (code !== 0) console.error(`[postgres] exited with code ${code ?? 'unknown'}`);
-  });
-  return child;
-}
-
-async function waitForPostgresReady(input: { pgIsReady: string; port: number; user: string; process: ChildProcessWithoutNullStreams }): Promise<void> {
-  const startedAt = Date.now();
-  const timeoutMs = 60_000;
-  while (Date.now() - startedAt < timeoutMs) {
-    if (input.process.exitCode !== null) {
-      throw new Error(`Embedded PostgreSQL exited before it became ready with code ${input.process.exitCode}.`);
-    }
-    if (await runCommand(input.pgIsReady, ['-h', '127.0.0.1', '-p', String(input.port), '-U', input.user], { allowFailure: true })) {
-      return;
-    }
-    await sleep(250);
-  }
-  throw new Error(`Embedded PostgreSQL did not become ready on port ${input.port} within ${timeoutMs}ms.`);
-}
-
-function registerEmbeddedPostgresShutdown(input: { pgCtl: string; dataDir: string; process: ChildProcessWithoutNullStreams }): void {
+function registerEmbeddedPostgresShutdown(pgCtl: string, dataDir: string): void {
   stopEmbeddedPostgres = async () => {
-    await runCommand(input.pgCtl, ['-D', input.dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
-    if (input.process.exitCode === null) input.process.kill('SIGTERM');
+    await runCommand(pgCtl, ['-D', dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
   };
   if (shutdownRegistered) return;
   shutdownRegistered = true;
@@ -148,10 +118,6 @@ function registerEmbeddedPostgresShutdown(input: { pgCtl: string; dataDir: strin
       void stopEmbeddedPostgres?.().finally(() => process.exit(0));
     });
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function ensureDatabase(input: { createdb: string; psql: string; port: number; user: string; database: string; password: string }): Promise<void> {
