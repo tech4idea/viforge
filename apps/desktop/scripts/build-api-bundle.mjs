@@ -62,6 +62,7 @@ await build({
   },
   external: [
     'electron',
+    'fsevents',
   ],
   plugins: [chromiumBidiShimPlugin],
 });
@@ -71,3 +72,4 @@ await cp(
   path.join(outDir, 'product-profiles'),
   { recursive: true },
 );
+
