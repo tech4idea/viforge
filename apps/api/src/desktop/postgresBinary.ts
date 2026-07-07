@@ -40,6 +40,7 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   const binDir = options.binDir ?? resolveBundledPostgresBinDir();
   const initdb = executablePath(binDir, 'initdb');
   const pgCtl = executablePath(binDir, 'pg_ctl');
+  const postgres = executablePath(binDir, 'postgres');
   const createdb = executablePath(binDir, 'createdb');
   const psql = executablePath(binDir, 'psql');
   const preferredPort = options.port ?? Number(process.env.VIWORK_EMBEDDED_POSTGRES_PORT ?? '15432');
@@ -49,6 +50,7 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
 
   await assertExecutable(initdb, 'initdb');
   await assertExecutable(pgCtl, 'pg_ctl');
+  await assertExecutable(postgres, 'postgres');
   await assertExecutable(createdb, 'createdb');
   await assertExecutable(psql, 'psql');
   await mkdir(dataRoot, { recursive: true });
