@@ -1,3 +1,7 @@
+!ifndef VIWORK_INSTALLER_NSH_INCLUDED
+!define VIWORK_INSTALLER_NSH_INCLUDED
+
+!ifndef BUILD_UNINSTALLER
 !include LogicLib.nsh
 !include nsDialogs.nsh
 
@@ -53,3 +57,7 @@ FunctionEnd
   FileWrite $0 "$ViworkDataRoot$\r$\n"
   FileClose $0
 !macroend
+
+!endif
+!endif
+
