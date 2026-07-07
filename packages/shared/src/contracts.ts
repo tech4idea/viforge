@@ -217,6 +217,12 @@ export type RuntimeConfig = {
   restartRequired?: boolean;
 };
 
+export type RuntimeModelTestResponse = {
+  ok: boolean;
+  status?: number;
+  message: string;
+};
+
 export type UpdateRuntimeConfigInput = {
   modelProvider?: {
     baseUrl?: string;

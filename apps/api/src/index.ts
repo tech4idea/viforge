@@ -13,7 +13,17 @@ installFileLogger();
 await loadRuntimeConfigIntoEnv();
 
 if (process.env.VIWORK_DESKTOP === '1' && (process.env.VIWORK_DATABASE_MODE || 'embedded-postgres') === 'embedded-postgres') {
-  await ensureEmbeddedPostgres({ dataRoot: process.env.VIWORK_DESKTOP_DATA_ROOT });
+  process.env.VIWORK_EMBEDDED_POSTGRES_STATUS = 'starting';
+  void ensureEmbeddedPostgres({ dataRoot: process.env.VIWORK_DESKTOP_DATA_ROOT })
+    .then(() => {
+      process.env.VIWORK_EMBEDDED_POSTGRES_STATUS = 'ready';
+      delete process.env.VIWORK_EMBEDDED_POSTGRES_ERROR;
+    })
+    .catch((error) => {
+      process.env.VIWORK_EMBEDDED_POSTGRES_STATUS = 'error';
+      process.env.VIWORK_EMBEDDED_POSTGRES_ERROR = error instanceof Error ? error.message : String(error);
+      console.error('[desktop] embedded PostgreSQL failed to start', error);
+    });
 }
 
 const server = serve({

@@ -1795,7 +1795,7 @@ export function buildModelConfig(options: {
     || process.env.VIWORK_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
     || process.env.VIWORK_LANGGRAPH_MODEL
-    || 'ds/deepseek-v4-pro';
+    || 'MiniMax-M3';
 
   const baseUrl = options.baseUrl
     || process.env.VIWORK_AIGC_HUB_BASE_URL

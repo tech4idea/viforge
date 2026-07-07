@@ -5771,6 +5771,8 @@ function RuntimeSettingsPanel({
   const [vectorStore, setVectorStore] = useState<NonNullable<RuntimeConfig['database']['vectorStore']>>('pgvector');
   const [localDataRoot, setLocalDataRoot] = useState('');
   const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
+  const [modelTestState, setModelTestState] = useState<LoadState>('idle');
+  const [modelTestMessage, setModelTestMessage] = useState('');
 
   useEffect(() => {
     if (!config) return;
@@ -5786,10 +5788,20 @@ function RuntimeSettingsPanel({
     setApiKey('');
     setLocalDataRoot(config.desktop.dataRoot ?? '');
     setDataRootRestartRequired(false);
+    setModelTestState('idle');
+    setModelTestMessage('');
   }, [config]);
 
   const busy = state === 'loading';
   const canSelectDesktopDataRoot = Boolean(config?.desktop.enabled && window.viworkDesktop?.selectDataRoot);
+  const modelInput = (): NonNullable<UpdateRuntimeConfigInput['modelProvider']> => ({
+    baseUrl,
+    ...(apiKey.trim() ? { apiKey } : {}),
+    chatModel,
+    imageModel,
+    embeddingModel,
+    embeddingDims: Number(embeddingDims) || 1024,
+  });
 
   return (
     <div className="runtime-settings-panel">
@@ -5828,13 +5840,32 @@ function RuntimeSettingsPanel({
       <section className="runtime-settings-section">
         <h3>OpenAI 协议模型</h3>
         <div className="runtime-settings-grid">
-          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.yukeon.top/v1" /></label>
           <label><span>API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
-          <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="gpt-4.1 或兼容模型 id" /></label>
+          <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="MiniMax-M3" /></label>
           <label><span>图片模型</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>
           <label><span>Embedding 模型</span><input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} placeholder="text-embedding-3-large" /></label>
           <label><span>Embedding 维度</span><input inputMode="numeric" value={embeddingDims} onChange={(event) => setEmbeddingDims(event.target.value)} /></label>
         </div>
+        <div className="runtime-settings-actions runtime-settings-actions-inline">
+          <button
+            type="button"
+            disabled={busy || modelTestState === 'loading'}
+            onClick={async () => {
+              setModelTestState('loading');
+              setModelTestMessage('');
+              try {
+                const result = await apiClient.testRuntimeModel(modelInput());
+                setModelTestState(result.ok ? 'idle' : 'error');
+                setModelTestMessage(result.message);
+              } catch (error) {
+                setModelTestState('error');
+                setModelTestMessage(error instanceof Error ? error.message : String(error));
+              }
+            }}
+          >{modelTestState === 'loading' ? '测试中...' : '测试模型调用'}</button>
+        </div>
+        {modelTestMessage ? <p className={modelTestState === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage}</p> : null}
       </section>
 
       <section className="runtime-settings-section">
@@ -5862,14 +5893,7 @@ function RuntimeSettingsPanel({
           onClick={() => {
             const nextConnectionString = connectionString.trim();
             onSave({
-              modelProvider: {
-                baseUrl,
-                ...(apiKey.trim() ? { apiKey } : {}),
-                chatModel,
-                imageModel,
-                embeddingModel,
-                embeddingDims: Number(embeddingDims) || 1024,
-              },
+              modelProvider: modelInput(),
               database: {
                 mode: databaseMode,
                 ...(nextConnectionString ? { connectionString: nextConnectionString } : {}),

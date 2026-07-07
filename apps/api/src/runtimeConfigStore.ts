@@ -31,6 +31,8 @@ type StoredRuntimeConfig = {
 };
 
 const DEFAULT_DATABASE_PORT = 15432;
+const DEFAULT_MODEL_BASE_URL = 'https://api.yukeon.top/v1';
+const DEFAULT_CHAT_MODEL = 'MiniMax-M3';
 
 export type RuntimeConfigStore = {
   getConfig(): Promise<RuntimeConfig>;
@@ -127,9 +129,9 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
 
   return {
     modelProvider: {
-      baseUrl: model.baseUrl ?? process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL,
+      baseUrl: model.baseUrl || process.env.VIWORK_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL,
       apiKeyConfigured: Boolean(model.apiKey ?? process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY),
-      chatModel: model.chatModel ?? process.env.VIWORK_AIGC_HUB_CHAT_MODEL ?? AIGC_HUB_CHAT_MODEL,
+      chatModel: model.chatModel || process.env.VIWORK_AIGC_HUB_CHAT_MODEL || AIGC_HUB_CHAT_MODEL || DEFAULT_CHAT_MODEL,
       imageModel: model.imageModel ?? process.env.VIWORK_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL,
       embeddingModel: model.embeddingModel ?? process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? EMBEDDING_MODEL,
       embeddingDims: model.embeddingDims ?? Number(process.env.VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
@@ -152,6 +154,9 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
 }
 
 function databaseStatusMessage(mode: RuntimeConfig['database']['mode'], connectionString: string): string {
+  if (mode === 'embedded-postgres' && process.env.VIWORK_EMBEDDED_POSTGRES_STATUS === 'error') {
+    return process.env.VIWORK_EMBEDDED_POSTGRES_ERROR || '内置 PostgreSQL 启动失败，请检查数据路径和日志。';
+  }
   if (mode === 'embedded-postgres' && connectionString) return '内置 PostgreSQL 已启动，LangGraph memory 使用本地 pgvector。';
   if (mode === 'embedded-postgres') return '桌面模式启动时会拉起内置 PostgreSQL，LangGraph memory 使用本地 pgvector。';
   if (mode === 'external-postgres' && connectionString) return 'LangGraph memory uses the configured external PostgreSQL database.';
@@ -166,6 +171,7 @@ function defaultConnectionStringForDisplay(mode: RuntimeConfig['database']['mode
 }
 
 function embeddedDatabaseStatus(): RuntimeConfig['database']['status'] {
+  if (process.env.VIWORK_EMBEDDED_POSTGRES_STATUS === 'error') return 'error';
   return process.env.DATABASE_URL || process.env.VIWORK_DESKTOP !== '1' ? 'ready' : 'starting';
 }
 

@@ -17,6 +17,7 @@ const PREFERRED_API_PORT = 3001;
 const API_START_TIMEOUT_MS = 120_000;
 const PLAYWRITER_RELAY_HOST = '127.0.0.1';
 const PLAYWRITER_RELAY_PORT = 19988;
+const WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\viwork';
 let apiProcess: ChildProcessWithoutNullStreams | null = null;
 let playwriterProcess: ChildProcessWithoutNullStreams | null = null;
 const desktopAccessToken = randomUUID();
@@ -165,7 +166,7 @@ function startupHtmlUrl(): string {
 <body>
   <main>
     <h1>viwork 正在打开</h1>
-    <p>正在启动本地 API 和内置 PostgreSQL，请稍候。</p>
+    <p>正在打开，请稍候。</p>
     <div class="bar"></div>
   </main>
 </body>
@@ -250,7 +251,7 @@ async function startApiServer(): Promise<string> {
   const playwriterEntry = resolvePlaywriterEntry(resourcesPath);
   const resourceRoots = resolveResourceRoots(resourcesPath);
   const apiPort = await findAvailableLocalPort(PREFERRED_API_PORT);
-  await startPlaywriterRelay(playwriterEntry, dataRoot);
+  startPlaywriterRelay(playwriterEntry, dataRoot);
   const playwriterHost = `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`;
 
   apiProcess = spawn(process.execPath, [apiEntry], {
@@ -295,8 +296,8 @@ async function startApiServer(): Promise<string> {
   return `http://127.0.0.1:${apiPort}`;
 }
 
-async function startPlaywriterRelay(playwriterEntry: string, dataRoot: string): Promise<void> {
-  if (await isPlaywriterRelayReady()) return;
+function startPlaywriterRelay(playwriterEntry: string, dataRoot: string): void {
+  if (playwriterProcess) return;
 
   const playwriterLogDir = path.join(dataRoot, 'logs', 'playwriter');
 
@@ -323,7 +324,7 @@ async function startPlaywriterRelay(playwriterEntry: string, dataRoot: string): 
     playwriterProcess = null;
   });
 
-  await waitForPlaywriterRelay(10_000).catch((error) => {
+  waitForPlaywriterRelay(10_000).catch((error) => {
     console.warn(`Playwriter relay did not become ready: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
@@ -396,7 +397,9 @@ async function readDesktopDataRoot(): Promise<string | null> {
     const value = (await readFile(desktopDataRootFile(), 'utf8')).trim();
     return value || null;
   } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return readDesktopDataRootFromRegistry();
+    }
     throw error;
   }
 }
@@ -404,6 +407,34 @@ async function readDesktopDataRoot(): Promise<string | null> {
 async function writeDesktopDataRoot(dataRoot: string): Promise<void> {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(desktopDataRootFile(), `${dataRoot}\n`, 'utf8');
+  await writeDesktopDataRootToRegistry(dataRoot);
+}
+
+function readDesktopDataRootFromRegistry(): Promise<string | null> {
+  if (process.platform !== 'win32') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const child = spawn('reg', ['query', WINDOWS_REGISTRY_KEY, '/v', 'DataRoot'], { stdio: 'pipe', windowsHide: true });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      const match = stdout.match(/DataRoot\s+REG_SZ\s+(.+)$/m);
+      resolve(match?.[1]?.trim() || null);
+    });
+  });
+}
+
+function writeDesktopDataRootToRegistry(dataRoot: string): Promise<void> {
+  if (process.platform !== 'win32') return Promise.resolve();
+  return new Promise((resolve) => {
+    const child = spawn('reg', ['add', WINDOWS_REGISTRY_KEY, '/v', 'DataRoot', '/t', 'REG_SZ', '/d', dataRoot, '/f'], { stdio: 'ignore', windowsHide: true });
+    child.on('error', () => resolve());
+    child.on('close', () => resolve());
+  });
 }
 
 function desktopDataRootFile(): string {

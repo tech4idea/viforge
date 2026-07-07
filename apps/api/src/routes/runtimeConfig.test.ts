@@ -14,6 +14,40 @@ afterEach(async () => {
 });
 
 describe('runtime config routes', () => {
+  it('returns desktop-friendly default OpenAI-compatible model values', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
+    tempDirs.push(root);
+    const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
+
+    const response = await app.request('/runtime-config');
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      modelProvider: {
+        baseUrl: 'https://api.yukeon.top/v1',
+        chatModel: 'MiniMax-M3',
+      },
+    });
+  });
+
+  it('validates model test requests without requiring network when the API key is missing', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
+    tempDirs.push(root);
+    const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
+
+    const response = await app.request('/runtime-config/test-model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.yukeon.top/v1', apiKey: '', chatModel: 'MiniMax-M3' } }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      message: '请先填写 API Key 后再测试。',
+    });
+  });
+
   it('persists OpenAI-compatible model and database configuration without returning secrets', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
     tempDirs.push(root);

@@ -37,6 +37,7 @@ import type {
   ReferencedFile,
   RetrievalPolicy,
   RuntimeConfig,
+  RuntimeModelTestResponse,
   UpdateRuntimeConfigInput,
   EvalFixture,
   EvalRun,
@@ -89,6 +90,7 @@ export type {
   ReferencedFile,
   RetrievalPolicy,
   RuntimeConfig,
+  RuntimeModelTestResponse,
   UpdateRuntimeConfigInput,
   EvalFixture,
   EvalRun,
@@ -106,6 +108,7 @@ export type ApiClient = {
   getProductProfile(): Promise<ProductProfile>;
   getRuntimeConfig(): Promise<RuntimeConfig>;
   updateRuntimeConfig(input: UpdateRuntimeConfigInput): Promise<RuntimeConfig>;
+  testRuntimeModel(input: UpdateRuntimeConfigInput['modelProvider']): Promise<RuntimeModelTestResponse>;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
   readGlobalWorkspaceFile(path: string): Promise<WorkspaceFile>;
   writeGlobalWorkspaceFile(path: string, content: string): Promise<WorkspaceFile>;
@@ -369,6 +372,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<RuntimeConfig>(fetcher, baseUrl, '/api/runtime-config', {
         method: 'PUT',
         body: JSON.stringify(input),
+      }),
+    testRuntimeModel: (input) =>
+      request<RuntimeModelTestResponse>(fetcher, baseUrl, '/api/runtime-config/test-model', {
+        method: 'POST',
+        body: JSON.stringify({ modelProvider: input }),
       }),
     listGlobalWorkspaceEntries: () => request<WorkspaceEntry[]>(fetcher, baseUrl, '/api/global/files'),
     readGlobalWorkspaceFile: (path) =>

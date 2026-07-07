@@ -5,13 +5,13 @@
 ## 产品形态
 
 - 桌面端使用 Electron，安装包内置 Chromium 与 Node runtime，用户不需要预装 Node。
-- Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。
+- Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。升级安装时会优先从 `HKCU\\Software\\viwork\\InstallLocation` 读取既有安装路径，从 `HKCU\\Software\\viwork\\DataRoot` 读取既有数据路径，其次兼容旧版 `AppData\\Roaming\\viwork\\data-root.txt`。
 - Electron 主进程启动本地 API 服务，再用内置 WebView 窗口加载 `http://127.0.0.1:<local-port>`。默认优先使用 `3001`，如端口被占用会在后续端口中寻找可用端口。
-- 启动 API 和内置 PostgreSQL 期间会先显示一个“viwork 正在打开”的占位窗口，避免用户以为没有响应。桌面端使用 Electron 单实例锁，重复点击桌面图标只会聚焦当前启动窗口或主窗口，不会再拉起一套 API/PostgreSQL。
+- 启动 API 期间会先显示一个“viwork 正在打开”的占位窗口，避免用户以为没有响应。内置 PostgreSQL 在 API 进程内后台启动，运行设置页会展示其状态。桌面端使用 Electron 单实例锁，重复点击桌面图标只会聚焦当前启动窗口或主窗口，不会再拉起一套 API/PostgreSQL。
 - 桌面模式下 API 同时托管 `apps/web/dist` 静态资源，所以不需要单独 Vite dev server 或浏览器入口。
 - 桌面模式会生成一次性访问 token，Electron 首屏用 `desktopToken` 建立 HttpOnly cookie；未带 token 的本机浏览器请求会被 API 拒绝，避免“做了 WebView 但仍可当浏览器版访问”的产品形态混淆。
 - 桌面主进程会随 API 一起启动 bundled Playwriter relay，并把 `VIWORK_PLAYWRITER_HOST` / `VIWORK_PLAYWRITER_BIN` 注入 API。用户使用网页浏览工具时只需要安装 Playwriter Chrome 扩展并授权目标标签页，不需要手动运行 `playwriter serve`。
-- 本地数据放在安装向导中选择的目录下，包括工作区、日志、运行配置和内置 PostgreSQL 数据目录。该路径记录在 Electron `userData/data-root.txt`，运行设置页可以重新选择，修改后重启生效。目录版或旧安装包缺少该文件时，应用首次启动会兜底要求选择数据路径。
+- 本地数据放在安装向导中选择的目录下，包括工作区、日志、运行配置和内置 PostgreSQL 数据目录。该路径记录在 Electron `userData/data-root.txt`，并同步写入 Windows 注册表 `HKCU\\Software\\viwork\\DataRoot`；运行设置页可以重新选择，修改后重启生效。目录版或旧安装包缺少该文件时，应用首次启动会兜底读取注册表或要求选择数据路径。
 - 用户点击窗口关闭按钮时会二次确认：可选择“仅关闭窗口”保留本地服务后台运行，也可选择“完全退出”停止 Electron、API 和由本次 API 启动的内置 PostgreSQL。
 
 ## 数据库策略

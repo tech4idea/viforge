@@ -8,12 +8,32 @@
 Var ViworkDataRootDialog
 Var ViworkDataRootText
 Var ViworkDataRoot
+Var ViworkExistingDataRoot
+
+!macro customInit
+  ReadRegStr $0 HKCU "Software\viwork" "InstallLocation"
+  ${If} $0 != ""
+    StrCpy $INSTDIR "$0"
+  ${EndIf}
+!macroend
 
 !macro customPageAfterChangeDir
   Page custom ViworkDataRootPageCreate ViworkDataRootPageLeave
 !macroend
 
 Function ViworkDataRootPageCreate
+  ReadRegStr $ViworkExistingDataRoot HKCU "Software\viwork" "DataRoot"
+  ${If} $ViworkExistingDataRoot == ""
+    IfFileExists "$APPDATA\viwork\data-root.txt" 0 +4
+      FileOpen $0 "$APPDATA\viwork\data-root.txt" r
+      FileRead $0 $ViworkExistingDataRoot
+      FileClose $0
+      StrCpy $ViworkExistingDataRoot $ViworkExistingDataRoot -2
+  ${EndIf}
+  ${If} $ViworkExistingDataRoot == ""
+    StrCpy $ViworkExistingDataRoot "$LOCALAPPDATA\viwork\data"
+  ${EndIf}
+
   nsDialogs::Create 1018
   Pop $ViworkDataRootDialog
   ${If} $ViworkDataRootDialog == error
@@ -21,7 +41,7 @@ Function ViworkDataRootPageCreate
   ${EndIf}
 
   ${NSD_CreateLabel} 0 0 100% 24u "选择 viwork 数据路径。项目、运行配置、日志和内置 PostgreSQL 数据都会保存在这里。"
-  ${NSD_CreateText} 0 34u 78% 12u ""
+  ${NSD_CreateText} 0 34u 78% 12u "$ViworkExistingDataRoot"
   Pop $ViworkDataRootText
   ${NSD_CreateBrowseButton} 82% 33u 18% 14u "浏览..."
   Pop $0
@@ -56,8 +76,13 @@ FunctionEnd
   FileOpen $0 "$APPDATA\viwork\data-root.txt" w
   FileWrite $0 "$ViworkDataRoot$\r$\n"
   FileClose $0
+  WriteRegStr HKCU "Software\viwork" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\viwork" "DataRoot" "$ViworkDataRoot"
+!macroend
+
+!macro customUnInstall
+  DeleteRegValue HKCU "Software\viwork" "InstallLocation"
 !macroend
 
 !endif
 !endif
-
