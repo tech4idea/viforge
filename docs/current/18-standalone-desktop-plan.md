@@ -75,7 +75,7 @@ VIWORK_PGVECTOR_SOURCE_DIR=/path/to/pgvector-0.8.0 pnpm --filter @viwork/desktop
 
 `build:pgvector` 会使用 bundled PostgreSQL 的 `bin/pg_config` 编译并安装 `vector.so` / `vector.control` 到同一个资源目录。打包前 `prepare:postgres` 会检查 pgvector 是否存在；默认缺失时只告警并退化为 PostgreSQL 文本检索，发布正式安装包时建议设置 `VIWORK_REQUIRE_PGVECTOR=1` 让缺失 pgvector 直接失败。
 
-内置 PostgreSQL 启动时会优先使用 `VIWORK_EMBEDDED_POSTGRES_PORT`，默认 `15432`。如果端口被占用但不是当前数据目录对应的 PostgreSQL 实例，API 会在后续端口中寻找可用端口并写入实际 `DATABASE_URL`，避免和用户机器已有 PostgreSQL 冲突。Electron 退出时会停止由本次 API 进程启动的内置 PostgreSQL；如果检测到同一数据目录已有服务运行，则复用该服务。
+内置 PostgreSQL 启动时会优先使用 `VIWORK_EMBEDDED_POSTGRES_PORT`，默认 `15432`。如果端口被占用，API 会在后续端口中寻找可用端口并写入实际 `DATABASE_URL`，避免和用户机器已有 PostgreSQL 冲突。桌面模式不再用 `pg_ctl start` 启动守护进程，而是由 API 直接 `spawn postgres`，让 PostgreSQL 成为 viwork API 的子进程；退出时先用 `pg_ctl stop -m fast -w` 优雅停止，再兜底结束子进程。若同一数据目录已有旧的 PostgreSQL 服务运行，启动前会先尝试停止它，避免残留进程脱离 viwork 管理。
 
 打包命令会先执行 `pnpm --filter @viwork/desktop prepare:postgres` 检查这些文件。若希望从外部目录复制，可设置：
 

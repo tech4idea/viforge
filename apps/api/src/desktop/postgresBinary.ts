@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -41,7 +41,9 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   const binDir = options.binDir ?? resolveBundledPostgresBinDir();
   const initdb = executablePath(binDir, 'initdb');
   const pgCtl = executablePath(binDir, 'pg_ctl');
+  const postgres = executablePath(binDir, 'postgres');
   const createdb = executablePath(binDir, 'createdb');
+  const pgIsReady = executablePath(binDir, 'pg_isready');
   const psql = executablePath(binDir, 'psql');
   const preferredPort = options.port ?? Number(process.env.VIWORK_EMBEDDED_POSTGRES_PORT ?? '15432');
   const database = options.database ?? DEFAULT_DATABASE;
@@ -50,7 +52,9 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
 
   await assertExecutable(initdb, 'initdb');
   await assertExecutable(pgCtl, 'pg_ctl');
+  await assertExecutable(postgres, 'postgres');
   await assertExecutable(createdb, 'createdb');
+  await assertExecutable(pgIsReady, 'pg_isready');
   await assertExecutable(psql, 'psql');
   await mkdir(dataRoot, { recursive: true });
 
@@ -60,27 +64,19 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   }
 
   await removeStalePostmasterPid(pgCtl, dataDir);
+  await stopExistingDataDirServer(pgCtl, dataDir);
 
-  let port = preferredPort;
-  let startedByThisProcess = false;
-  const dataDirServerRunning = await isDataDirServerRunning(pgCtl, dataDir);
-  if (dataDirServerRunning) {
-    port = await readRunningPostgresPort(dataDir) ?? preferredPort;
-  } else {
-    port = await findAvailableLocalPort(preferredPort);
-    await runCommand(pgCtl, ['-D', dataDir, '-l', path.join(dataRoot, 'postgres.log'), '-o', `-p ${port}`, '-w', 'start']);
-    startedByThisProcess = true;
-  }
+  const port = await findAvailableLocalPort(preferredPort);
+  const postgresProcess = spawnPostgres({ postgres, dataDir, port });
+  await waitForPostgresReady({ pgIsReady, port, user, process: postgresProcess });
 
   await ensureDatabase({ createdb, psql, port, user, database, password });
 
   const connectionString = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@127.0.0.1:${port}/${database}`;
   process.env.DATABASE_URL = connectionString;
-  if (startedByThisProcess) {
-    registerEmbeddedPostgresShutdown(pgCtl, dataDir);
-  }
+  registerEmbeddedPostgresShutdown({ pgCtl, dataDir, process: postgresProcess });
 
-  return { connectionString, dataDir, port };
+  return { connectionString, dataDir, port, process: postgresProcess };
 }
 
 async function isDataDirServerRunning(pgCtl: string, dataDir: string): Promise<boolean> {
@@ -94,23 +90,9 @@ async function removeStalePostmasterPid(pgCtl: string, dataDir: string): Promise
   await rm(pidFile, { force: true });
 }
 
-async function readRunningPostgresPort(dataDir: string): Promise<number | null> {
-  try {
-    const contents = await readFile(path.join(dataDir, 'postmaster.opts'), 'utf8');
-    const tokens = contents.match(/"[^"]*"|\S+/g) ?? [];
-    for (let index = 0; index < tokens.length; index += 1) {
-      const token = tokens[index]?.replace(/^"|"$/g, '');
-      if (token === '-p') {
-        const value = tokens[index + 1]?.replace(/^"|"$/g, '');
-        const port = Number(value);
-        return Number.isInteger(port) && port > 0 ? port : null;
-      }
-    }
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
-    throw error;
-  }
-  return null;
+async function stopExistingDataDirServer(pgCtl: string, dataDir: string): Promise<void> {
+  if (!(await isDataDirServerRunning(pgCtl, dataDir))) return;
+  await runCommand(pgCtl, ['-D', dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
 }
 
 async function findAvailableLocalPort(preferredPort: number): Promise<number> {
@@ -121,9 +103,39 @@ async function findAvailableLocalPort(preferredPort: number): Promise<number> {
   throw new Error(`No available local PostgreSQL port found near ${preferredPort}.`);
 }
 
-function registerEmbeddedPostgresShutdown(pgCtl: string, dataDir: string): void {
+function spawnPostgres(input: { postgres: string; dataDir: string; port: number }): ChildProcessWithoutNullStreams {
+  const child = spawn(input.postgres, ['-D', input.dataDir, '-p', String(input.port), '-h', '127.0.0.1'], {
+    stdio: 'pipe',
+    env: postgresProcessEnv(input.postgres),
+  });
+  child.stdout.on('data', (chunk) => console.info(`[postgres:stdout] ${String(chunk)}`));
+  child.stderr.on('data', (chunk) => console.info(`[postgres:stderr] ${String(chunk)}`));
+  child.on('error', (error) => console.error('[postgres] failed to start', error));
+  child.on('exit', (code) => {
+    if (code !== 0) console.error(`[postgres] exited with code ${code ?? 'unknown'}`);
+  });
+  return child;
+}
+
+async function waitForPostgresReady(input: { pgIsReady: string; port: number; user: string; process: ChildProcessWithoutNullStreams }): Promise<void> {
+  const startedAt = Date.now();
+  const timeoutMs = 60_000;
+  while (Date.now() - startedAt < timeoutMs) {
+    if (input.process.exitCode !== null) {
+      throw new Error(`Embedded PostgreSQL exited before it became ready with code ${input.process.exitCode}.`);
+    }
+    if (await runCommand(input.pgIsReady, ['-h', '127.0.0.1', '-p', String(input.port), '-U', input.user], { allowFailure: true })) {
+      return;
+    }
+    await sleep(250);
+  }
+  throw new Error(`Embedded PostgreSQL did not become ready on port ${input.port} within ${timeoutMs}ms.`);
+}
+
+function registerEmbeddedPostgresShutdown(input: { pgCtl: string; dataDir: string; process: ChildProcessWithoutNullStreams }): void {
   stopEmbeddedPostgres = async () => {
-    await runCommand(pgCtl, ['-D', dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
+    await runCommand(input.pgCtl, ['-D', input.dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
+    if (input.process.exitCode === null) input.process.kill('SIGTERM');
   };
   if (shutdownRegistered) return;
   shutdownRegistered = true;
@@ -136,6 +148,10 @@ function registerEmbeddedPostgresShutdown(pgCtl: string, dataDir: string): void 
       void stopEmbeddedPostgres?.().finally(() => process.exit(0));
     });
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function ensureDatabase(input: { createdb: string; psql: string; port: number; user: string; database: string; password: string }): Promise<void> {
