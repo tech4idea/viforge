@@ -6,6 +6,7 @@
 
 - 桌面端使用 Electron，安装包内置 Chromium 与 Node runtime，用户不需要预装 Node。
 - Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。升级安装时会优先从 `HKCU\\Software\\viwork\\InstallLocation` 读取既有安装路径，从 `HKCU\\Software\\viwork\\DataRoot` 读取既有数据路径，其次兼容旧版 `AppData\\Roaming\\viwork\\data-root.txt`。
+- Windows 安装包不会在结束页自动启动 viwork，主程序 manifest 使用普通用户权限启动。内置 PostgreSQL 不允许管理员权限运行，因此桌面主进程如果检测到管理员权限启动，会直接提示用户用普通用户权限重新打开。
 - Electron 主进程启动本地 API 服务，再用内置 WebView 窗口加载 `http://127.0.0.1:<local-port>`。默认优先使用 `3001`，如端口被占用会在后续端口中寻找可用端口。
 - 启动 API 期间会先显示一个“viwork 正在打开”的占位窗口，避免用户以为没有响应。内置 PostgreSQL 在 API 进程内后台启动，运行设置页会展示其状态。桌面端使用 Electron 单实例锁，重复点击桌面图标只会聚焦当前启动窗口或主窗口，不会再拉起一套 API/PostgreSQL。
 - 桌面模式下 API 同时托管 `apps/web/dist` 静态资源，所以不需要单独 Vite dev server 或浏览器入口。

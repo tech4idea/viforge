@@ -61,6 +61,7 @@ async function startDesktopAppOnce(): Promise<void> {
   ensureStartupWindow();
 
   try {
+    await assertSupportedLaunchContext();
     const apiUrl = await startApiServer();
     await createMainWindow(apiUrl);
     closingStartupWindow = true;
@@ -75,6 +76,27 @@ async function startDesktopAppOnce(): Promise<void> {
     app.quit();
     throw error;
   }
+}
+
+async function assertSupportedLaunchContext(): Promise<void> {
+  if (process.platform !== 'win32' || !(await isWindowsProcessElevated())) return;
+
+  await dialog.showMessageBox({
+    type: 'error',
+    title: 'viwork 无法以管理员权限启动',
+    message: '请用普通用户权限启动 viwork。',
+    detail: '内置 PostgreSQL 不允许在管理员权限下运行。请关闭当前窗口，从桌面图标或开始菜单正常打开 viwork。',
+    noLink: true,
+  });
+  throw new Error('viwork desktop cannot run embedded PostgreSQL as an elevated Windows process.');
+}
+
+function isWindowsProcessElevated(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn('net', ['session'], { stdio: 'ignore', windowsHide: true });
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => resolve(code === 0));
+  });
 }
 
 async function createMainWindow(apiUrl: string): Promise<void> {
@@ -283,7 +305,7 @@ async function startApiServer(): Promise<string> {
   });
 
   try {
-    await waitForApi(apiPort, desktopAccessToken, API_START_TIMEOUT_MS);
+    await waitForApi(apiPort, desktopAccessToken, API_START_TIMEOUT_MS, apiProcess);
   } catch (error) {
     const message = [
       error instanceof Error ? error.message : 'API server failed to start.',
@@ -528,19 +550,33 @@ function platformArch(): string {
   return `${platform}-${arch}`;
 }
 
-function waitForApi(port: number, token: string, timeoutMs: number): Promise<void> {
+function waitForApi(port: number, token: string, timeoutMs: number, processToWatch: ChildProcessWithoutNullStreams): Promise<void> {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout: NodeJS.Timeout | null = null;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      processToWatch.off('exit', onExit);
+      callback();
+    };
+    const onExit = (code: number | null) => {
+      finish(() => reject(new Error(`API server exited before it became ready with code ${code ?? 'unknown'}.`)));
+    };
+    processToWatch.once('exit', onExit);
+
     const poll = async () => {
       if (await isApiReady(port, token)) {
-        resolve();
+        finish(resolve);
         return;
       }
       if (Date.now() - startedAt > timeoutMs) {
-        reject(new Error(`API server did not open port ${port} within ${timeoutMs}ms.`));
+        finish(() => reject(new Error(`API server did not open port ${port} within ${timeoutMs}ms.`)));
         return;
       }
-      setTimeout(poll, 250);
+      timeout = setTimeout(poll, 250);
     };
     void poll();
   });

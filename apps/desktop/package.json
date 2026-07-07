@@ -61,12 +61,14 @@
     ],
     "win": {
       "target": ["nsis"],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": false,
       "include": "installer.nsh"
     },
     "mac": {
