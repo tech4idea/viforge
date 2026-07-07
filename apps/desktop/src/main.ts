@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, Tray } from 'electron';
 import started from 'electron-squirrel-startup';
 
 if (started) {
@@ -15,10 +15,25 @@ if (started) {
 
 const PREFERRED_API_PORT = 3001;
 const API_START_TIMEOUT_MS = 120_000;
+const PLAYWRITER_RELAY_HOST = '127.0.0.1';
+const PLAYWRITER_RELAY_PORT = 19988;
 let apiProcess: ChildProcessWithoutNullStreams | null = null;
+let playwriterProcess: ChildProcessWithoutNullStreams | null = null;
 const desktopAccessToken = randomUUID();
 const apiOutputTail: string[] = [];
 let currentDesktopDataRoot: string | null = null;
+let mainWindow: BrowserWindow | null = null;
+let startupWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let startupPromise: Promise<void> | null = null;
+let appQuitting = false;
+let closingStartupWindow = false;
+let closeConfirmationOpen = false;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 ipcMain.handle('viwork:select-data-root', async () => {
   const selected = await promptForDesktopDataRoot({ required: false });
@@ -32,10 +47,44 @@ ipcMain.handle('viwork:select-data-root', async () => {
   };
 });
 
-async function createWindow(): Promise<void> {
-  const apiUrl = await startApiServer();
+async function startDesktopApp(): Promise<void> {
+  if (startupPromise) return startupPromise;
+  startupPromise = startDesktopAppOnce().finally(() => {
+    startupPromise = null;
+  });
+  return startupPromise;
+}
+
+async function startDesktopAppOnce(): Promise<void> {
   Menu.setApplicationMenu(null);
-  const window = new BrowserWindow({
+  ensureStartupWindow();
+
+  try {
+    const apiUrl = await startApiServer();
+    await createMainWindow(apiUrl);
+    closingStartupWindow = true;
+    startupWindow?.close();
+    closingStartupWindow = false;
+    startupWindow = null;
+  } catch (error) {
+    closingStartupWindow = true;
+    startupWindow?.close();
+    closingStartupWindow = false;
+    startupWindow = null;
+    app.quit();
+    throw error;
+  }
+}
+
+async function createMainWindow(apiUrl: string): Promise<void> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow();
+    return;
+  }
+
+  Menu.setApplicationMenu(null);
+  ensureTray();
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1100,
@@ -50,9 +99,147 @@ async function createWindow(): Promise<void> {
       sandbox: true,
     },
   });
-  window.setMenuBarVisibility(false);
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.on('close', (event) => {
+    if (appQuitting) return;
+    event.preventDefault();
+    void confirmMainWindowClose();
+  });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 
-  await window.loadURL(`${apiUrl}/?desktopToken=${encodeURIComponent(desktopAccessToken)}`);
+  await mainWindow.loadURL(`${apiUrl}/?desktopToken=${encodeURIComponent(desktopAccessToken)}`);
+}
+
+function ensureStartupWindow(): void {
+  if (startupWindow && !startupWindow.isDestroyed()) {
+    startupWindow.show();
+    startupWindow.focus();
+    return;
+  }
+
+  startupWindow = new BrowserWindow({
+    width: 360,
+    height: 180,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    title: 'viwork 正在打开',
+    icon: resolveWindowIcon(process.resourcesPath),
+    autoHideMenuBar: true,
+    show: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  startupWindow.setMenuBarVisibility(false);
+  startupWindow.on('close', (event) => {
+    if (appQuitting || closingStartupWindow) return;
+    event.preventDefault();
+  });
+  startupWindow.on('closed', () => {
+    startupWindow = null;
+  });
+  void startupWindow.loadURL(startupHtmlUrl());
+}
+
+function startupHtmlUrl(): string {
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>viwork 正在打开</title>
+  <style>
+    body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f7f4; color: #1e2428; }
+    main { width: 280px; }
+    h1 { margin: 0 0 12px; font-size: 18px; font-weight: 650; }
+    p { margin: 0; color: #5c666d; font-size: 13px; line-height: 1.6; }
+    .bar { margin-top: 22px; height: 4px; overflow: hidden; background: #d7ddd7; border-radius: 999px; }
+    .bar::before { content: ""; display: block; width: 38%; height: 100%; background: #2f6f5e; border-radius: inherit; animation: loading 1.2s ease-in-out infinite; }
+    @keyframes loading { 0% { transform: translateX(-105%); } 100% { transform: translateX(270%); } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>viwork 正在打开</h1>
+    <p>正在启动本地 API 和内置 PostgreSQL，请稍候。</p>
+    <div class="bar"></div>
+  </main>
+</body>
+</html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function ensureTray(): void {
+  if (tray || process.platform === 'darwin') return;
+  tray = new Tray(resolveWindowIcon(process.resourcesPath));
+  tray.setToolTip('viwork');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开 viwork', click: () => showMainWindow() },
+    { type: 'separator' },
+    { label: '完全退出', click: () => quitApp() },
+  ]));
+  tray.on('double-click', () => showMainWindow());
+}
+
+async function confirmMainWindowClose(): Promise<void> {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return;
+  if (closeConfirmationOpen) {
+    window.focus();
+    return;
+  }
+
+  closeConfirmationOpen = true;
+  const result = await dialog.showMessageBox(window, {
+    type: 'question',
+    title: '关闭 viwork',
+    message: '要如何关闭 viwork？',
+    detail: '选择“仅关闭窗口”会保留本地 API 和 PostgreSQL 运行，再次点击桌面图标会回到当前实例；选择“完全退出”会停止后台服务。',
+    buttons: ['仅关闭窗口', '完全退出', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  }).finally(() => {
+    closeConfirmationOpen = false;
+  });
+
+  if (result.response === 0) {
+    window.hide();
+    return;
+  }
+  if (result.response === 1) quitApp();
+}
+
+function showMainWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+  if (startupWindow && !startupWindow.isDestroyed()) {
+    startupWindow.show();
+    startupWindow.focus();
+    return;
+  }
+  launchDesktopApp();
+}
+
+function quitApp(): void {
+  appQuitting = true;
+  tray?.destroy();
+  tray = null;
+  app.quit();
+}
+
+function launchDesktopApp(): void {
+  void startDesktopApp().catch((error) => {
+    console.error('Failed to start viwork desktop app:', error);
+  });
 }
 
 async function startApiServer(): Promise<string> {
@@ -60,8 +247,11 @@ async function startApiServer(): Promise<string> {
   const dataRoot = await resolveDesktopDataRoot();
   currentDesktopDataRoot = dataRoot;
   const apiEntry = resolveApiEntry(resourcesPath);
+  const playwriterEntry = resolvePlaywriterEntry(resourcesPath);
   const resourceRoots = resolveResourceRoots(resourcesPath);
   const apiPort = await findAvailableLocalPort(PREFERRED_API_PORT);
+  await startPlaywriterRelay(playwriterEntry, dataRoot);
+  const playwriterHost = `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`;
 
   apiProcess = spawn(process.execPath, [apiEntry], {
     env: {
@@ -72,6 +262,9 @@ async function startApiServer(): Promise<string> {
       VIWORK_DESKTOP_ACCESS_TOKEN: desktopAccessToken,
       VIWORK_DESKTOP_DATA_ROOT: dataRoot,
       VIWORK_DESKTOP_CONFIG_ROOT: app.getPath('userData'),
+      VIWORK_PLAYWRITER_BIN: playwriterEntry,
+      VIWORK_PLAYWRITER_HOST: playwriterHost,
+      PLAYWRITER_HOST: playwriterHost,
       VIWORK_DATABASE_MODE: process.env.VIWORK_DATABASE_MODE ?? 'embedded-postgres',
       VIWORK_POSTGRES_BIN_DIR: process.env.VIWORK_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin'),
       WORKSPACES_ROOT: path.join(dataRoot, 'workspaces'),
@@ -100,6 +293,66 @@ async function startApiServer(): Promise<string> {
   }
 
   return `http://127.0.0.1:${apiPort}`;
+}
+
+async function startPlaywriterRelay(playwriterEntry: string, dataRoot: string): Promise<void> {
+  if (await isPlaywriterRelayReady()) return;
+
+  const playwriterLogDir = path.join(dataRoot, 'logs', 'playwriter');
+
+  playwriterProcess = spawn(process.execPath, [playwriterEntry, 'serve', '--host', PLAYWRITER_RELAY_HOST], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      PLAYWRITER_HOST: `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`,
+      PLAYWRITER_LOG_FILE_PATH: path.join(playwriterLogDir, 'relay-server.log'),
+      PLAYWRITER_CDP_LOG_FILE_PATH: path.join(playwriterLogDir, 'cdp.jsonl'),
+      VIWORK_PLAYWRITER_HOST: `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`,
+    },
+    stdio: 'pipe',
+  });
+
+  playwriterProcess.stderr.on('data', (chunk) => appendPlaywriterOutput('stderr', chunk));
+  playwriterProcess.stdout.on('data', (chunk) => appendPlaywriterOutput('stdout', chunk));
+  playwriterProcess.on('error', (error) => {
+    console.warn(`Playwriter relay failed to start: ${error.message}`);
+    playwriterProcess = null;
+  });
+  playwriterProcess.on('exit', (code) => {
+    if (playwriterProcess && code !== 0) console.error(`[playwriter] exited with code ${code ?? 'unknown'}`);
+    playwriterProcess = null;
+  });
+
+  await waitForPlaywriterRelay(10_000).catch((error) => {
+    console.warn(`Playwriter relay did not become ready: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
+function waitForPlaywriterRelay(timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    const poll = async () => {
+      if (await isPlaywriterRelayReady()) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        reject(new Error(`Playwriter relay did not open port ${PLAYWRITER_RELAY_PORT} within ${timeoutMs}ms.`));
+        return;
+      }
+      setTimeout(poll, 250);
+    };
+    void poll();
+  });
+}
+
+async function isPlaywriterRelayReady(): Promise<boolean> {
+  try {
+    const response = await fetch(`http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}/extensions/status`, { signal: AbortSignal.timeout(1_000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveDesktopDataRoot(): Promise<string> {
@@ -171,6 +424,15 @@ function appendApiOutput(stream: 'stdout' | 'stderr', chunk: Buffer | string): v
   while (apiOutputTail.length > 30) apiOutputTail.shift();
 }
 
+function appendPlaywriterOutput(stream: 'stdout' | 'stderr', chunk: Buffer | string): void {
+  const prefixed = `[playwriter:${stream}] ${String(chunk)}`;
+  if (stream === 'stderr') {
+    console.error(prefixed);
+  } else {
+    console.info(prefixed);
+  }
+}
+
 function formatApiOutputTail(): string {
   if (apiOutputTail.length === 0) return '';
   return `最近 API 日志:\n${apiOutputTail.join('\n')}`;
@@ -180,6 +442,12 @@ function resolveApiEntry(resourcesPath: string): string {
   const packagedEntry = path.join(resourcesPath, 'api', 'index.mjs');
   if (app.isPackaged) return packagedEntry;
   return path.resolve(projectRoot(), 'apps', 'desktop', 'dist', 'api', 'index.mjs');
+}
+
+function resolvePlaywriterEntry(resourcesPath: string): string {
+  const packagedEntry = path.join(resourcesPath, 'app.asar', 'dist', 'playwriter-cli.mjs');
+  if (app.isPackaged) return packagedEntry;
+  return path.resolve(projectRoot(), 'apps', 'desktop', 'dist', 'playwriter-cli.mjs');
 }
 
 function resolvePreloadEntry(): string {
@@ -275,17 +543,24 @@ function isPortOpen(port: number): Promise<boolean> {
   });
 }
 
+app.on('second-instance', () => {
+  showMainWindow();
+});
+
 app.whenReady().then(() => {
-  void createWindow();
+  if (!hasSingleInstanceLock) return;
+  launchDesktopApp();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    showMainWindow();
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform === 'darwin' && appQuitting) app.quit();
 });
 
 app.on('before-quit', () => {
+  appQuitting = true;
   apiProcess?.kill();
+  playwriterProcess?.kill();
 });

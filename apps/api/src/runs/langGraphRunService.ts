@@ -1076,7 +1076,7 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
     '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',
     '涉及登录、提交、购买、删除、发布、授权、付款或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
-    '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并启动 playwriter serve，不要假装已访问网页。',
+    '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 playwriter serve。不要假装已访问网页。',
     '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
     '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
     '当需要查看或合并结构化项目长期记忆时，调用 read_project_memory；写回完整 Markdown 时调用 update_project_memory。',
