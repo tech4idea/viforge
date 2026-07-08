@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viwork/shared';
 import { z } from 'zod';
 
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
+import { LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { appendJsonLog } from '../logger';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -514,7 +514,9 @@ function createScheduledTaskTool({
     description: [
       '创建绑定当前会话的定时任务。',
       '仅当用户明确要求在未来某个时间、周期性、每天、每周、每隔一段时间执行提醒或通知时调用。',
-      '当前 MVP 支持在任务执行时实时生成一条微信消息并发送给已绑定微信。不要在创建任务时提前写死将来要发送的正文。',
+      '本工具只负责创建任务，不会立即发送微信消息；任务到期后会启动一次 schedule 来源的 agent run。',
+      '当前 MVP 的任务动作是在执行时实时生成一条微信消息，并由执行 run 调用 send_wechat_message 发送给已绑定微信。',
+      '不要在创建任务时提前写死将来要发送的正文。',
       '如果用户没有给出可执行时间或实时生成内容的要求，先追问，不要创建任务。',
     ].join('\n'),
     inputSchema: z.object({
@@ -980,15 +982,16 @@ async function detectChoiceRequest(
     return;
   }
 
-  if (!AIGC_HUB_API_KEY) {
+  const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  if (!apiKey) {
     appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.unconfigured', runId });
     return;
   }
 
   try {
-    const baseUrl = AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+    const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
     const model = 'minimax/minimax-m2.7';
-    const headers = buildAigcHubHeaders({ apiKey: AIGC_HUB_API_KEY, contentType: 'application/json' });
+    const headers = buildAigcHubHeaders({ apiKey, contentType: 'application/json' });
 
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
@@ -1071,11 +1074,12 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '当用户明确要求创建定时任务、提醒、每天/每周/每隔一段时间向微信发送消息时，使用 create_scheduled_task 工具创建绑定当前会话的任务。',
     '调用 create_scheduled_task 前必须确认有明确的 nextRunAt、频率和执行时内容生成要求；缺少时间或生成要求时先追问。',
     '创建定时任务后，用简短文字告诉用户任务标题、下次执行时间和执行时会实时生成微信内容。',
+    'send_wechat_message 只用于当前 run 立即发送微信文本，不用于创建未来或周期性发送任务。',
     '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点或整理在线资料时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
     '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
     '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',
     '涉及登录、提交、购买、删除、发布、授权、付款或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
-    '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并启动 playwriter serve，不要假装已访问网页。',
+    '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 playwriter serve。不要假装已访问网页。',
     '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
     '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
     '当需要查看或合并结构化项目长期记忆时，调用 read_project_memory；写回完整 Markdown 时调用 update_project_memory。',

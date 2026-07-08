@@ -6,8 +6,11 @@
     "dev": "pnpm --parallel --filter @viwork/api --filter @viwork/web dev",
     "dev:api": "pnpm --filter @viwork/api dev",
     "dev:web": "pnpm --filter @viwork/web dev",
+    "dev:desktop": "pnpm --filter @viwork/desktop dev",
     "dev:agent-worker": "pnpm --filter @viwork/agent-worker dev",
     "dev:integration-gateway": "pnpm --filter @viwork/integration-gateway dev",
+    "desktop:pack": "pnpm --filter @viwork/desktop run pack",
+    "desktop:dist": "pnpm --filter @viwork/desktop run dist",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"

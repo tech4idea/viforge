@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 
 export type PlaywriterStatus = {
   enabled: boolean;
@@ -71,14 +72,7 @@ export function createPlaywriterService(options: { binary?: string; host?: strin
         error: cli.ok ? relay.error : cli.error,
         relayReachable: relay.reachable,
         connectedBrowsers: relay.connectedBrowsers,
-        steps: [
-          '在浏览器所在机器安装 Playwriter Chrome 扩展。',
-          '在浏览器所在机器启动 relay：playwriter serve --host 127.0.0.1 --replace。',
-          '打开需要让 agent 访问的标签页，点击 Playwriter 扩展图标授权该标签页。',
-          'Docker/WSL 部署可使用 host.docker.internal 指向宿主机；如果 Playwriter relay 拒绝该 Host header，可设置 VIWORK_PLAYWRITER_HOST_HEADER=127.0.0.1:19988。',
-          '如果 API 不在同一台机器，把 VIWORK_PLAYWRITER_HOST 设置为浏览器机器对 API 可访问的地址，并在远程监听时配置 VIWORK_PLAYWRITER_TOKEN。',
-          '无需手动创建 session；viwork 会在首次调用浏览器工具时自动创建并复用 Playwriter session。',
-        ],
+        steps: playwriterInstallSteps(),
       };
     },
 
@@ -178,7 +172,8 @@ function playwriterRequestHeaders(input: { token: string; hostHeader: string }):
 
 async function checkPlaywriterCli(binary: string): Promise<{ ok: true } | { ok: false; error: string }> {
   return new Promise((resolve) => {
-    execFile(binary, ['--version'], { timeout: 5_000, maxBuffer: 64 * 1024 }, (error) => {
+    const command = playwriterCommand(binary, ['--version']);
+    execFile(command.file, command.args, { env: command.env, timeout: 5_000, maxBuffer: 64 * 1024 }, (error) => {
       if (error) {
         resolve({ ok: false, error: error.message });
         return;
@@ -196,7 +191,8 @@ async function createPlaywriterSession(input: { binary: string; host: string; to
   };
 
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(input.binary, ['session', 'new'], { env, timeout: 15_000, maxBuffer: 256 * 1024 }, (error, stdout, stderr) => {
+    const command = playwriterCommand(input.binary, ['session', 'new'], env);
+    execFile(command.file, command.args, { env: command.env, timeout: 15_000, maxBuffer: 256 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`Playwriter session creation failed: ${error.message}${stderr ? `\n${stderr}` : ''}`));
         return;
@@ -226,8 +222,9 @@ async function executePlaywriterCode(input: { binary: string; host: string; toke
   };
 
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(input.binary, ['-s', input.sessionId, '-e', input.code], {
-      env,
+    const command = playwriterCommand(input.binary, ['-s', input.sessionId, '-e', input.code], env);
+    execFile(command.file, command.args, {
+      env: command.env,
       timeout,
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
@@ -265,6 +262,36 @@ function parseJsonOrText(text: string): unknown {
   } catch {
     return text;
   }
+}
+
+function playwriterCommand(binary: string, args: string[], env: NodeJS.ProcessEnv = process.env): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
+  if (/\.[cm]?js$/i.test(path.basename(binary))) {
+    return {
+      file: process.execPath,
+      args: [binary, ...args],
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+    };
+  }
+  return { file: binary, args, env };
+}
+
+function playwriterInstallSteps(): string[] {
+  if (process.env.VIWORK_DESKTOP === '1') {
+    return [
+      '在浏览器所在机器安装 Playwriter Chrome 扩展。',
+      '打开需要让 agent 访问的标签页，点击 Playwriter 扩展图标授权该标签页。',
+      '无需手动启动 relay 或创建 session；viwork 桌面版会在后台自动启动 relay，并在首次调用浏览器工具时自动创建和复用 Playwriter session。',
+    ];
+  }
+
+  return [
+    '在浏览器所在机器安装 Playwriter Chrome 扩展。',
+    '在浏览器所在机器启动 relay：playwriter serve --host 127.0.0.1 --replace。',
+    '打开需要让 agent 访问的标签页，点击 Playwriter 扩展图标授权该标签页。',
+    'Docker/WSL 部署可使用 host.docker.internal 指向宿主机；如果 Playwriter relay 拒绝该 Host header，可设置 VIWORK_PLAYWRITER_HOST_HEADER=127.0.0.1:19988。',
+    '如果 API 不在同一台机器，把 VIWORK_PLAYWRITER_HOST 设置为浏览器机器对 API 可访问的地址，并在远程监听时配置 VIWORK_PLAYWRITER_TOKEN。',
+    '无需手动创建 session；viwork 会在首次调用浏览器工具时自动创建并复用 Playwriter session。',
+  ];
 }
 
 function trimTrailingSlashes(value: string): string {

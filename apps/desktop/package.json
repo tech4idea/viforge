@@ -1,0 +1,83 @@
+{
+  "name": "@viwork/desktop",
+  "description": "viwork standalone desktop app",
+  "author": "viwork",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-api-bundle.mjs && node scripts/prepare-icons.mjs",
+    "dev": "pnpm build && electron .",
+    "build:postgres": "node scripts/build-postgres-from-source.mjs",
+    "build:pgvector": "node scripts/build-pgvector-from-source.mjs",
+    "prepare:postgres": "node scripts/prepare-postgres.mjs",
+    "pack": "pnpm --filter @viwork/web build && pnpm --filter @viwork/api build && pnpm build && pnpm prepare:postgres && electron-builder --dir",
+    "dist": "pnpm --filter @viwork/web build && pnpm --filter @viwork/api build && pnpm build && pnpm prepare:postgres && electron-builder"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.21.5",
+    "sharp": "^0.34.5",
+    "typescript": "^5.5.3"
+  },
+  "build": {
+    "appId": "cn.viwork.desktop",
+    "productName": "viwork",
+    "executableName": "viwork",
+    "npmRebuild": false,
+    "directories": {
+      "output": "../../release/desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web"
+      },
+      {
+        "from": "dist/api",
+        "to": "api",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/postgres",
+        "to": "postgres",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": false,
+      "include": "installer.nsh"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "build/icon.png"
+    }
+  }
+}

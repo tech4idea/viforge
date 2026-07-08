@@ -186,6 +186,60 @@ export type AigcHubModelListResponse = {
   error?: string;
 };
 
+export type RuntimeModelProviderConfig = {
+  baseUrl: string;
+  apiKeyConfigured: boolean;
+  chatModel?: string;
+  imageModel?: string;
+  embeddingModel?: string;
+  embeddingDims?: number;
+};
+
+export type RuntimeDatabaseMode = 'embedded-postgres' | 'external-postgres' | 'custom';
+
+export type RuntimeDatabaseConfig = {
+  mode: RuntimeDatabaseMode;
+  connectionStringConfigured: boolean;
+  connectionString?: string;
+  customAdapter?: string;
+  vectorStore?: 'pgvector' | 'external';
+  status?: 'unknown' | 'starting' | 'ready' | 'error';
+  statusMessage?: string;
+};
+
+export type RuntimeConfig = {
+  modelProvider: RuntimeModelProviderConfig;
+  database: RuntimeDatabaseConfig;
+  desktop: {
+    enabled: boolean;
+    dataRoot?: string;
+  };
+  restartRequired?: boolean;
+};
+
+export type RuntimeModelTestResponse = {
+  ok: boolean;
+  status?: number;
+  message: string;
+};
+
+export type UpdateRuntimeConfigInput = {
+  modelProvider?: {
+    baseUrl?: string;
+    apiKey?: string;
+    chatModel?: string;
+    imageModel?: string;
+    embeddingModel?: string;
+    embeddingDims?: number;
+  };
+  database?: {
+    mode?: RuntimeDatabaseMode;
+    connectionString?: string;
+    customAdapter?: string;
+    vectorStore?: RuntimeDatabaseConfig['vectorStore'];
+  };
+};
+
 export type RunEvent =
   | { type: 'run.start'; runId: string }
   | { type: 'text.delta'; runId: string; text: string }

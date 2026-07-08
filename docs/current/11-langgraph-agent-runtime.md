@@ -71,7 +71,7 @@ LangGraph run service 实现统一的 `RunService` 接口：
 
 ## Playwriter Browser Tools
 
-LangGraph runtime 现在通过 Playwriter 暴露浏览器能力，目标是连接用户已登录、已授权的真实浏览器标签页，而不是启动一个全新的无状态浏览器。API 通过 Playwriter CLI 执行浏览器动作，CLI 路径默认 `playwriter`，可用 `VIWORK_PLAYWRITER_BIN` 覆盖。API 默认连接 `VIWORK_PLAYWRITER_HOST`，未设置时使用 `http://127.0.0.1:19988`；如 Playwriter relay 配置了 token，可设置 `VIWORK_PLAYWRITER_TOKEN`。默认 session id 可用 `VIWORK_PLAYWRITER_SESSION_ID` 覆盖，未设置时为 `1`。
+LangGraph runtime 现在通过 Playwriter 暴露浏览器能力，目标是连接用户已登录、已授权的真实浏览器标签页，而不是启动一个全新的无状态浏览器。API 通过 Playwriter CLI 执行浏览器动作，CLI 路径默认 `playwriter`，可用 `VIWORK_PLAYWRITER_BIN` 覆盖。API 默认连接 `VIWORK_PLAYWRITER_HOST`，未设置时使用 `http://127.0.0.1:19988`；如 Playwriter relay 配置了 token，可设置 `VIWORK_PLAYWRITER_TOKEN`。默认 session id 可用 `VIWORK_PLAYWRITER_SESSION_ID` 覆盖，未设置时会自动创建并复用 session。桌面版会由 Electron 主进程自动启动本机 relay，用户只需要安装浏览器扩展并授权标签页；普通 Web/API 部署仍需要手动启动 `playwriter serve`。
 
 Agent 可用工具：
 
@@ -81,9 +81,9 @@ Agent 可用工具：
 - `browser_snapshot`：读取 Playwriter 的页面可访问性快照，获取文字、链接、控件和 aria-ref。
 - `browser_evaluate`：执行简短 Playwright JavaScript，作用域包含 `page`、`context`、`state`、`require`。
 
-安全边界：登录、提交、购买、删除、发布、授权、付款或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并启动 `playwriter serve`，不能假装已访问网页。
+安全边界：登录、提交、购买、删除、发布、授权、付款或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 `playwriter serve`。agent 不能假装已访问网页。
 
-本地启用步骤如下；agent 也可以在用户需要网页访问但环境未就绪时调用 `browser_use_install` 返回同类指引：
+普通 Web/API 本地启用步骤如下；agent 也可以在用户需要网页访问但环境未就绪时调用 `browser_use_install` 返回同类指引：
 
 ```bash
 npm i -g playwriter
@@ -170,7 +170,7 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 - `PostgresSaver`，schema 为 `langgraph`，用于 LangGraph checkpoint 表。
 - `PostgresStore`，schema 为 `langgraph_store`，用于 LangGraph Store 表。
 
-如果未设置 `DATABASE_URL`，本地开发和测试使用 `MemorySaver` + `InMemoryStore`，API 可以正常启动和运行，但进程重启后 LangGraph 记忆不会保留。生产或 Docker Compose 部署应配置 `DATABASE_URL`。
+运行态必须配置 PostgreSQL：桌面单机模式由 API 启动内置 PostgreSQL binary 并写入 `DATABASE_URL`，服务模式应通过外部 PostgreSQL 或 Docker Compose 注入 `DATABASE_URL`。`MemorySaver` + `InMemoryStore` 只作为自动化测试后备，需显式设置 `VIWORK_LANGGRAPH_ALLOW_IN_MEMORY=1`，不作为产品运行模式暴露。
 
 项目长期记忆由 viwork 自己的工具层实现：
 

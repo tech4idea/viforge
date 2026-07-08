@@ -19,6 +19,7 @@ let originalBaseUrl: string | undefined;
 let originalApiKey: string | undefined;
 let originalImageModel: string | undefined;
 let originalDatabaseUrl: string | undefined;
+let originalAllowInMemory: string | undefined;
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'viwork-LangGraph-run-service-'));
@@ -29,7 +30,9 @@ beforeEach(async () => {
   originalApiKey = process.env.VIWORK_AIGC_HUB_API_KEY;
   originalImageModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL;
   originalDatabaseUrl = process.env.DATABASE_URL;
+  originalAllowInMemory = process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY;
   delete process.env.DATABASE_URL;
+  process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY = '1';
 });
 
 afterEach(async () => {
@@ -38,6 +41,7 @@ afterEach(async () => {
   restoreEnv('VIWORK_AIGC_HUB_API_KEY', originalApiKey);
   restoreEnv('VIWORK_AIGC_HUB_IMAGE_MODEL', originalImageModel);
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
+  restoreEnv('VIWORK_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
   await rm(root, { recursive: true, force: true });
 });
 

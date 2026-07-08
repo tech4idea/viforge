@@ -16,8 +16,15 @@ let root: string;
 let app: Hono;
 let store: WorkspaceStore;
 let harnessStore: HarnessStore;
+let originalDatabaseUrl: string | undefined;
+let originalAllowInMemory: string | undefined;
 
 beforeEach(async () => {
+  originalDatabaseUrl = process.env.DATABASE_URL;
+  originalAllowInMemory = process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY;
+  delete process.env.DATABASE_URL;
+  process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY = '1';
+
   root = await mkdtemp(path.join(tmpdir(), 'viwork-harness-routes-'));
   store = createWorkspaceStore(path.join(root, 'workspaces'));
   harnessStore = createHarnessStore(path.join(root, 'harness'), store);
@@ -27,8 +34,18 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  restoreEnv('DATABASE_URL', originalDatabaseUrl);
+  restoreEnv('VIWORK_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
   await rm(root, { recursive: true, force: true });
 });
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
 
 describe('harness routes', () => {
   it('seeds product profile prompts as active baseline agent specs', async () => {

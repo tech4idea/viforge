@@ -27,6 +27,8 @@ import {
   type Project,
   type ReferencedChatSnippet,
   type ReferencedFile,
+  type RuntimeConfig,
+  type UpdateRuntimeConfigInput,
   type RunEvent,
   type ScheduledTask,
   type StreamEvent,
@@ -109,6 +111,18 @@ const TEMPORARY_CHAT_SCOPE_ID = '__temporary__';
 const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
 const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
 const RUN_NOTIFY_STORAGE_KEY = 'viwork.runNotify.v1';
+
+declare global {
+  interface Window {
+    viworkDesktop?: {
+      selectDataRoot(): Promise<{
+        canceled: boolean;
+        dataRoot?: string;
+        restartRequired?: boolean;
+      }>;
+    };
+  }
+}
 
 type RunNotifyMode = 'off' | 'sound' | 'wechat' | 'both';
 type RunStreamBinding = {
@@ -431,7 +445,9 @@ function App() {
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | 'settings' | null>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [runtimeConfigState, setRuntimeConfigState] = useState<LoadState>('idle');
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
@@ -896,6 +912,9 @@ function App() {
     if (activeToolPanel === 'wechat') {
       void loadWechatStatus();
     }
+    if (activeToolPanel === 'settings') {
+      void loadRuntimeConfig();
+    }
   }, [activeToolPanel]);
 
   useEffect(() => {
@@ -1101,6 +1120,32 @@ function App() {
       setImageModel((current) => current || preferredModelId(response.models, 'image') || response.models[0]?.id || '');
     } catch (error) {
       setAigcHubModelError(errorToMessage(error));
+    }
+  }
+
+  async function loadRuntimeConfig() {
+    setRuntimeConfigState('loading');
+    try {
+      const config = await apiClient.getRuntimeConfig();
+      setRuntimeConfig(config);
+      setRuntimeConfigState('idle');
+    } catch (error) {
+      setRuntimeConfigState('error');
+      showToast(`读取运行设置失败：${errorToMessage(error)}`, 'error');
+    }
+  }
+
+  async function saveRuntimeConfig(input: UpdateRuntimeConfigInput) {
+    setRuntimeConfigState('loading');
+    try {
+      const config = await apiClient.updateRuntimeConfig(input);
+      setRuntimeConfig(config);
+      setRuntimeConfigState('idle');
+      showToast('运行设置已保存', 'success');
+      await loadAigcHubModels();
+    } catch (error) {
+      setRuntimeConfigState('error');
+      showToast(`保存运行设置失败：${errorToMessage(error)}`, 'error');
     }
   }
 
@@ -3298,6 +3343,7 @@ function App() {
         onOpenGitSync={() => setActiveToolPanel('git')}
         onOpenHarness={openHarnessStandalone}
         onOpenSchedules={() => void openScheduleOverview()}
+        onOpenSettings={() => setActiveToolPanel('settings')}
       />
 
       <div className="content-area" style={{ gridTemplateColumns: contentAreaColumns() }}>
@@ -4081,8 +4127,8 @@ function App() {
           <section className="modal-panel" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">{activeToolPanel === 'git' ? 'Version Control' : 'Remote WeChat'}</p>
-                <h2>{activeToolPanel === 'git' ? '版本管理与安全备份' : '远程微信接入'}</h2>
+                <p className="eyebrow">{toolPanelEyebrow(activeToolPanel)}</p>
+                <h2>{toolPanelTitle(activeToolPanel)}</h2>
               </div>
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
             </div>
@@ -4106,6 +4152,15 @@ function App() {
                 apiClient={apiClient}
                 projects={projects}
                 selectedProjectId={selectedProjectId}
+              />
+            ) : null}
+
+            {activeToolPanel === 'settings' ? (
+              <RuntimeSettingsPanel
+                config={runtimeConfig}
+                state={runtimeConfigState}
+                onReload={() => void loadRuntimeConfig()}
+                onSave={(input) => void saveRuntimeConfig(input)}
               />
             ) : null}
 
@@ -5679,6 +5734,145 @@ function upsertScheduledTask(tasks: ScheduledTask[], task: ScheduledTask): Sched
 function formatScheduleNextRun(task: ScheduledTask): string {
   if (task.status === 'completed') return task.lastRunAt ? `完成于 ${formatChatTime(task.lastRunAt)}` : '已完成';
   return `下次 ${formatChatTime(task.nextRunAt)}`;
+}
+
+function toolPanelEyebrow(panel: 'wechat' | 'git' | 'harness' | 'settings' | null): string {
+  if (panel === 'git') return 'Version Control';
+  if (panel === 'settings') return 'Runtime';
+  return 'Remote WeChat';
+}
+
+function toolPanelTitle(panel: 'wechat' | 'git' | 'harness' | 'settings' | null): string {
+  if (panel === 'git') return '版本管理与安全备份';
+  if (panel === 'settings') return '运行设置';
+  return '远程微信接入';
+}
+
+function RuntimeSettingsPanel({
+  config,
+  state,
+  onReload,
+  onSave,
+}: {
+  config: RuntimeConfig | null;
+  state: LoadState;
+  onReload: () => void;
+  onSave: (input: UpdateRuntimeConfigInput) => void;
+}): JSX.Element {
+  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [chatModel, setChatModel] = useState('');
+  const [imageModel, setImageModel] = useState('');
+  const [embeddingModel, setEmbeddingModel] = useState('');
+  const [embeddingDims, setEmbeddingDims] = useState('1024');
+  const [localDataRoot, setLocalDataRoot] = useState('');
+  const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
+  const [modelTestState, setModelTestState] = useState<LoadState>('idle');
+  const [modelTestMessage, setModelTestMessage] = useState('');
+
+  useEffect(() => {
+    if (!config) return;
+    setBaseUrl(config.modelProvider.baseUrl ?? '');
+    setChatModel(config.modelProvider.chatModel ?? '');
+    setImageModel(config.modelProvider.imageModel ?? '');
+    setEmbeddingModel(config.modelProvider.embeddingModel ?? '');
+    setEmbeddingDims(String(config.modelProvider.embeddingDims ?? 1024));
+    setApiKey('');
+    setLocalDataRoot(config.desktop.dataRoot ?? '');
+    setDataRootRestartRequired(false);
+    setModelTestState('idle');
+    setModelTestMessage('');
+  }, [config]);
+
+  const busy = state === 'loading';
+  const canSelectDesktopDataRoot = Boolean(config?.desktop.enabled && window.viworkDesktop?.selectDataRoot);
+  const modelInput = (): NonNullable<UpdateRuntimeConfigInput['modelProvider']> => ({
+    baseUrl,
+    ...(apiKey.trim() ? { apiKey } : {}),
+    chatModel,
+    imageModel,
+    embeddingModel,
+    embeddingDims: Number(embeddingDims) || 1024,
+  });
+
+  return (
+    <div className="runtime-settings-panel">
+      <div className="runtime-settings-toolbar">
+        <div>
+          <strong>{config?.desktop.enabled ? '桌面单机模式' : '服务模式'}</strong>
+          <span>{localDataRoot || '使用当前运行目录'}</span>
+        </div>
+        <button type="button" onClick={onReload} disabled={busy}>刷新</button>
+      </div>
+
+      {config?.desktop.enabled ? (
+        <section className="runtime-settings-section">
+          <h3>本地数据路径</h3>
+          <div className="runtime-settings-grid">
+            <label className="runtime-settings-wide"><span>数据路径</span><input value={localDataRoot} readOnly placeholder="首次启动时必须选择" /></label>
+          </div>
+          <div className="runtime-settings-actions runtime-settings-actions-inline">
+            <button
+              type="button"
+              disabled={busy || !canSelectDesktopDataRoot}
+              onClick={async () => {
+                const result = await window.viworkDesktop?.selectDataRoot();
+                if (!result || result.canceled || !result.dataRoot) return;
+                setLocalDataRoot(result.dataRoot);
+                setDataRootRestartRequired(Boolean(result.restartRequired));
+              }}
+            >选择数据路径</button>
+          </div>
+          <p className="runtime-settings-status">
+            {dataRootRestartRequired ? '数据路径已更新，重启 viwork 后生效。' : '项目、配置、日志和内置 PostgreSQL 数据都会保存在此路径下。'}
+          </p>
+        </section>
+      ) : null}
+
+      <section className="runtime-settings-section">
+        <h3>OpenAI 协议模型</h3>
+        <div className="runtime-settings-grid">
+          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.yukeon.top/v1" /></label>
+          <label><span>API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
+          <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="MiniMax-M3" /></label>
+          <label><span>图片模型</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>
+          <label><span>Embedding 模型</span><input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} placeholder="text-embedding-3-large" /></label>
+          <label><span>Embedding 维度</span><input inputMode="numeric" value={embeddingDims} onChange={(event) => setEmbeddingDims(event.target.value)} /></label>
+        </div>
+        <div className="runtime-settings-actions runtime-settings-actions-inline">
+          <button
+            type="button"
+            disabled={busy || modelTestState === 'loading'}
+            onClick={async () => {
+              setModelTestState('loading');
+              setModelTestMessage('');
+              try {
+                const result = await apiClient.testRuntimeModel(modelInput());
+                setModelTestState(result.ok ? 'idle' : 'error');
+                setModelTestMessage(result.message);
+              } catch (error) {
+                setModelTestState('error');
+                setModelTestMessage(error instanceof Error ? error.message : String(error));
+              }
+            }}
+          >{modelTestState === 'loading' ? '测试中...' : '测试模型调用'}</button>
+        </div>
+        {modelTestMessage ? <p className={modelTestState === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage}</p> : null}
+      </section>
+
+      <div className="runtime-settings-actions">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            onSave({
+              modelProvider: modelInput(),
+            });
+          }}
+        >保存设置</button>
+      </div>
+    </div>
+  );
 }
 
 function Root(): JSX.Element {

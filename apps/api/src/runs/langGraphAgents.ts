@@ -14,7 +14,7 @@ import { z } from 'zod';
 import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
-import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, EMBEDDING_MODEL, PRODUCT_PROFILE } from '../env';
+import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, PRODUCT_PROFILE } from '../env';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -34,6 +34,10 @@ let postgresMemoryBackend: Promise<LangGraphMemoryBackend> | null = null;
 async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
   const databaseUrl = process.env.DATABASE_URL ?? '';
   if (!databaseUrl) {
+    if (process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY !== '1') {
+      throw new Error('LangGraph PostgreSQL is not configured. Start embedded PostgreSQL in desktop mode or set DATABASE_URL for service mode.');
+    }
+
     const key = process.env.VITEST_WORKER_ID ?? 'default';
     let backend = inMemoryBackends.get(key);
     if (!backend) {
@@ -64,6 +68,7 @@ async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promis
 }
 
 function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0]['index'] | undefined {
+  if (process.env.VIWORK_PGVECTOR_AVAILABLE === '0') return undefined;
   if (!process.env.VIWORK_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
 
   return {
@@ -77,7 +82,7 @@ function createMemoryEmbeddings(): OpenAIEmbeddings {
   const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
   const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
-    model: EMBEDDING_MODEL,
+    model: process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
     apiKey,
     configuration: {
       baseURL: trimTrailingSlashes(baseUrl),
@@ -1012,8 +1017,9 @@ export function createWorkspaceTools(
     tools.send_wechat_message = createTool({
       id: 'send_wechat_message',
       description: [
-        '向已绑定的用户微信发送一条文本消息。',
-        '当用户明确要求通过微信接收通知、提醒、摘要或定时任务执行结果时使用。',
+        '立即向已绑定的用户微信发送一条文本消息。',
+        '只在本次运行中需要马上发送当前正文时使用，例如用户要求现在把摘要、通知或结果发到微信。',
+        '本工具不会创建未来或周期性任务；如果用户要求定时、每天、每周或隔一段时间发送，必须使用 create_scheduled_task。',
         '由你根据当前上下文生成最终要发送的正文，再调用本工具发送；不要让外层系统替你发送。',
       ].join('\n'),
       inputSchema: z.object({
@@ -1790,7 +1796,7 @@ export function buildModelConfig(options: {
     || process.env.VIWORK_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
     || process.env.VIWORK_LANGGRAPH_MODEL
-    || 'ds/deepseek-v4-pro';
+    || 'MiniMax-M3';
 
   const baseUrl = options.baseUrl
     || process.env.VIWORK_AIGC_HUB_BASE_URL

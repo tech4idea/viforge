@@ -20,6 +20,14 @@ pnpm --filter @viwork/api dev
 pnpm --filter @viwork/web dev
 ```
 
+启动桌面壳开发模式：
+
+```bash
+pnpm --filter @viwork/desktop dev
+```
+
+桌面开发模式会先构建 Web 静态资源和桌面专用 API bundle，再由 Electron 主进程启动本地 API。默认仍需要准备本机可运行的 PostgreSQL binary；可用 `VIWORK_POSTGRES_BIN_DIR=/path/to/postgres/bin` 指向外部 PostgreSQL bin 目录调试。
+
 默认端口：
 
 - API：`3001`
@@ -51,6 +59,16 @@ pnpm --filter @viwork/web build
 
 Web 构建会执行 `tsc -b` 和 `vite build`。
 
+桌面壳构建与安装包：
+
+```bash
+pnpm --filter @viwork/desktop build
+pnpm desktop:pack
+pnpm desktop:dist
+```
+
+`desktop:dist` 生成 Electron 安装包，Windows 目标是 NSIS one-click exe。打包前需要把官方 PostgreSQL 源码构建出的可重定位 bundle 放到 `apps/desktop/resources/postgres/<platform>-<arch>`，或设置 `VIWORK_POSTGRES_BUNDLE_SOURCE=/path/to/postgresql-root` 让 `prepare:postgres` 复制。
+
 ## 后端测试
 
 推荐按改动范围运行：
@@ -61,6 +79,7 @@ pnpm --filter @viwork/api test -- chatSessions.test.ts
 pnpm --filter @viwork/api test -- runs.test.ts
 pnpm --filter @viwork/api test -- runEvents.test.ts
 pnpm --filter @viwork/api test -- langGraphRunService.test.ts
+pnpm --filter @viwork/api test -- runtimeConfig.test.ts desktopAccess.test.ts
 pnpm --filter @viwork/api test -- skills.test.ts
 pnpm --filter @viwork/api test -- wechat.test.ts
 ```

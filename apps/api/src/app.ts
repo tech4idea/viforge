@@ -19,6 +19,7 @@ import { createSkillsRoutes } from './routes/skills';
 import { createWechatRoutes } from './routes/wechat';
 import { createGitRoutes } from './routes/git';
 import { createScheduleRoutes } from './routes/schedules';
+import { createRuntimeConfigRoutes } from './routes/runtimeConfig';
 import { createGitService } from './storage/gitService';
 import { createGitConfigStore } from './storage/gitConfigStore';
 import { createSkillStore } from './skills/skillStore';
@@ -35,12 +36,16 @@ import { assertNever, type PendingSessionAction } from './wechat/wechatTypes';
 import type { WechatIlinkClient } from './wechat/wechatIlinkClient';
 import type { WechatPoller } from './wechat/wechatPoller';
 import { WORKSPACES_ROOT } from './env';
+import { installDesktopAccessGuard } from './desktopAccess';
 import { initializePhoenixTracing } from './observability/phoenix';
+import { createRuntimeConfigStore } from './runtimeConfigStore';
+import { mountStaticWeb } from './staticWeb';
 
 export function createApp(): Hono {
   initializePhoenixTracing();
 
   const app = new Hono();
+  installDesktopAccessGuard(app);
   const chatSessionStore = createChatSessionStore(path.join(WORKSPACES_ROOT, '..', 'chat-sessions.json'));
 
   app.use('/api/*', cors());
@@ -51,6 +56,7 @@ export function createApp(): Hono {
 
   app.route('/api', createProjectsRoutes(workspaceStore));
   app.route('/api', createAigcHubRoutes());
+  app.route('/api', createRuntimeConfigRoutes(createRuntimeConfigStore()));
 
   // WeChat + ilink (zero-config: uses official WeChat https://ilinkai.weixin.qq.com)
   const wechatStore = createWechatStore(path.join(WORKSPACES_ROOT, '..', 'wechat.json'));
@@ -268,6 +274,10 @@ export function createApp(): Hono {
     sessionRouter,
   }));
   app.route('/api', createScheduleRoutes(scheduleStore, scheduleService));
+
+  if (process.env.VIWORK_STATIC_WEB_ROOT) {
+    mountStaticWeb(app, process.env.VIWORK_STATIC_WEB_ROOT);
+  }
 
   return app;
 }
