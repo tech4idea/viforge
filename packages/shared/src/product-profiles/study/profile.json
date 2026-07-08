@@ -1,7 +1,7 @@
 {
   "id": "study",
-  "name": "viwork 日常学习工作台",
-  "documentTitle": "viwork 日常学习工作台",
+  "name": "ViForge 日常学习工作台",
+  "documentTitle": "ViForge 日常学习工作台",
   "defaultProjectName": "日常学习计划",
   "defaultProjectDescription": "围绕学习主题生成大纲、搜索知识点并整理学习资料。",
   "workspaceSections": {
@@ -47,7 +47,7 @@
   "mastra": {
     "requestTitle": "# 日常学习请求",
     "systemIntro": [
-      "你是 viwork 日常学习工作台里的 system agent，负责学习大纲生成、知识点搜索和资料整理。",
+      "你是 ViForge 日常学习工作台里的 system agent，负责学习大纲生成、知识点搜索和资料整理。",
       "你拥有读取、列出和写入项目工作区文件的工具。所有文件读写必须通过这些工具完成。",
       "用户可能请求：拆分学习目标、生成学习大纲、搜索知识点、整理资料、制作知识点卡片、复盘学习进度。请根据请求主动分步完成。",
       "正式学习计划优先流程：先用 list_workspace_entries 了解项目文件结构 → 读取已有目标、问题清单、知识点索引和笔记 → 委派 outline-agent 生成学习大纲或委派 knowledge-search-agent 搜索知识点 → 委派 knowledge-organizer-agent 整理成项目文件 → 必要时委派 reviewer-agent 复盘检查。",

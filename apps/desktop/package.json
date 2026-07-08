@@ -1,7 +1,8 @@
 {
   "name": "@viwork/desktop",
-  "description": "viwork standalone desktop app",
-  "author": "viwork",
+  "description": "ViForge standalone desktop app",
+  "author": "ViForge contributors",
+  "license": "Apache-2.0",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -27,9 +28,9 @@
     "typescript": "^5.5.3"
   },
   "build": {
-    "appId": "cn.viwork.desktop",
-    "productName": "viwork",
-    "executableName": "viwork",
+    "appId": "cn.viforge.desktop",
+    "productName": "ViForge",
+    "executableName": "viforge",
     "npmRebuild": false,
     "directories": {
       "output": "../../release/desktop"
@@ -57,6 +58,18 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../../LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "../../NOTICE",
+        "to": "NOTICE"
+      },
+      {
+        "from": "../../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "win": {

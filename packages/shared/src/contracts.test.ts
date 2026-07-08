@@ -56,13 +56,13 @@ describe('shared contracts', () => {
       );
     }
 
-    expect(resolveProductProfile('sitcom')).toMatchObject({ id: 'sitcom', documentTitle: 'viwork 情景剧创作工作台' });
+    expect(resolveProductProfile('sitcom')).toMatchObject({ id: 'sitcom', documentTitle: 'ViForge 情景剧创作工作台' });
     expect(resolveProductProfile('sitcom').defaultAgentSkillNames).toEqual(expect.arrayContaining([
       'character-agent',
       'continuity-agent',
       'story-agent',
     ]));
-    expect(resolveProductProfile('study')).toMatchObject({ id: 'study', documentTitle: 'viwork 日常学习工作台' });
+    expect(resolveProductProfile('study')).toMatchObject({ id: 'study', documentTitle: 'ViForge 日常学习工作台' });
     expect(resolveProductProfile('study').defaultAgentSkillNames).toEqual(expect.arrayContaining([
       'outline-agent',
       'knowledge-search-agent',

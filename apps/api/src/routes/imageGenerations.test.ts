@@ -79,7 +79,7 @@ describe('image generation routes', () => {
         method: 'POST',
         headers: expect.objectContaining({
           authorization: 'Bearer hub_test_key',
-          appid: 'viwork-novel-adaptation',
+          appid: 'viforge-novel-adaptation',
           traceid: expect.any(String),
         }),
         body: JSON.stringify({
@@ -119,7 +119,7 @@ describe('image generation routes', () => {
       'http://127.0.0.1:8000/v1/images/generations',
       expect.objectContaining({
         headers: expect.objectContaining({
-          appid: 'viwork-novel-adaptation',
+          appid: 'viforge-novel-adaptation',
           traceid: 'client-trace-123',
         }),
       }),

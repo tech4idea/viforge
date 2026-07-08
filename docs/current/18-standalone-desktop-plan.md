@@ -1,18 +1,18 @@
 # 单机桌面版落地方案
 
-单机版目标是让用户通过安装包一键启动 viwork，不再手动安装 Node、启动 Web/API、部署 PostgreSQL 或 Qdrant。运行设置界面不暴露 LangGraph 存储配置，默认使用内置 PostgreSQL。
+单机版目标是让用户通过安装包一键启动 ViForge，不再手动安装 Node、启动 Web/API、部署 PostgreSQL 或 Qdrant。运行设置界面不暴露 LangGraph 存储配置，默认使用内置 PostgreSQL。
 
 ## 产品形态
 
 - 桌面端使用 Electron，安装包内置 Chromium 与 Node runtime，用户不需要预装 Node。
-- Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。升级安装时会优先从 `HKCU\\Software\\viwork\\InstallLocation` 读取既有安装路径，从 `HKCU\\Software\\viwork\\DataRoot` 读取既有数据路径，其次兼容旧版 `AppData\\Roaming\\viwork\\data-root.txt`。
-- Windows 安装包不会在结束页自动启动 viwork，主程序 manifest 使用调用方权限启动。内置 PostgreSQL 通过 `pg_ctl start` 托管，兼容 Administrator 账户启动场景；viwork 完全退出时会主动 `pg_ctl stop` 回收本次数据目录对应的 PostgreSQL 进程。
+- Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。升级安装时会优先从 `HKCU\\Software\\ViForge\\InstallLocation` 读取既有安装路径，从 `HKCU\\Software\\ViForge\\DataRoot` 读取既有数据路径，并兼容读取旧版 `HKCU\\Software\\viwork` 和 `AppData\\Roaming\\viwork\\data-root.txt`。
+- Windows 安装包不会在结束页自动启动 ViForge，主程序 manifest 使用调用方权限启动。内置 PostgreSQL 通过 `pg_ctl start` 托管，兼容 Administrator 账户启动场景；ViForge 完全退出时会主动 `pg_ctl stop` 回收本次数据目录对应的 PostgreSQL 进程。
 - Electron 主进程启动本地 API 服务，再用内置 WebView 窗口加载 `http://127.0.0.1:<local-port>`。默认优先使用 `3001`，如端口被占用会在后续端口中寻找可用端口。
-- 启动 API 期间会先显示一个“viwork 正在打开”的占位窗口，避免用户以为没有响应。内置 PostgreSQL 在 API 进程内后台启动，运行设置页会展示其状态。桌面端使用 Electron 单实例锁，重复点击桌面图标只会聚焦当前启动窗口或主窗口，不会再拉起一套 API/PostgreSQL。
+- 启动 API 期间会先显示一个“ViForge 正在打开”的占位窗口，避免用户以为没有响应。内置 PostgreSQL 在 API 进程内后台启动，运行设置页会展示其状态。桌面端使用 Electron 单实例锁，重复点击桌面图标只会聚焦当前启动窗口或主窗口，不会再拉起一套 API/PostgreSQL。
 - 桌面模式下 API 同时托管 `apps/web/dist` 静态资源，所以不需要单独 Vite dev server 或浏览器入口。
 - 桌面模式会生成一次性访问 token，Electron 首屏用 `desktopToken` 建立 HttpOnly cookie；未带 token 的本机浏览器请求会被 API 拒绝，避免“做了 WebView 但仍可当浏览器版访问”的产品形态混淆。
 - 桌面主进程会随 API 一起启动 bundled Playwriter relay，并把 `VIWORK_PLAYWRITER_HOST` / `VIWORK_PLAYWRITER_BIN` 注入 API。用户使用网页浏览工具时只需要安装 Playwriter Chrome 扩展并授权目标标签页，不需要手动运行 `playwriter serve`。
-- 本地数据放在安装向导中选择的目录下，包括工作区、日志、运行配置和内置 PostgreSQL 数据目录。该路径记录在 Electron `userData/data-root.txt`，并同步写入 Windows 注册表 `HKCU\\Software\\viwork\\DataRoot`；运行设置页可以重新选择，修改后重启生效。目录版或旧安装包缺少该文件时，应用首次启动会兜底读取注册表或要求选择数据路径。
+- 本地数据放在安装向导中选择的目录下，包括工作区、日志、运行配置和内置 PostgreSQL 数据目录。该路径记录在 Electron `userData/data-root.txt`，并同步写入 Windows 注册表 `HKCU\\Software\\ViForge\\DataRoot`；运行设置页可以重新选择，修改后重启生效。目录版或旧安装包缺少该文件时，应用首次启动会兜底读取注册表或要求选择数据路径。
 - 用户点击窗口关闭按钮时会二次确认：可选择“仅关闭窗口”保留本地服务后台运行，也可选择“完全退出”停止 Electron、API 和由本次 API 启动的内置 PostgreSQL。
 
 ## 数据库策略
@@ -72,7 +72,7 @@ VIWORK_PGVECTOR_SOURCE_DIR=/path/to/pgvector-0.8.0 pnpm --filter @viwork/desktop
 
 `build:pgvector` 会使用 bundled PostgreSQL 的 `bin/pg_config` 编译并安装 `vector.so` / `vector.control` 到同一个资源目录。打包前 `prepare:postgres` 会检查 pgvector 是否存在；默认缺失时只告警并退化为 PostgreSQL 文本检索，发布正式安装包时建议设置 `VIWORK_REQUIRE_PGVECTOR=1` 让缺失 pgvector 直接失败。
 
-内置 PostgreSQL 启动时会优先使用 `VIWORK_EMBEDDED_POSTGRES_PORT`，默认 `15432`。如果端口被占用，API 会在后续端口中寻找可用端口并写入实际 `DATABASE_URL`，避免和用户机器已有 PostgreSQL 冲突。桌面模式使用 `pg_ctl start` 启动本地数据目录对应的 PostgreSQL；API 进程和 Electron 主进程退出时都会尝试 `pg_ctl stop -m fast -w`，确保完全退出 viwork 时回收内置 PostgreSQL。若同一数据目录已有旧的 PostgreSQL 服务运行，启动前会先尝试停止它，避免残留进程脱离 viwork 管理。
+内置 PostgreSQL 启动时会优先使用 `VIWORK_EMBEDDED_POSTGRES_PORT`，默认 `15432`。如果端口被占用，API 会在后续端口中寻找可用端口并写入实际 `DATABASE_URL`，避免和用户机器已有 PostgreSQL 冲突。桌面模式使用 `pg_ctl start` 启动本地数据目录对应的 PostgreSQL；API 进程和 Electron 主进程退出时都会尝试 `pg_ctl stop -m fast -w`，确保完全退出 ViForge 时回收内置 PostgreSQL。若同一数据目录已有旧的 PostgreSQL 服务运行，启动前会先尝试停止它，避免残留进程脱离 ViForge 管理。
 
 打包命令会先执行 `pnpm --filter @viwork/desktop prepare:postgres` 检查这些文件。若希望从外部目录复制，可设置：
 

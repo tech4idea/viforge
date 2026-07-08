@@ -28,7 +28,7 @@ export const AIGC_HUB_BASE_URL = process.env.VIWORK_AIGC_HUB_BASE_URL ?? '';
 
 export const AIGC_HUB_API_KEY = process.env.VIWORK_AIGC_HUB_API_KEY ?? '';
 
-export const AIGC_HUB_APP_ID = process.env.VIWORK_AIGC_HUB_APP_ID || `viwork-${PRODUCT_PROFILE.id}`;
+export const AIGC_HUB_APP_ID = process.env.VIWORK_AIGC_HUB_APP_ID || `viforge-${PRODUCT_PROFILE.id}`;
 
 export const AIGC_HUB_CHAT_MODEL = process.env.VIWORK_AIGC_HUB_CHAT_MODEL ?? '';
 
@@ -41,8 +41,8 @@ export const QDRANT_URL = process.env.QDRANT_URL ?? '';
 export const EMBEDDING_MODEL = process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision';
 
 export const PHOENIX_COLLECTOR_ENDPOINT = process.env.PHOENIX_COLLECTOR_ENDPOINT ?? '';
-export const PHOENIX_PROJECT_NAME = process.env.PHOENIX_PROJECT_NAME ?? 'viwork';
-export const PHOENIX_SERVICE_NAME = process.env.PHOENIX_SERVICE_NAME ?? 'viwork-api';
+export const PHOENIX_PROJECT_NAME = process.env.PHOENIX_PROJECT_NAME ?? 'viforge';
+export const PHOENIX_SERVICE_NAME = process.env.PHOENIX_SERVICE_NAME ?? 'viforge-api';
 
 export const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY ?? '';
 export const LANGFUSE_SECRET_KEY = process.env.LANGFUSE_SECRET_KEY ?? '';

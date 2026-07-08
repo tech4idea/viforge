@@ -307,6 +307,10 @@ function App() {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
+  useEffect(() => {
+    document.title = ACTIVE_PRODUCT_PROFILE.documentTitle || 'ViForge';
+  }, []);
+
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [entriesProjectId, setEntriesProjectId] = useState<string | null>(null);
   const [entriesState, setEntriesState] = useState<LoadState>('idle');
@@ -5824,13 +5828,14 @@ function RuntimeSettingsPanel({
             >选择数据路径</button>
           </div>
           <p className="runtime-settings-status">
-            {dataRootRestartRequired ? '数据路径已更新，重启 viwork 后生效。' : '项目、配置、日志和内置 PostgreSQL 数据都会保存在此路径下。'}
+            {dataRootRestartRequired ? '数据路径已更新，重启 ViForge 后生效。' : '项目、配置、日志和内置 PostgreSQL 数据都会保存在此路径下。'}
           </p>
         </section>
       ) : null}
 
       <section className="runtime-settings-section">
         <h3>OpenAI 协议模型</h3>
+        <p className="runtime-settings-status">ViForge 不内置模型服务。Base URL、API Key 和模型 ID 只保存在本机运行配置中；API Key 不会回显到前端。</p>
         <div className="runtime-settings-grid">
           <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.yukeon.top/v1" /></label>
           <label><span>API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
@@ -5858,6 +5863,11 @@ function RuntimeSettingsPanel({
           >{modelTestState === 'loading' ? '测试中...' : '测试模型调用'}</button>
         </div>
         {modelTestMessage ? <p className={modelTestState === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage}</p> : null}
+      </section>
+
+      <section className="runtime-settings-section">
+        <h3>本地优先与浏览器边界</h3>
+        <p className="runtime-settings-status">工作区、聊天会话、Agent 记忆、Harness 产物和日志默认保存在本机数据目录。浏览器工具只连接用户通过 Playwriter 授权的标签页；登录、发布、删除、付款、授权等高风险动作需要用户确认。</p>
       </section>
 
       <div className="runtime-settings-actions">

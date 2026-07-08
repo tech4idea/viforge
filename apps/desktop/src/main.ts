@@ -17,7 +17,9 @@ const PREFERRED_API_PORT = 3001;
 const API_START_TIMEOUT_MS = 120_000;
 const PLAYWRITER_RELAY_HOST = '127.0.0.1';
 const PLAYWRITER_RELAY_PORT = 19988;
-const WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\viwork';
+const PRODUCT_NAME = 'ViForge';
+const WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\ViForge';
+const LEGACY_WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\viwork';
 let apiProcess: ChildProcessWithoutNullStreams | null = null;
 let playwriterProcess: ChildProcessWithoutNullStreams | null = null;
 const desktopAccessToken = randomUUID();
@@ -36,6 +38,8 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 }
+
+app.setName(PRODUCT_NAME);
 
 ipcMain.handle('viwork:select-data-root', async () => {
   const selected = await promptForDesktopDataRoot({ required: false });
@@ -91,7 +95,7 @@ async function createMainWindow(apiUrl: string): Promise<void> {
     height: 920,
     minWidth: 1100,
     minHeight: 720,
-    title: 'viwork',
+    title: PRODUCT_NAME,
     icon: resolveWindowIcon(process.resourcesPath),
     autoHideMenuBar: true,
     webPreferences: {
@@ -127,7 +131,7 @@ function ensureStartupWindow(): void {
     resizable: false,
     maximizable: false,
     minimizable: false,
-    title: 'viwork 正在打开',
+    title: `${PRODUCT_NAME} 正在打开`,
     icon: resolveWindowIcon(process.resourcesPath),
     autoHideMenuBar: true,
     show: true,
@@ -153,7 +157,7 @@ function startupHtmlUrl(): string {
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>viwork 正在打开</title>
+  <title>${PRODUCT_NAME} 正在打开</title>
   <style>
     body { margin: 0; height: 100vh; display: grid; place-items: center; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f7f4; color: #1e2428; }
     main { width: 280px; }
@@ -166,8 +170,8 @@ function startupHtmlUrl(): string {
 </head>
 <body>
   <main>
-    <h1>viwork 正在打开</h1>
-    <p>正在打开，请稍候。</p>
+    <h1>${PRODUCT_NAME} 正在打开</h1>
+    <p>正在启动本地工作台、API 和内置数据库。</p>
     <div class="bar"></div>
   </main>
 </body>
@@ -178,9 +182,9 @@ function startupHtmlUrl(): string {
 function ensureTray(): void {
   if (tray || process.platform === 'darwin') return;
   tray = new Tray(resolveWindowIcon(process.resourcesPath));
-  tray.setToolTip('viwork');
+  tray.setToolTip(PRODUCT_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开 viwork', click: () => showMainWindow() },
+    { label: `打开 ${PRODUCT_NAME}`, click: () => showMainWindow() },
     { type: 'separator' },
     { label: '完全退出', click: () => quitApp() },
   ]));
@@ -198,8 +202,8 @@ async function confirmMainWindowClose(): Promise<void> {
   closeConfirmationOpen = true;
   const result = await dialog.showMessageBox(window, {
     type: 'question',
-    title: '关闭 viwork',
-    message: '要如何关闭 viwork？',
+    title: `关闭 ${PRODUCT_NAME}`,
+    message: `要如何关闭 ${PRODUCT_NAME}？`,
     detail: '选择“仅关闭窗口”会保留本地 API 和 PostgreSQL 运行，再次点击桌面图标会回到当前实例；选择“完全退出”会停止后台服务。',
     buttons: ['仅关闭窗口', '完全退出', '取消'],
     defaultId: 0,
@@ -242,7 +246,7 @@ function quitApp(): void {
 
 function launchDesktopApp(): void {
   void startDesktopApp().catch((error) => {
-    console.error('Failed to start viwork desktop app:', error);
+    console.error(`Failed to start ${PRODUCT_NAME} desktop app:`, error);
   });
 }
 
@@ -292,7 +296,7 @@ async function startApiServer(): Promise<string> {
       error instanceof Error ? error.message : 'API server failed to start.',
       formatApiOutputTail(),
     ].filter(Boolean).join('\n\n');
-    await dialog.showMessageBox({ type: 'error', title: 'viwork 启动失败', message });
+    await dialog.showMessageBox({ type: 'error', title: `${PRODUCT_NAME} 启动失败`, message });
     throw error;
   }
 
@@ -375,10 +379,10 @@ async function resolveDesktopDataRoot(): Promise<string> {
 
 async function promptForDesktopDataRoot(options: { required: boolean }): Promise<string | null> {
   const result = await dialog.showOpenDialog({
-    title: '选择 viwork 数据路径',
+    title: `选择 ${PRODUCT_NAME} 数据路径`,
     message: options.required
-      ? '首次启动需要选择 viwork 保存项目数据和配置的位置。未选择数据路径时应用不会继续启动。'
-      : '请选择 viwork 保存项目数据和配置的位置。修改后需要重启应用生效。',
+      ? `首次启动需要选择 ${PRODUCT_NAME} 保存项目数据和配置的位置。未选择数据路径时应用不会继续启动。`
+      : `请选择 ${PRODUCT_NAME} 保存项目数据和配置的位置。修改后需要重启应用生效。`,
     buttonLabel: '使用此路径',
     properties: ['openDirectory', 'createDirectory'],
   });
@@ -387,7 +391,7 @@ async function promptForDesktopDataRoot(options: { required: boolean }): Promise
       await dialog.showMessageBox({
         type: 'info',
         title: '需要选择数据路径',
-        message: 'viwork 需要一个数据路径保存项目数据和配置。请重新启动应用后选择路径。',
+        message: `${PRODUCT_NAME} 需要一个数据路径保存项目数据和配置。请重新启动应用后选择路径。`,
       });
     }
     return null;
@@ -401,7 +405,7 @@ async function readDesktopDataRoot(): Promise<string | null> {
     return value || null;
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return readDesktopDataRootFromRegistry();
+      return (await readDesktopDataRootFromRegistry()) ?? readLegacyDesktopDataRootFile();
     }
     throw error;
   }
@@ -413,10 +417,15 @@ async function writeDesktopDataRoot(dataRoot: string): Promise<void> {
   await writeDesktopDataRootToRegistry(dataRoot);
 }
 
-function readDesktopDataRootFromRegistry(): Promise<string | null> {
+async function readDesktopDataRootFromRegistry(): Promise<string | null> {
   if (process.platform !== 'win32') return Promise.resolve(null);
+  return (await readRegistryString(WINDOWS_REGISTRY_KEY, 'DataRoot'))
+    ?? readRegistryString(LEGACY_WINDOWS_REGISTRY_KEY, 'DataRoot');
+}
+
+function readRegistryString(key: string, valueName: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn('reg', ['query', WINDOWS_REGISTRY_KEY, '/v', 'DataRoot'], { stdio: 'pipe', windowsHide: true });
+    const child = spawn('reg', ['query', key, '/v', valueName], { stdio: 'pipe', windowsHide: true });
     let stdout = '';
     child.stdout.on('data', (chunk) => { stdout += String(chunk); });
     child.on('error', () => resolve(null));
@@ -425,7 +434,8 @@ function readDesktopDataRootFromRegistry(): Promise<string | null> {
         resolve(null);
         return;
       }
-      const match = stdout.match(/DataRoot\s+REG_SZ\s+(.+)$/m);
+      const line = stdout.split(/\r?\n/).find((item) => item.trim().startsWith(valueName));
+      const match = line?.match(/\s+REG_SZ\s+(.+)$/);
       resolve(match?.[1]?.trim() || null);
     });
   });
@@ -433,8 +443,12 @@ function readDesktopDataRootFromRegistry(): Promise<string | null> {
 
 function writeDesktopDataRootToRegistry(dataRoot: string): Promise<void> {
   if (process.platform !== 'win32') return Promise.resolve();
+  return writeRegistryString(WINDOWS_REGISTRY_KEY, 'DataRoot', dataRoot);
+}
+
+function writeRegistryString(key: string, valueName: string, value: string): Promise<void> {
   return new Promise((resolve) => {
-    const child = spawn('reg', ['add', WINDOWS_REGISTRY_KEY, '/v', 'DataRoot', '/t', 'REG_SZ', '/d', dataRoot, '/f'], { stdio: 'ignore', windowsHide: true });
+    const child = spawn('reg', ['add', key, '/v', valueName, '/t', 'REG_SZ', '/d', value, '/f'], { stdio: 'ignore', windowsHide: true });
     child.on('error', () => resolve());
     child.on('close', () => resolve());
   });
@@ -442,6 +456,16 @@ function writeDesktopDataRootToRegistry(dataRoot: string): Promise<void> {
 
 function desktopDataRootFile(): string {
   return path.join(app.getPath('userData'), 'data-root.txt');
+}
+
+async function readLegacyDesktopDataRootFile(): Promise<string | null> {
+  try {
+    const value = (await readFile(path.join(app.getPath('appData'), 'viwork', 'data-root.txt'), 'utf8')).trim();
+    return value || null;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 function appendApiOutput(stream: 'stdout' | 'stderr', chunk: Buffer | string): void {

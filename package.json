@@ -1,6 +1,7 @@
 {
   "name": "viwork",
   "private": true,
+  "license": "Apache-2.0",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "pnpm --parallel --filter @viwork/api --filter @viwork/web dev",
@@ -11,6 +12,7 @@
     "dev:integration-gateway": "pnpm --filter @viwork/integration-gateway dev",
     "desktop:pack": "pnpm --filter @viwork/desktop run pack",
     "desktop:dist": "pnpm --filter @viwork/desktop run dist",
+    "licenses:list": "pnpm licenses list --long",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"

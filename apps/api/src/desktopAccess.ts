@@ -15,7 +15,7 @@ export function installDesktopAccessGuard(app: Hono): void {
       return;
     }
 
-    return context.text('viwork desktop session required', 403);
+    return context.text('ViForge desktop session required', 403);
   });
 }
 

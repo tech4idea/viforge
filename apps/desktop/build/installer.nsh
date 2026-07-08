@@ -11,7 +11,10 @@ Var ViworkDataRoot
 Var ViworkExistingDataRoot
 
 !macro customInit
-  ReadRegStr $0 HKCU "Software\viwork" "InstallLocation"
+  ReadRegStr $0 HKCU "Software\ViForge" "InstallLocation"
+  ${If} $0 == ""
+    ReadRegStr $0 HKCU "Software\viwork" "InstallLocation"
+  ${EndIf}
   ${If} $0 != ""
     StrCpy $INSTDIR "$0"
   ${EndIf}
@@ -22,7 +25,10 @@ Var ViworkExistingDataRoot
 !macroend
 
 Function ViworkDataRootPageCreate
-  ReadRegStr $ViworkExistingDataRoot HKCU "Software\viwork" "DataRoot"
+  ReadRegStr $ViworkExistingDataRoot HKCU "Software\ViForge" "DataRoot"
+  ${If} $ViworkExistingDataRoot == ""
+    ReadRegStr $ViworkExistingDataRoot HKCU "Software\viwork" "DataRoot"
+  ${EndIf}
   ${If} $ViworkExistingDataRoot == ""
     IfFileExists "$APPDATA\viwork\data-root.txt" 0 +4
       FileOpen $0 "$APPDATA\viwork\data-root.txt" r
@@ -31,7 +37,7 @@ Function ViworkDataRootPageCreate
       StrCpy $ViworkExistingDataRoot $ViworkExistingDataRoot -2
   ${EndIf}
   ${If} $ViworkExistingDataRoot == ""
-    StrCpy $ViworkExistingDataRoot "$LOCALAPPDATA\viwork\data"
+    StrCpy $ViworkExistingDataRoot "$LOCALAPPDATA\ViForge\data"
   ${EndIf}
 
   nsDialogs::Create 1018
@@ -40,7 +46,7 @@ Function ViworkDataRootPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 24u "选择 viwork 数据路径。项目数据、运行配置和日志都会保存在这里。"
+  ${NSD_CreateLabel} 0 0 100% 24u "选择 ViForge 数据路径。项目数据、运行配置和日志都会保存在这里。"
   ${NSD_CreateText} 0 34u 78% 12u "$ViworkExistingDataRoot"
   Pop $ViworkDataRootText
   ${NSD_CreateBrowseButton} 82% 33u 18% 14u "浏览..."
@@ -51,7 +57,7 @@ Function ViworkDataRootPageCreate
 FunctionEnd
 
 Function ViworkDataRootBrowse
-  nsDialogs::SelectFolderDialog "选择 viwork 数据路径" ""
+  nsDialogs::SelectFolderDialog "选择 ViForge 数据路径" ""
   Pop $0
   ${If} $0 != error
     ${NSD_SetText} $ViworkDataRootText "$0"
@@ -61,7 +67,7 @@ FunctionEnd
 Function ViworkDataRootPageLeave
   ${NSD_GetText} $ViworkDataRootText $ViworkDataRoot
   ${If} $ViworkDataRoot == ""
-    MessageBox MB_ICONEXCLAMATION|MB_OK "请选择 viwork 数据路径，否则无法继续安装。"
+    MessageBox MB_ICONEXCLAMATION|MB_OK "请选择 ViForge 数据路径，否则无法继续安装。"
     Abort
   ${EndIf}
 
@@ -72,16 +78,16 @@ Function ViworkDataRootPageLeave
 FunctionEnd
 
 !macro customInstall
-  CreateDirectory "$APPDATA\viwork"
-  FileOpen $0 "$APPDATA\viwork\data-root.txt" w
+  CreateDirectory "$APPDATA\ViForge"
+  FileOpen $0 "$APPDATA\ViForge\data-root.txt" w
   FileWrite $0 "$ViworkDataRoot$\r$\n"
   FileClose $0
-  WriteRegStr HKCU "Software\viwork" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\viwork" "DataRoot" "$ViworkDataRoot"
+  WriteRegStr HKCU "Software\ViForge" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\ViForge" "DataRoot" "$ViworkDataRoot"
 !macroend
 
 !macro customUnInstall
-  DeleteRegValue HKCU "Software\viwork" "InstallLocation"
+  DeleteRegValue HKCU "Software\ViForge" "InstallLocation"
 !macroend
 
 !endif

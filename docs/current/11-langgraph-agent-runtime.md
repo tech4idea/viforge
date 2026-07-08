@@ -91,7 +91,7 @@ playwriter serve --host 127.0.0.1
 ```
 
 浏览器侧需要安装 remorses/playwriter 的 Chrome 扩展，并在要授权给 agent 的标签页点击扩展图标。需要独立 session 时可先执行 `playwriter session new`，再把返回的 id 设置为 `VIWORK_PLAYWRITER_SESSION_ID`。
-默认不需要手动创建 session；viwork 会在首次浏览器工具调用时自动创建并复用 Playwriter session。
+默认不需要手动创建 session；ViForge 会在首次浏览器工具调用时自动创建并复用 Playwriter session。
    - `file.changed`
    - `image.generated`
    - `wechat.file_sent`
@@ -204,8 +204,8 @@ API 支持通过 OpenTelemetry OTLP/HTTP 向 Phoenix 上报 LangGraph 和 LangCh
 
 ```bash
 PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
-PHOENIX_PROJECT_NAME=viwork
-PHOENIX_SERVICE_NAME=viwork-api
+PHOENIX_PROJECT_NAME=viforge
+PHOENIX_SERVICE_NAME=viforge-api
 ```
 
 开启后，API 启动时初始化 `NodeTracerProvider`，将 spans 发送到 `${PHOENIX_COLLECTOR_ENDPOINT}/v1/traces`。上报内容包括：

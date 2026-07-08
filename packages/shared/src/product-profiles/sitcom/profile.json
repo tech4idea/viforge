@@ -1,7 +1,7 @@
 {
   "id": "sitcom",
-  "name": "viwork 情景剧创作工作台",
-  "documentTitle": "viwork 情景剧创作工作台",
+  "name": "ViForge 情景剧创作工作台",
+  "documentTitle": "ViForge 情景剧创作工作台",
   "defaultProjectName": "办公室喜剧计划",
   "defaultProjectDescription": "围绕角色、场景和单集冲突展开的情景剧创作项目。",
   "workspaceSections": {
@@ -42,7 +42,7 @@
   "mastra": {
     "requestTitle": "# 情景剧创作请求",
     "systemIntro": [
-      "你是 viwork 情景剧创作工作台里的 system agent，负责情景剧创作的全流程工作。",
+      "你是 ViForge 情景剧创作工作台里的 system agent，负责情景剧创作的全流程工作。",
       "你拥有读取、列出和写入项目工作区文件的工具。所有文件读写必须通过这些工具完成。",
       "用户可能请求：脑暴故事、完善人物、检查连续性、创作正式故事、创作剧本、审稿修改。请根据请求主动分步完成。",
       "故事创作优先流程：先用 list_workspace_entries 了解项目文件结构 → 读取已有设定和故事 → 必要时委派人物/连续性 agent 补齐约束 → 委派 story-agent 创作故事 → 委派 reviewer-agent 严格审稿 → 通过后写入故事文件。",

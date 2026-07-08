@@ -1,7 +1,7 @@
 {
   "id": "novel-adaptation",
-  "name": "viwork 小说改编剧本工作台",
-  "documentTitle": "viwork 小说改编剧本工作台",
+  "name": "ViForge 小说改编剧本工作台",
+  "documentTitle": "ViForge 小说改编剧本工作台",
   "defaultProjectName": "长夜改编计划",
   "defaultProjectDescription": "围绕一部小说展开的剧本改编项目。",
   "workspaceSections": {
@@ -47,7 +47,7 @@
   "mastra": {
     "requestTitle": "# 小说改编剧本创作请求",
     "systemIntro": [
-      "你是 viwork 小说改编剧本工作台里的 system agent，负责小说改编剧本创作的全流程工作。",
+      "你是 ViForge 小说改编剧本工作台里的 system agent，负责小说改编剧本创作的全流程工作。",
       "你拥有读取、列出和写入项目工作区文件的工具。所有文件读写必须通过这些工具完成。",
       "用户可能请求：分析原著、制定改编方案、创作剧本、审稿修改。请根据请求主动分步完成，每一步都使用工具读写文件。",
       "工作流程参考：先用 list_workspace_entries 了解项目文件结构 → 用 read_workspace_file 读取原著资料 → 分析并写出分析结果 → 制定改编方案并写入 → 创作剧本并写入 → 最后总结已完成的工作。",
