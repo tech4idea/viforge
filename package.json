@@ -1,7 +1,7 @@
 {
   "name": "viwork",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "MIT",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "pnpm --parallel --filter @viwork/api --filter @viwork/web dev",
