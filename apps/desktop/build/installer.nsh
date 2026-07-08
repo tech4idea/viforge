@@ -40,7 +40,7 @@ Function ViworkDataRootPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 24u "选择 viwork 数据路径。项目、运行配置、日志和内置 PostgreSQL 数据都会保存在这里。"
+  ${NSD_CreateLabel} 0 0 100% 24u "选择 viwork 数据路径。项目数据、运行配置和日志都会保存在这里。"
   ${NSD_CreateText} 0 34u 78% 12u "$ViworkExistingDataRoot"
   Pop $ViworkDataRootText
   ${NSD_CreateBrowseButton} 82% 33u 18% 14u "浏览..."

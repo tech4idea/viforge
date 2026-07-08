@@ -64,13 +64,14 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   await stopExistingDataDirServer(pgCtl, dataDir);
 
   const port = await findAvailableLocalPort(preferredPort);
-  await runCommand(pgCtl, [
+  startPostgresWithPgCtl(pgCtl, [
     '-D', dataDir,
     '-l', path.join(dataRoot, 'postgres.log'),
     '-o', `-p ${port} -h 127.0.0.1`,
-    '-w',
+    '-W',
     'start',
   ]);
+  await waitForPostgresReady({ psql, port, user });
 
   await ensureDatabase({ createdb, psql, port, user, database, password });
 
@@ -95,6 +96,40 @@ async function removeStalePostmasterPid(pgCtl: string, dataDir: string): Promise
 async function stopExistingDataDirServer(pgCtl: string, dataDir: string): Promise<void> {
   if (!(await isDataDirServerRunning(pgCtl, dataDir))) return;
   await runCommand(pgCtl, ['-D', dataDir, '-m', 'fast', '-w', 'stop'], { allowFailure: true });
+}
+
+function startPostgresWithPgCtl(command: string, args: string[]): void {
+  const child = spawn(command, args, {
+    stdio: 'ignore',
+    env: postgresProcessEnv(command),
+    windowsHide: true,
+  });
+  child.once('error', (error) => {
+    console.error(`[desktop] failed to spawn ${path.basename(command)}: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  child.unref();
+}
+
+async function waitForPostgresReady(input: { psql: string; port: number; user: string }): Promise<void> {
+  const startedAt = Date.now();
+  let lastError = '';
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      const output = await runCommand(input.psql, ['-h', '127.0.0.1', '-p', String(input.port), '-U', input.user, '-d', 'postgres', '-tAc', 'SELECT 1'], {
+        captureStdout: true,
+      });
+      if (typeof output === 'string' && output.trim() === '1') return;
+      lastError = String(output).trim();
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await sleep(500);
+  }
+  throw new Error(`Embedded PostgreSQL did not become ready within 30000ms: ${lastError}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function findAvailableLocalPort(preferredPort: number): Promise<number> {

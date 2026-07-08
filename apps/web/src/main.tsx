@@ -1141,7 +1141,7 @@ function App() {
       const config = await apiClient.updateRuntimeConfig(input);
       setRuntimeConfig(config);
       setRuntimeConfigState('idle');
-      showToast(config.restartRequired ? '运行设置已保存，部分数据库设置重启后生效' : '运行设置已保存', 'success');
+      showToast('运行设置已保存', 'success');
       await loadAigcHubModels();
     } catch (error) {
       setRuntimeConfigState('error');
@@ -5765,10 +5765,6 @@ function RuntimeSettingsPanel({
   const [imageModel, setImageModel] = useState('');
   const [embeddingModel, setEmbeddingModel] = useState('');
   const [embeddingDims, setEmbeddingDims] = useState('1024');
-  const [databaseMode, setDatabaseMode] = useState<RuntimeConfig['database']['mode']>('embedded-postgres');
-  const [connectionString, setConnectionString] = useState('');
-  const [customAdapter, setCustomAdapter] = useState('');
-  const [vectorStore, setVectorStore] = useState<NonNullable<RuntimeConfig['database']['vectorStore']>>('pgvector');
   const [localDataRoot, setLocalDataRoot] = useState('');
   const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
   const [modelTestState, setModelTestState] = useState<LoadState>('idle');
@@ -5781,10 +5777,6 @@ function RuntimeSettingsPanel({
     setImageModel(config.modelProvider.imageModel ?? '');
     setEmbeddingModel(config.modelProvider.embeddingModel ?? '');
     setEmbeddingDims(String(config.modelProvider.embeddingDims ?? 1024));
-    setDatabaseMode(config.database.mode);
-    setConnectionString('');
-    setCustomAdapter(config.database.customAdapter ?? '');
-    setVectorStore(config.database.vectorStore ?? 'pgvector');
     setApiKey('');
     setLocalDataRoot(config.desktop.dataRoot ?? '');
     setDataRootRestartRequired(false);
@@ -5868,38 +5860,13 @@ function RuntimeSettingsPanel({
         {modelTestMessage ? <p className={modelTestState === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage}</p> : null}
       </section>
 
-      <section className="runtime-settings-section">
-        <h3>LangGraph 存储</h3>
-        <div className="runtime-settings-grid">
-          <label><span>数据库模式</span><select value={databaseMode} onChange={(event) => setDatabaseMode(event.target.value as RuntimeConfig['database']['mode'])}>
-            <option value="embedded-postgres">内置 PostgreSQL</option>
-            <option value="external-postgres">外部 PostgreSQL</option>
-            <option value="custom">自定义适配器</option>
-          </select></label>
-          <label><span>向量存储</span><select value={vectorStore} onChange={(event) => setVectorStore(event.target.value as NonNullable<RuntimeConfig['database']['vectorStore']>)}>
-            <option value="pgvector">PostgreSQL / pgvector</option>
-            <option value="external">外部向量库</option>
-          </select></label>
-          <label className="runtime-settings-wide"><span>连接字符串</span><input value={connectionString} onChange={(event) => setConnectionString(event.target.value)} placeholder={config?.database.connectionStringConfigured ? '已配置，留空则不修改' : 'postgresql://user:password@host:5432/db'} /></label>
-          <label className="runtime-settings-wide"><span>自定义适配器</span><input value={customAdapter} onChange={(event) => setCustomAdapter(event.target.value)} placeholder="保留给 LangGraph 未来官方适配器" /></label>
-        </div>
-        <p className="runtime-settings-status">{config?.database.statusMessage ?? '正在读取数据库状态...'}</p>
-      </section>
-
       <div className="runtime-settings-actions">
         <button
           type="button"
           disabled={busy}
           onClick={() => {
-            const nextConnectionString = connectionString.trim();
             onSave({
               modelProvider: modelInput(),
-              database: {
-                mode: databaseMode,
-                ...(nextConnectionString ? { connectionString: nextConnectionString } : {}),
-                customAdapter,
-                vectorStore,
-              },
             });
           }}
         >保存设置</button>

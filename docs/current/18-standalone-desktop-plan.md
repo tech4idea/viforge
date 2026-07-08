@@ -1,6 +1,6 @@
 # 单机桌面版落地方案
 
-单机版目标是让用户通过安装包一键启动 viwork，不再手动安装 Node、启动 Web/API、部署 PostgreSQL 或 Qdrant。高级用户仍可在运行设置里切换到自己的 PostgreSQL 或后续 LangGraph 官方支持的其他存储适配器。
+单机版目标是让用户通过安装包一键启动 viwork，不再手动安装 Node、启动 Web/API、部署 PostgreSQL 或 Qdrant。运行设置界面不暴露 LangGraph 存储配置，默认使用内置 PostgreSQL。
 
 ## 产品形态
 
@@ -24,11 +24,7 @@
 
 这两者来自 `@langchain/langgraph-checkpoint-postgres`，稳定路径是 PostgreSQL/pgvector。为了按 LangGraph 适配宽度做最小自研，单机版默认走内置 PostgreSQL binary，而不是自己实现 SQLite Store。这样本地默认和高级部署使用同一套 LangGraph 存储语义。
 
-运行设置支持三种模式：
-
-- `embedded-postgres`：桌面版默认，启动安装包内 bundled PostgreSQL binary。
-- `external-postgres`：用户填写自己的 PostgreSQL connection string。
-- `custom`：为后续 LangGraph 官方更多 adapter 预留配置入口。
+桌面版运行设置不再提供数据库模式切换，启动时固定使用 `embedded-postgres` 并拉起安装包内 bundled PostgreSQL binary。历史版本写入 `runtime-config.json` 的 `external-postgres` 或 `custom` 配置会在桌面模式下被忽略，避免升级后继续指向旧的外部数据库。
 
 向量检索默认使用 `pgvector`。因为桌面默认已经提供内置 PostgreSQL，产品运行态不再提供内存临时存储模式；自动化测试可显式设置 `VIWORK_LANGGRAPH_ALLOW_IN_MEMORY=1` 使用 LangGraph `MemorySaver` / `InMemoryStore` 后备。未配置 embedding key 或 embedded PostgreSQL bundle 未包含 pgvector 扩展时，`PostgresStore` 仍持久化长期记忆，`search()` 退化为 PostgreSQL 文本搜索。
 
@@ -94,11 +90,11 @@ Linux 本机打包时，`prepare:postgres` 还会用 `ldd` 检查 bundled Postgr
 
 - 桌面模式下的数据路径。修改后写入 Electron `userData/data-root.txt`，重启应用后 API、工作区、日志和内置 PostgreSQL 数据目录一起切换到新路径。
 - OpenAI-compatible Base URL、API Key、文本模型、图片模型、embedding 模型与维度。
-- LangGraph 数据库模式、连接字符串、自定义 adapter 名称和向量存储策略。
+- LangGraph 存储固定使用内置 PostgreSQL，运行设置界面不提供数据库模式、连接字符串或自定义 adapter 配置。
 
 后端配置持久化到 `<dataRoot>/runtime-config.json`。API 启动时会读取该配置并写入当前进程环境变量，供现有模型调用和 LangGraph memory 初始化复用。
 
-连接字符串和 API Key 属于敏感配置：后端只返回 `apiKeyConfigured` / `connectionStringConfigured` 和脱敏展示值；前端表单不会把脱敏值回写为真实连接字符串。用户留空保存时表示保持既有密钥或连接字符串不变。
+API Key 属于敏感配置：后端只返回 `apiKeyConfigured` 状态；前端表单不会回写密钥。用户留空保存时表示保持既有密钥不变。数据库连接字符串仍保留在后端合同中用于兼容历史配置，但不在运行设置界面展示或回写。
 
 ## 命令
 

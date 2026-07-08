@@ -1017,8 +1017,9 @@ export function createWorkspaceTools(
     tools.send_wechat_message = createTool({
       id: 'send_wechat_message',
       description: [
-        '向已绑定的用户微信发送一条文本消息。',
-        '当用户明确要求通过微信接收通知、提醒、摘要或定时任务执行结果时使用。',
+        '立即向已绑定的用户微信发送一条文本消息。',
+        '只在本次运行中需要马上发送当前正文时使用，例如用户要求现在把摘要、通知或结果发到微信。',
+        '本工具不会创建未来或周期性任务；如果用户要求定时、每天、每周或隔一段时间发送，必须使用 create_scheduled_task。',
         '由你根据当前上下文生成最终要发送的正文，再调用本工具发送；不要让外层系统替你发送。',
       ].join('\n'),
       inputSchema: z.object({

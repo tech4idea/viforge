@@ -73,7 +73,9 @@ export function createRuntimeConfigStore(configPath = CONFIG_PATH): RuntimeConfi
         },
       };
 
-      if (next.database?.mode && next.database.mode !== 'external-postgres') {
+      if (process.env.VIWORK_DESKTOP === '1') {
+        next.database = { mode: 'embedded-postgres', vectorStore: 'pgvector' };
+      } else if (next.database?.mode && next.database.mode !== 'external-postgres') {
         next.database.connectionString = '';
       }
 
@@ -100,7 +102,7 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
   if (model?.embeddingModel !== undefined) process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL = model.embeddingModel;
   if (model?.embeddingDims !== undefined) process.env.VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS = String(model.embeddingDims);
 
-  const database = config.database;
+  const database = effectiveDatabaseConfig(config.database);
   if (database?.mode !== undefined) process.env.VIWORK_DATABASE_MODE = database.mode;
   if (database?.mode === 'external-postgres') {
     if (database.connectionString) {
@@ -109,7 +111,11 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
       delete process.env.DATABASE_URL;
     }
   } else if (database?.mode === 'embedded-postgres') {
-    if (process.env.VIWORK_DESKTOP !== '1') delete process.env.DATABASE_URL;
+    if (process.env.VIWORK_DESKTOP === '1') {
+      delete process.env.DATABASE_URL;
+    } else if (!process.env.DATABASE_URL) {
+      delete process.env.DATABASE_URL;
+    }
   } else if (database?.mode === 'custom') {
     delete process.env.DATABASE_URL;
   }
@@ -117,7 +123,7 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
 
 function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): RuntimeConfig {
   const model = config.modelProvider ?? {};
-  const database = config.database ?? {};
+  const database = effectiveDatabaseConfig(config.database);
   const databaseMode = database.mode ?? process.env.VIWORK_DATABASE_MODE as RuntimeConfig['database']['mode'] | undefined ?? (process.env.VIWORK_DESKTOP === '1' ? 'embedded-postgres' : 'external-postgres');
   const configuredConnectionString = databaseMode === 'external-postgres'
     ? database.connectionString ?? process.env.DATABASE_URL ?? DATABASE_URL
@@ -151,6 +157,13 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
     },
     restartRequired,
   };
+}
+
+function effectiveDatabaseConfig(database: StoredRuntimeConfig['database']): NonNullable<StoredRuntimeConfig['database']> {
+  if (process.env.VIWORK_DESKTOP === '1') {
+    return { mode: 'embedded-postgres', vectorStore: 'pgvector' };
+  }
+  return database ?? {};
 }
 
 function databaseStatusMessage(mode: RuntimeConfig['database']['mode'], connectionString: string): string {

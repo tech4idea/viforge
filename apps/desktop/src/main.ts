@@ -377,8 +377,8 @@ async function promptForDesktopDataRoot(options: { required: boolean }): Promise
   const result = await dialog.showOpenDialog({
     title: '选择 viwork 数据路径',
     message: options.required
-      ? '首次启动需要选择 viwork 保存项目、配置和本地数据库的位置。未选择数据路径时应用不会继续启动。'
-      : '请选择 viwork 保存项目、配置和本地数据库的位置。修改后需要重启应用生效。',
+      ? '首次启动需要选择 viwork 保存项目数据和配置的位置。未选择数据路径时应用不会继续启动。'
+      : '请选择 viwork 保存项目数据和配置的位置。修改后需要重启应用生效。',
     buttonLabel: '使用此路径',
     properties: ['openDirectory', 'createDirectory'],
   });
@@ -387,7 +387,7 @@ async function promptForDesktopDataRoot(options: { required: boolean }): Promise
       await dialog.showMessageBox({
         type: 'info',
         title: '需要选择数据路径',
-        message: 'viwork 需要一个数据路径保存项目、配置和本地 PostgreSQL 数据。请重新启动应用后选择路径。',
+        message: 'viwork 需要一个数据路径保存项目数据和配置。请重新启动应用后选择路径。',
       });
     }
     return null;

@@ -5,11 +5,17 @@ import path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 
 import { createRuntimeConfigRoutes } from './runtimeConfig';
-import { createRuntimeConfigStore } from '../runtimeConfigStore';
+import { applyRuntimeConfigToEnv, createRuntimeConfigStore } from '../runtimeConfigStore';
 
 const tempDirs: string[] = [];
+const originalDesktop = process.env.VIWORK_DESKTOP;
+const originalDatabaseMode = process.env.VIWORK_DATABASE_MODE;
+const originalDatabaseUrl = process.env.DATABASE_URL;
 
 afterEach(async () => {
+  restoreEnv('VIWORK_DESKTOP', originalDesktop);
+  restoreEnv('VIWORK_DATABASE_MODE', originalDatabaseMode);
+  restoreEnv('DATABASE_URL', originalDatabaseUrl);
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -30,6 +36,21 @@ describe('runtime config routes', () => {
     });
   });
 
+  it('forces embedded PostgreSQL in desktop mode even when legacy config points to an external database', async () => {
+    process.env.VIWORK_DESKTOP = '1';
+    process.env.DATABASE_URL = 'postgresql://legacy:password@db.example.test:5432/viwork';
+
+    applyRuntimeConfigToEnv({
+      database: {
+        mode: 'external-postgres',
+        connectionString: 'postgresql://writer:password@db.example.test:5432/viwork',
+        vectorStore: 'pgvector',
+      },
+    });
+
+    expect(process.env.VIWORK_DATABASE_MODE).toBe('embedded-postgres');
+    expect(process.env.DATABASE_URL).toBeUndefined();
+  });
   it('validates model test requests without requiring network when the API key is missing', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
     tempDirs.push(root);
@@ -129,3 +150,11 @@ describe('runtime config routes', () => {
     });
   });
 });
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
