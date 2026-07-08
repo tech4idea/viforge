@@ -51,7 +51,7 @@ export function ActivityRail({
 }): JSX.Element {
   return (
     <nav className="activity-rail" aria-label="主导航">
-      <img className="rail-logo" src="/viwork-logo.svg" alt="ViForge" />
+      <img className="rail-logo" src="/viforge-logo-full.svg" alt="ViForge" />
 
       <button
         type="button"
