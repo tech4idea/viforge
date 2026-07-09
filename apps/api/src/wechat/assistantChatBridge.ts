@@ -1,7 +1,7 @@
 import type { ChatSessionStore } from '../chat/chatSessionStore';
 import type { RunBus } from '../runs/runBus';
 import type { CreateRunInput, RunService } from '../runs/runService';
-import type { ChatMessageAttachment, StreamEvent } from '@viwork/shared';
+import type { ChatMessageAttachment, StreamEvent } from '@viforge/shared';
 import type { WechatStore } from './wechatStore';
 import { createWechatSendContext } from './wechatStore';
 import type { WechatIlinkClient } from './wechatIlinkClient';
@@ -191,8 +191,8 @@ export function createAssistantChatBridge(
 
 function resolveWechatChatModel(input: { runInputModel?: string; sessionModel?: string }): string | undefined {
   if (input.sessionModel) return input.sessionModel;
-  return process.env.VIWORK_WECHAT_CHAT_MODEL
-    || process.env.VIWORK_AIGC_HUB_WECHAT_MODEL
+  return process.env.VIFORGE_WECHAT_CHAT_MODEL
+    || process.env.VIFORGE_AIGC_HUB_WECHAT_MODEL
     || input.runInputModel
     || 'minimax/minimax-m2.7';
 }

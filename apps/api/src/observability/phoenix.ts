@@ -2,6 +2,7 @@ import { DiagConsoleLogger, DiagLogLevel, diag, trace, SpanStatusCode, type Span
 import { register } from '@arizeai/phoenix-otel';
 import { LangChainInstrumentation, isPatched as isLangChainInstrumentationPatched } from '@arizeai/openinference-instrumentation-langchain';
 import * as CallbackManagerModule from '@langchain/core/callbacks/manager';
+import { BaseTracer } from '@langchain/core/tracers/base';
 import type { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 
 import { PHOENIX_COLLECTOR_ENDPOINT, PHOENIX_PROJECT_NAME, PHOENIX_SERVICE_NAME } from '../env';
@@ -10,6 +11,8 @@ import { appendJsonLog } from '../logger';
 let provider: NodeTracerProvider | null = null;
 let initializationErrorLogged = false;
 let shutdownHandlersRegistered = false;
+let langChainTracerMismatchGuardInstalled = false;
+let langChainTracerMismatchLogged = false;
 
 export function initializePhoenixTracing(): boolean {
   if (!PHOENIX_COLLECTOR_ENDPOINT) return false;
@@ -26,6 +29,7 @@ export function initializePhoenixTracing(): boolean {
       global: true,
     }) as NodeTracerProvider;
 
+    installLangChainTracerMismatchGuard();
     const instrumentation = new LangChainInstrumentation({ tracerProvider: provider });
     instrumentation.manuallyInstrument(CallbackManagerModule);
     registerFlushHandlers(provider);
@@ -81,7 +85,7 @@ export async function withPhoenixSpan<T>(
   options?: SpanOptions,
 ): Promise<T> {
   const enabled = isPhoenixTracingEnabled();
-  const tracer = trace.getTracer('viwork-api');
+  const tracer = trace.getTracer('viforge-api');
   const span = tracer.startSpan(name, {
     ...options,
     attributes: enabled ? sanitizeAttributes(projectAttributes(attributes)) : undefined,
@@ -150,4 +154,48 @@ function registerFlushHandlers(activeProvider: NodeTracerProvider): void {
   process.once('beforeExit', flush);
   process.once('SIGINT', flush);
   process.once('SIGTERM', flush);
+}
+
+function installLangChainTracerMismatchGuard(): void {
+  if (langChainTracerMismatchGuardInstalled) return;
+  langChainTracerMismatchGuardInstalled = true;
+
+  const prototype = BaseTracer.prototype as unknown as Record<string, unknown>;
+  wrapLangChainTracerEndMethod(prototype, 'handleLLMEnd');
+  wrapLangChainTracerEndMethod(prototype, 'handleLLMError');
+}
+
+function wrapLangChainTracerEndMethod(prototype: Record<string, unknown>, methodName: 'handleLLMEnd' | 'handleLLMError'): void {
+  const original = prototype[methodName];
+  if (typeof original !== 'function') return;
+
+  prototype[methodName] = async function guardedLangChainTracerEnd(this: unknown, ...args: unknown[]) {
+    try {
+      return await original.apply(this, args);
+    } catch (error) {
+      if (isOpenInferenceMissingRunError(this, error)) {
+        logLangChainTracerMismatch(methodName, args[1]);
+        return undefined;
+      }
+      throw error;
+    }
+  };
+}
+
+function isOpenInferenceMissingRunError(handler: unknown, error: unknown): boolean {
+  if (!(error instanceof Error) || error.message !== 'No LLM run to end.') return false;
+  if (!handler || typeof handler !== 'object') return false;
+  return (handler as { name?: unknown }).name === 'OpenInferenceLangChainTracer';
+}
+
+function logLangChainTracerMismatch(methodName: string, runId: unknown): void {
+  if (langChainTracerMismatchLogged) return;
+  langChainTracerMismatchLogged = true;
+  appendJsonLog('api.error.log', {
+    scope: 'phoenix',
+    stage: 'langchain.tracer_mismatch',
+    methodName,
+    runId: typeof runId === 'string' ? runId : undefined,
+    error: 'OpenInference LangChain tracer received an LLM end/error event without a matching start event.',
+  });
 }

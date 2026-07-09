@@ -114,31 +114,26 @@ async function resolveAndCreateRun(
       projectId = project.id;
       projectName = project.name;
     } catch {
-      // Project deleted; fall back to creating inbox
-      const projects = await workspaceStore.listProjects();
-      const inbox = projects.find((p) => p.name === '远程微信灵感箱');
-      projectId = inbox?.id ?? (await createInboxProject(workspaceStore)).id;
-      projectName = '远程微信灵感箱';
+      const project = await workspaceStore.createTemporaryProject();
+      projectId = project.id;
+      projectName = '临时会话';
+      await wechatStore.setRouteState(externalUserId, {
+        scope: 'temporary',
+        projectId: null,
+        projectName,
+        lastCommandAt: new Date().toISOString(),
+      });
     }
   } else {
-    const projects = await workspaceStore.listProjects();
-    const inbox = projects.find((p) => p.name === '远程微信灵感箱');
-    if (inbox) {
-      projectId = inbox.id;
-      projectName = inbox.name;
-    } else {
-      const created = await createInboxProject(workspaceStore);
-      projectId = created.id;
-      projectName = created.name;
-    }
-
-    const newRoute: WechatRouteState = {
-      scope: 'project',
-      projectId,
+    const project = await workspaceStore.createTemporaryProject();
+    projectId = project.id;
+    projectName = '临时会话';
+    await wechatStore.setRouteState(externalUserId, {
+      scope: 'temporary',
+      projectId: null,
       projectName,
       lastCommandAt: new Date().toISOString(),
-    };
-    await wechatStore.setRouteState(externalUserId, newRoute);
+    });
   }
 
   const sessionId = chatSessionStore
@@ -271,11 +266,4 @@ function formatRelativeTime(iso: string): string {
   if (diffMs < day) return `${Math.floor(diffMs / hour)} 小时前`;
   if (diffMs < 30 * day) return `${Math.floor(diffMs / day)} 天前`;
   return new Date(timestamp).toLocaleDateString('zh-CN');
-}
-
-async function createInboxProject(workspaceStore: WorkspaceStore) {
-  return workspaceStore.createProject({
-    name: '远程微信灵感箱',
-    description: '从微信远程收集的小说改编创作灵感。',
-  });
 }

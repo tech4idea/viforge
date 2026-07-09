@@ -11,22 +11,22 @@ pnpm install
 启动 API：
 
 ```bash
-pnpm --filter @viwork/api dev
+pnpm --filter @viforge/api dev
 ```
 
 启动 Web：
 
 ```bash
-pnpm --filter @viwork/web dev
+pnpm --filter @viforge/web dev
 ```
 
 启动桌面壳开发模式：
 
 ```bash
-pnpm --filter @viwork/desktop dev
+pnpm --filter @viforge/desktop dev
 ```
 
-桌面开发模式会先构建 Web 静态资源和桌面专用 API bundle，再由 Electron 主进程启动本地 API。默认仍需要准备本机可运行的 PostgreSQL binary；可用 `VIWORK_POSTGRES_BIN_DIR=/path/to/postgres/bin` 指向外部 PostgreSQL bin 目录调试。
+桌面开发模式会先构建 Web 静态资源和桌面专用 API bundle，再由 Electron 主进程启动本地 API。默认仍需要准备本机可运行的 PostgreSQL binary；可用 `VIFORGE_POSTGRES_BIN_DIR=/path/to/postgres/bin` 指向外部 PostgreSQL bin 目录调试。
 
 默认端口：
 
@@ -44,9 +44,9 @@ LangGraph run 失败时，后端会先打印包含 `runId`、`projectId`、`sess
 ## 类型检查
 
 ```bash
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
-pnpm --filter @viwork/shared test
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
+pnpm --filter @viforge/shared test
 ```
 
 `packages/shared` 当前没有单独 typecheck 脚本，测试会覆盖合同类型的基础断言。
@@ -54,7 +54,7 @@ pnpm --filter @viwork/shared test
 ## 构建
 
 ```bash
-pnpm --filter @viwork/web build
+pnpm --filter @viforge/web build
 ```
 
 Web 构建会执行 `tsc -b` 和 `vite build`。
@@ -62,26 +62,26 @@ Web 构建会执行 `tsc -b` 和 `vite build`。
 桌面壳构建与安装包：
 
 ```bash
-pnpm --filter @viwork/desktop build
+pnpm --filter @viforge/desktop build
 pnpm desktop:pack
 pnpm desktop:dist
 ```
 
-`desktop:dist` 生成 Electron 安装包，Windows 目标是 NSIS one-click exe。打包前需要把官方 PostgreSQL 源码构建出的可重定位 bundle 放到 `apps/desktop/resources/postgres/<platform>-<arch>`，或设置 `VIWORK_POSTGRES_BUNDLE_SOURCE=/path/to/postgresql-root` 让 `prepare:postgres` 复制。
+`desktop:dist` 生成 Electron 安装包，Windows 目标是 NSIS one-click exe。打包前需要把官方 PostgreSQL 源码构建出的可重定位 bundle 放到 `apps/desktop/resources/postgres/<platform>-<arch>`，或设置 `VIFORGE_POSTGRES_BUNDLE_SOURCE=/path/to/postgresql-root` 让 `prepare:postgres` 复制。
 
 ## 后端测试
 
 推荐按改动范围运行：
 
 ```bash
-pnpm --filter @viwork/api test -- projects.test.ts
-pnpm --filter @viwork/api test -- chatSessions.test.ts
-pnpm --filter @viwork/api test -- runs.test.ts
-pnpm --filter @viwork/api test -- runEvents.test.ts
-pnpm --filter @viwork/api test -- langGraphRunService.test.ts
-pnpm --filter @viwork/api test -- runtimeConfig.test.ts desktopAccess.test.ts
-pnpm --filter @viwork/api test -- skills.test.ts
-pnpm --filter @viwork/api test -- wechat.test.ts
+pnpm --filter @viforge/api test -- projects.test.ts
+pnpm --filter @viforge/api test -- chatSessions.test.ts
+pnpm --filter @viforge/api test -- runs.test.ts
+pnpm --filter @viforge/api test -- runEvents.test.ts
+pnpm --filter @viforge/api test -- langGraphRunService.test.ts
+pnpm --filter @viforge/api test -- runtimeConfig.test.ts desktopAccess.test.ts
+pnpm --filter @viforge/api test -- skills.test.ts
+pnpm --filter @viforge/api test -- wechat.test.ts
 ```
 
 注意：当前 `apps/api` 测试命令可能会扫到 `apps/api/data/workspaces/.codex-home` 下的临时插件测试文件。功能测试仍会通过，但输出会很长。需要清理时谨慎处理 `.codex-home`，不要删除用户需要保留的会话运行态。
@@ -89,11 +89,11 @@ pnpm --filter @viwork/api test -- wechat.test.ts
 ## 前端测试
 
 ```bash
-pnpm --filter @viwork/web test -- api.test.ts
-pnpm --filter @viwork/web test -- workspace-tree.test.ts
-pnpm --filter @viwork/web test -- viewer-components.test.ts
-pnpm --filter @viwork/web test -- viewers.test.ts
-pnpm --filter @viwork/web test -- chat-references.test.ts
+pnpm --filter @viforge/web test -- api.test.ts
+pnpm --filter @viforge/web test -- workspace-tree.test.ts
+pnpm --filter @viforge/web test -- viewer-components.test.ts
+pnpm --filter @viforge/web test -- viewers.test.ts
+pnpm --filter @viforge/web test -- chat-references.test.ts
 ```
 
 ## 关键测试覆盖

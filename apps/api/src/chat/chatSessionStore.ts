@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ChatMessage, ChatSession, ChatSessionKind, ChatSessionModelConfig, StreamEvent } from '@viwork/shared';
+import type { ChatMessage, ChatSession, ChatSessionKind, ChatSessionModelConfig, StreamEvent } from '@viforge/shared';
 
 const INTERRUPTED_ASSISTANT_MESSAGE = '回复未完成，可能是服务重启或连接中断。可以发送“继续”让创作助手接着聊。';
 

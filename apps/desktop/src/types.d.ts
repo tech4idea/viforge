@@ -4,7 +4,7 @@ declare module 'electron-squirrel-startup' {
 }
 
 interface Window {
-  viworkDesktop?: {
+  viforgeDesktop?: {
     selectDataRoot(): Promise<{
       canceled: boolean;
       dataRoot?: string;

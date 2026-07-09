@@ -100,7 +100,7 @@ const sitcomProjectDirectories = [
 const sitcomGlobalFiles: TemplateFile[] = [
   {
     path: 'Agent 配置/config.toml',
-    content: '# viwork agent runtime\n[viwork]\nmax_revision_rounds = 5\n',
+    content: '# viforge agent runtime\n[viforge]\nmax_revision_rounds = 5\n',
   },
   { path: '知识库/编剧知识/情景剧结构参考.md', content: '# 情景剧结构参考\n\n## 常见结构\n\n- 冷开场\n- 主冲突建立\n- 误会升级\n- 反转收束\n' },
   { path: '知识库/编剧知识/角色关系参考.md', content: '# 角色关系参考\n\n| 关系 | 典型张力 | 适用场景 |\n| --- | --- | --- |\n' },
@@ -194,7 +194,7 @@ const studyProjectDirectories = [
 const studyGlobalFiles: TemplateFile[] = [
   {
     path: 'Agent 配置/config.toml',
-    content: '# viwork agent runtime\n[viwork]\nmax_revision_rounds = 3\n',
+    content: '# viforge agent runtime\n[viforge]\nmax_revision_rounds = 3\n',
   },
   { path: '知识库/学习方法/学习路径设计.md', content: '# 学习路径设计\n\n## 原则\n\n- 先定义目标产出\n- 再拆分能力模块\n- 每个模块绑定练习和检查点\n' },
   { path: '知识库/学习方法/知识点整理方法.md', content: '# 知识点整理方法\n\n## 推荐结构\n\n- 概念定义\n- 关键问题\n- 例子\n- 常见误区\n- 关联知识\n' },

@@ -14,7 +14,7 @@ importers:
 
   apps/agent-worker:
     dependencies:
-      '@viwork/shared':
+      '@viforge/shared':
         specifier: workspace:*
         version: link:../../packages/shared
     devDependencies:
@@ -81,7 +81,7 @@ importers:
       '@opentelemetry/semantic-conventions':
         specifier: ^1.41.1
         version: 1.41.1
-      '@viwork/shared':
+      '@viforge/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       hono:
@@ -146,7 +146,7 @@ importers:
 
   apps/integration-gateway:
     dependencies:
-      '@viwork/shared':
+      '@viforge/shared':
         specifier: workspace:*
         version: link:../../packages/shared
     devDependencies:
@@ -201,7 +201,7 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.1
         version: 4.7.0(vite@5.4.21(@types/node@22.19.17))
-      '@viwork/shared':
+      '@viforge/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       highlight.js:

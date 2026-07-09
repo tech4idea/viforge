@@ -24,9 +24,14 @@ export const AssistantStreamBody = memo(function AssistantStreamBody({ message, 
   }, [message.streamEvents]);
 
   if (message.streamEvents.length === 0) {
+    const placeholder = message.status === 'queued'
+      ? '排队中，等待当前会话上一条任务完成...'
+      : message.status === 'running'
+        ? '正在思考...'
+        : '';
     return (
       <div className="chat-markdown">
-        <MarkdownReadPreview content={displayContent || (message.status === 'running' ? '正在思考...' : '')} />
+        <MarkdownReadPreview content={displayContent || placeholder} />
       </div>
     );
   }
@@ -55,7 +60,7 @@ export const AssistantStreamBody = memo(function AssistantStreamBody({ message, 
         </div>
       ) : null}
       <div className="chat-markdown">
-        <MarkdownReadPreview content={displayContent || (message.status === 'running' ? '正在生成...' : '')} />
+        <MarkdownReadPreview content={displayContent || (message.status === 'queued' ? '排队中，等待当前会话上一条任务完成...' : message.status === 'running' ? '正在生成...' : '')} />
       </div>
       {choices.length > 0 && message.status !== 'running' ? (
         <div className="chat-choice-group">

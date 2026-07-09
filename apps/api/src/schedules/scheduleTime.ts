@@ -1,4 +1,4 @@
-import type { ScheduledTask } from '@viwork/shared';
+import type { ScheduledTask } from '@viforge/shared';
 
 export function computeNextRunAt(task: ScheduledTask, from = new Date()): string | null {
   const frequency = task.schedule.frequency;

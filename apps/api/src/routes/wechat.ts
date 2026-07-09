@@ -155,7 +155,7 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
 
     const { externalMessageId, externalUserId, displayName } = parsed.data;
     let text = parsed.data.text;
-    const inboundContextToken = context.req.header('x-viwork-wechat-context-token')?.trim();
+    const inboundContextToken = context.req.header('x-viforge-wechat-context-token')?.trim();
     if (inboundContextToken) {
       await wechatStore.setIlinkContextToken(externalUserId, inboundContextToken);
     }
@@ -176,6 +176,17 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
       if (routing.type === 'confirmed') {
         switch (routing.action.type) {
         case 'new_session':
+          await wechatStore.setRouteState(externalUserId, routing.action.projectId ? {
+            scope: 'project',
+            projectId: routing.action.projectId,
+            projectName: routing.action.projectName,
+            lastCommandAt: new Date().toISOString(),
+          } : {
+            scope: 'temporary',
+            projectId: null,
+            projectName: '临时会话',
+            lastCommandAt: new Date().toISOString(),
+          });
           await wechatStore.setActiveChatSessionId(externalUserId, null);
           break;
         case 'switch_session':
@@ -274,7 +285,7 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
 }
 
 const HELP_TEXT = [
-  '📖 viwork 微信指令',
+  '📖 viforge 微信指令',
   '',
   '/项目 <名称> — 切换到指定改编项目',
   '/草稿 — 切换到临时草稿区',

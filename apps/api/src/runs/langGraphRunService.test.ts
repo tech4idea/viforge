@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StreamEvent } from '@viwork/shared';
+import type { StreamEvent } from '@viforge/shared';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
 import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
@@ -22,26 +22,26 @@ let originalDatabaseUrl: string | undefined;
 let originalAllowInMemory: string | undefined;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-LangGraph-run-service-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-LangGraph-run-service-'));
   store = createWorkspaceStore(root);
   bus = createRunBus();
   originalFetch = globalThis.fetch;
-  originalBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL;
-  originalApiKey = process.env.VIWORK_AIGC_HUB_API_KEY;
-  originalImageModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL;
+  originalBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL;
+  originalApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY;
+  originalImageModel = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL;
   originalDatabaseUrl = process.env.DATABASE_URL;
-  originalAllowInMemory = process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY;
+  originalAllowInMemory = process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY;
   delete process.env.DATABASE_URL;
-  process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY = '1';
+  process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY = '1';
 });
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
-  restoreEnv('VIWORK_AIGC_HUB_BASE_URL', originalBaseUrl);
-  restoreEnv('VIWORK_AIGC_HUB_API_KEY', originalApiKey);
-  restoreEnv('VIWORK_AIGC_HUB_IMAGE_MODEL', originalImageModel);
+  restoreEnv('VIFORGE_AIGC_HUB_BASE_URL', originalBaseUrl);
+  restoreEnv('VIFORGE_AIGC_HUB_API_KEY', originalApiKey);
+  restoreEnv('VIFORGE_AIGC_HUB_IMAGE_MODEL', originalImageModel);
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
-  restoreEnv('VIWORK_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
+  restoreEnv('VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -147,7 +147,7 @@ describe('langgraph run service', () => {
           async systemAgent(instructions) {
             capturedInstructions = instructions;
             return {
-              id: 'viwork-system-agent',
+              id: 'viforge-system-agent',
               async stream(prompt) {
                 capturedPrompt = typeof prompt === "string" ? prompt : prompt.map((message) => message.content).join("\n\n");
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '情景剧处理完成。' } }]) };
@@ -195,7 +195,7 @@ describe('langgraph run service', () => {
           async systemAgent(_instructions, toolsOverride) {
             mainAgentTools = toolsOverride ?? tools;
             return {
-              id: 'viwork-system-agent',
+              id: 'viforge-system-agent',
               async stream() {
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '你好，我在。' } }]) };
               },
@@ -241,7 +241,7 @@ describe('langgraph run service', () => {
           async systemAgent(_instructions, toolsOverride) {
             delegateTool = (toolsOverride as typeof tools & { delegate_to_specialist_agent?: typeof delegateTool })?.delegate_to_specialist_agent ?? null;
             return {
-              id: 'viwork-system-agent',
+              id: 'viforge-system-agent',
               async stream() {
                 const result = await delegateTool?.execute?.({
                   agentId: 'reviewer-agent',
@@ -331,7 +331,7 @@ describe('langgraph run service', () => {
           async systemAgent(_instructions, toolsOverride) {
             const runtimeTools = toolsOverride ?? tools;
             return {
-              id: 'viwork-system-agent',
+              id: 'viforge-system-agent',
               async stream() {
                 browserToolResult = await runtimeTools.browser_navigate.execute?.({ url: 'example.com' }, {} as never);
                 await runtimeTools.browser_snapshot.execute?.({}, {} as never);
@@ -395,7 +395,7 @@ describe('langgraph run service', () => {
           async systemAgent(_instructions, toolsOverride) {
             scheduleTool = (toolsOverride ?? tools).create_scheduled_task as typeof scheduleTool;
             return {
-              id: 'viwork-system-agent',
+              id: 'viforge-system-agent',
               async stream() {
                 const result = await scheduleTool?.execute?.({
                   title: '每日检查大纲',
@@ -520,9 +520,9 @@ describe('langgraph run service', () => {
   });
 
   it('exposes image generation as an agent workspace tool', async () => {
-    process.env.VIWORK_AIGC_HUB_BASE_URL = 'http://127.0.0.1:8000/v1';
-    process.env.VIWORK_AIGC_HUB_API_KEY = 'hub_test_key';
-    process.env.VIWORK_AIGC_HUB_IMAGE_MODEL = 'gpt-image-1';
+    process.env.VIFORGE_AIGC_HUB_BASE_URL = 'http://127.0.0.1:8000/v1';
+    process.env.VIFORGE_AIGC_HUB_API_KEY = 'hub_test_key';
+    process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL = 'gpt-image-1';
     globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({
       data: [{ b64_json: Buffer.from('fake-image').toString('base64'), revised_prompt: 'revised prompt' }],
     })) as unknown as typeof fetch;

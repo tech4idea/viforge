@@ -12,7 +12,7 @@ let root: string;
 let app: Hono;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-api-routes-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-api-routes-'));
   app = new Hono().route('/api', createProjectsRoutes(createWorkspaceStore(root)));
 });
 

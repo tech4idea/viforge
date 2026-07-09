@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>viwork Agent Harness Data Flow</title>
+  <title>viforge Agent Harness Data Flow</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
@@ -55,7 +55,7 @@
     <div class="header">
       <div class="header-row">
         <div class="pulse-dot"></div>
-        <h1>viwork Agent Harness Data Flow</h1>
+        <h1>viforge Agent Harness Data Flow</h1>
         <div class="toolbar">
           <div class="toolbar-actions">
             <button onclick="copyAsImage(this)">Copy</button>
@@ -69,7 +69,7 @@
     </div>
 
     <div class="diagram-container">
-      <svg viewBox="0 0 1180 840" role="img" aria-label="viwork agent harness data flow diagram">
+      <svg viewBox="0 0 1180 840" role="img" aria-label="viforge agent harness data flow diagram">
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b" /></marker>
           <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" /></marker>
@@ -220,7 +220,7 @@
       <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>Release Gate</h3></div><ul><li>• 程序检查只判定硬约束</li><li>• HumanReviewRubric 判定内容质量</li><li>• candidate 通过后才可发布 active</li></ul></div>
     </div>
 
-    <div class="footer">viwork agent harness · data flow diagram · generated from docs/todo.md discussion</div>
+    <div class="footer">viforge agent harness · data flow diagram · generated from docs/todo.md discussion</div>
   </div>
   <script>
     async function captureNode() {
@@ -245,7 +245,7 @@
     async function downloadPNG() {
       const canvas = await captureNode();
       const link = document.createElement('a');
-      link.download = 'viwork-agent-harness-data-flow.png';
+      link.download = 'viforge-agent-harness-data-flow.png';
       link.href = canvas.toDataURL('image/png');
       link.click();
     }
@@ -255,7 +255,7 @@
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
       pdf.addImage(img, 'PNG', 0, 0, canvas.width, canvas.height);
-      pdf.save('viwork-agent-harness-data-flow.pdf');
+      pdf.save('viforge-agent-harness-data-flow.pdf');
     }
   </script>
 </body>

@@ -38,7 +38,7 @@ function createMockIlinkClient() {
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-wechat-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-wechat-'));
   runBus = createRunBus();
   const workspaceStore = createWorkspaceStore(path.join(root, 'workspaces'));
   const chatSessionStore = createChatSessionStore(path.join(root, 'chat-sessions.json'));
@@ -99,7 +99,7 @@ describe('wechat routes', () => {
     const setupResponse = await app.request('/api/wechat/setup-sessions', { method: 'POST' });
     expect(setupResponse.status).toBe(201);
     const setup = await setupResponse.json() as { sessionId: string; qrUrl: string };
-    expect(setup.qrUrl).toContain('viwork-wechat://pair/');
+    expect(setup.qrUrl).toContain('viforge-wechat://pair/');
     expect(setup.sessionId).toBeTruthy();
 
     // Test QR endpoint
@@ -147,7 +147,7 @@ describe('wechat routes', () => {
 
     const inboundResponse = await app.request('/api/wechat/inbound', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-viwork-wechat-context-token': 'context-token' },
+      headers: { 'content-type': 'application/json', 'x-viforge-wechat-context-token': 'context-token' },
       body: JSON.stringify({
         externalMessageId: 'msg-create',
         externalUserId: 'writer-openid',
@@ -174,7 +174,7 @@ describe('wechat routes', () => {
 
     const inboundResponse = await app.request('/api/wechat/inbound', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-viwork-wechat-context-token': 'context-token' },
+      headers: { 'content-type': 'application/json', 'x-viforge-wechat-context-token': 'context-token' },
       body: JSON.stringify({
         externalMessageId: 'msg-image',
         externalUserId: 'writer-openid',
@@ -201,7 +201,7 @@ describe('wechat routes', () => {
 
     const inboundResponse = await app.request('/api/wechat/inbound', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-viwork-wechat-context-token': 'context-token' },
+      headers: { 'content-type': 'application/json', 'x-viforge-wechat-context-token': 'context-token' },
       body: JSON.stringify({
         externalMessageId: 'msg-real-user',
         externalUserId: 'writer-openid',

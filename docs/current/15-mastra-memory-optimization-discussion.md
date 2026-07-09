@@ -13,7 +13,7 @@
 数据库路径由 `WORKSPACES_ROOT` 推导：
 
 ```
-~/.viwork/data/<productId>/mastra-memory.db
+~/.viforge/data/<productId>/mastra-memory.db
 ```
 
 Docker 部署时映射为容器内 `/data/mastra-memory.db`，通过 `./var/api-data` 卷持久化。

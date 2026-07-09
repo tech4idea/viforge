@@ -1,4 +1,4 @@
-import type { StreamEvent } from '@viwork/shared';
+import type { StreamEvent } from '@viforge/shared';
 
 type Subscriber = (event: StreamEvent) => void;
 

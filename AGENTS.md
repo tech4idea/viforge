@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repository is the current `viwork` implementation for sitcom creation workflows. Future agents should treat the monorepo implementation and `docs/current/` as the source of truth, not the historical Express starter files that still exist in the repository.
+This repository is the current `viforge` implementation for sitcom creation workflows. Future agents should treat the monorepo implementation and `docs/current/` as the source of truth, not the historical Express starter files that still exist in the repository.
 
 ## Read First
 
@@ -44,11 +44,11 @@ Agent configuration exposed inside the product is stored through the API data mo
 Run targeted checks for the area you changed. Common commands:
 
 ```bash
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
-pnpm --filter @viwork/web build
-pnpm --filter @viwork/api test
-pnpm --filter @viwork/web test
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
+pnpm --filter @viforge/web build
+pnpm --filter @viforge/api test
+pnpm --filter @viforge/web test
 ```
 
 When changing contracts, run both API and web checks. When changing preview/editor behavior, include web tests around viewers and workspace tree behavior. When changing Codex runtime or sessions, include API route/store tests.

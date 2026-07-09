@@ -19,7 +19,7 @@ const PLAYWRITER_RELAY_HOST = '127.0.0.1';
 const PLAYWRITER_RELAY_PORT = 19988;
 const PRODUCT_NAME = 'ViForge';
 const WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\ViForge';
-const LEGACY_WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\viwork';
+const LEGACY_WINDOWS_REGISTRY_KEY = 'HKCU\\Software\\viforge';
 let apiProcess: ChildProcessWithoutNullStreams | null = null;
 let playwriterProcess: ChildProcessWithoutNullStreams | null = null;
 const desktopAccessToken = randomUUID();
@@ -41,7 +41,7 @@ if (!hasSingleInstanceLock) {
 
 app.setName(PRODUCT_NAME);
 
-ipcMain.handle('viwork:select-data-root', async () => {
+ipcMain.handle('viforge:select-data-root', async () => {
   const selected = await promptForDesktopDataRoot({ required: false });
   if (!selected) return { canceled: true };
 
@@ -266,19 +266,19 @@ async function startApiServer(): Promise<string> {
       ...process.env,
       PORT: String(apiPort),
       ELECTRON_RUN_AS_NODE: '1',
-      VIWORK_DESKTOP: '1',
-      VIWORK_DESKTOP_ACCESS_TOKEN: desktopAccessToken,
-      VIWORK_DESKTOP_DATA_ROOT: dataRoot,
-      VIWORK_DESKTOP_CONFIG_ROOT: app.getPath('userData'),
-      VIWORK_PLAYWRITER_BIN: playwriterEntry,
-      VIWORK_PLAYWRITER_HOST: playwriterHost,
+      VIFORGE_DESKTOP: '1',
+      VIFORGE_DESKTOP_ACCESS_TOKEN: desktopAccessToken,
+      VIFORGE_DESKTOP_DATA_ROOT: dataRoot,
+      VIFORGE_DESKTOP_CONFIG_ROOT: app.getPath('userData'),
+      VIFORGE_PLAYWRITER_BIN: playwriterEntry,
+      VIFORGE_PLAYWRITER_HOST: playwriterHost,
       PLAYWRITER_HOST: playwriterHost,
-      VIWORK_DATABASE_MODE: process.env.VIWORK_DATABASE_MODE ?? 'embedded-postgres',
-      VIWORK_POSTGRES_BIN_DIR: process.env.VIWORK_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin'),
+      VIFORGE_DATABASE_MODE: process.env.VIFORGE_DATABASE_MODE ?? 'embedded-postgres',
+      VIFORGE_POSTGRES_BIN_DIR: process.env.VIFORGE_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin'),
       WORKSPACES_ROOT: path.join(dataRoot, 'workspaces'),
       LOGS_ROOT: path.join(dataRoot, 'logs'),
-      VIWORK_STATIC_WEB_ROOT: resourceRoots.web,
-      VIWORK_PRODUCT_PROMPTS_ROOT: resourceRoots.productPrompts,
+      VIFORGE_STATIC_WEB_ROOT: resourceRoots.web,
+      VIFORGE_PRODUCT_PROMPTS_ROOT: resourceRoots.productPrompts,
     },
     stdio: 'pipe',
   });
@@ -315,7 +315,7 @@ function startPlaywriterRelay(playwriterEntry: string, dataRoot: string): void {
       PLAYWRITER_HOST: `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`,
       PLAYWRITER_LOG_FILE_PATH: path.join(playwriterLogDir, 'relay-server.log'),
       PLAYWRITER_CDP_LOG_FILE_PATH: path.join(playwriterLogDir, 'cdp.jsonl'),
-      VIWORK_PLAYWRITER_HOST: `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`,
+      VIFORGE_PLAYWRITER_HOST: `http://${PLAYWRITER_RELAY_HOST}:${PLAYWRITER_RELAY_PORT}`,
     },
     stdio: 'pipe',
   });
@@ -460,7 +460,7 @@ function desktopDataRootFile(): string {
 
 async function readLegacyDesktopDataRootFile(): Promise<string | null> {
   try {
-    const value = (await readFile(path.join(app.getPath('appData'), 'viwork', 'data-root.txt'), 'utf8')).trim();
+    const value = (await readFile(path.join(app.getPath('appData'), 'viforge', 'data-root.txt'), 'utf8')).trim();
     return value || null;
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
@@ -500,7 +500,7 @@ async function stopDesktopServices(): Promise<void> {
 async function stopEmbeddedPostgresFromDesktop(): Promise<void> {
   if (!currentDesktopDataRoot) return;
   const resourceRoots = resolveResourceRoots(process.resourcesPath);
-  const binDir = process.env.VIWORK_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin');
+  const binDir = process.env.VIFORGE_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin');
   const pgCtl = path.join(binDir, process.platform === 'win32' ? 'pg_ctl.exe' : 'pg_ctl');
   const dataDir = path.join(currentDesktopDataRoot, 'postgres-data');
   if (!fs.existsSync(pgCtl) || !fs.existsSync(dataDir)) return;

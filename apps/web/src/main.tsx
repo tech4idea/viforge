@@ -22,6 +22,7 @@ import {
   type ChatMessageAttachment,
   type ChatSession,
   type GeminiImageAspectRatio,
+  type BrowserConnectorStatus,
   type GeminiImageThinkingLevel,
   type ImageGenerationReferenceImage,
   type Project,
@@ -49,6 +50,7 @@ import {
 import { ACTIVE_PRODUCT_PROFILE, SELECTABLE_PRODUCT_PROFILES } from './product-profile';
 import { ActivityRail, type ThemeMode as RailThemeMode } from './components/ActivityRail';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { ConnectorsPanel } from './components/ConnectorsPanel';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { EditorHeader } from './components/EditorHeader';
 import { GitSyncPanel } from './components/GitSyncPanel';
@@ -99,22 +101,24 @@ const WORKSPACE_PANEL_MIN_WIDTH = 180;
 const WORKSPACE_PANEL_MAX_WIDTH = 420;
 const CHAT_PANEL_MIN_WIDTH = 240;
 const CHAT_PANEL_FALLBACK_MAX_WIDTH = 960;
-const CHAT_READING_MODE_STORAGE_KEY = 'viwork.chatReadingMode.v1';
-const SELECTED_PROJECT_STORAGE_KEY = 'viwork.selectedProjectId.v1';
-const TEMPORARY_CHAT_SESSION_STORAGE_KEY = 'viwork.temporaryChatSession.v1';
-const CHAT_SCOPE_STORAGE_KEY = 'viwork.chatScope.v1';
-const WORKSPACE_SELECTION_STORAGE_KEY = 'viwork.workspaceSelection.v1';
-const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'viwork.activeChatSession.v1';
-const PANEL_VISIBILITY_STORAGE_KEY = 'viwork.panelVisibility.v1';
-const THEME_MODE_STORAGE_KEY = 'viwork.themeMode.v1';
+const DEFAULT_WORKSPACE_PANEL_WIDTH = 238;
+const CHAT_READING_MODE_STORAGE_KEY = 'viforge.chatReadingMode.v1';
+const SELECTED_PROJECT_STORAGE_KEY = 'viforge.selectedProjectId.v1';
+const TEMPORARY_CHAT_SESSION_STORAGE_KEY = 'viforge.temporaryChatSession.v1';
+const CHAT_SCOPE_STORAGE_KEY = 'viforge.chatScope.v1';
+const WORKSPACE_SELECTION_STORAGE_KEY = 'viforge.workspaceSelection.v1';
+const ACTIVE_CHAT_SESSION_STORAGE_KEY = 'viforge.activeChatSession.v1';
+const PANEL_VISIBILITY_STORAGE_KEY = 'viforge.panelVisibility.v1';
+const THEME_MODE_STORAGE_KEY = 'viforge.themeMode.v1';
 const TEMPORARY_CHAT_SCOPE_ID = '__temporary__';
-const CHAT_MODEL_STORAGE_KEY = 'viwork.chatModel.v1';
-const IMAGE_MODEL_STORAGE_KEY = 'viwork.imageModel.v1';
-const RUN_NOTIFY_STORAGE_KEY = 'viwork.runNotify.v1';
+const CHAT_MODEL_STORAGE_KEY = 'viforge.chatModel.v1';
+const IMAGE_MODEL_STORAGE_KEY = 'viforge.imageModel.v1';
+const RUN_NOTIFY_STORAGE_KEY = 'viforge.runNotify.v1';
+const QUEUED_ASSISTANT_MESSAGE = '排队中，等待当前会话上一条任务完成...';
 
 declare global {
   interface Window {
-    viworkDesktop?: {
+    viforgeDesktop?: {
       selectDataRoot(): Promise<{
         canceled: boolean;
         dataRoot?: string;
@@ -185,7 +189,7 @@ function playNotificationSound(): void {
 
 type LoadState = 'idle' | 'loading' | 'error';
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-type RunState = 'idle' | 'running' | 'success' | 'error';
+type RunState = 'idle' | 'queued' | 'running' | 'success' | 'error';
 type ChatMode = 'assistant' | 'image';
 type ChatScope = 'project' | 'temporary';
 type WorkspaceScope = 'global' | 'project' | 'temporary';
@@ -295,8 +299,10 @@ function App() {
   const streamBatchRef = useRef<Map<string, { sessionId: string; messageId: string; runProjectId: string; events: StreamEvent[] }>>(new Map());
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeStreamCloseRef = useRef<(() => void) | null>(null);
+  const streamCloseByRunIdRef = useRef<Map<string, () => void>>(new Map());
   const activeRunIdRef = useRef<string | null>(null);
   const runStreamBindingRef = useRef<RunStreamBinding | null>(null);
+  const runStreamBindingsRef = useRef<Map<string, RunStreamBinding>>(new Map());
   const seenRunStreamEventsRef = useRef<Map<string, Set<string>>>(new Map());
   const initState = useMemo(() => readInitialStoredState(), []);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -376,7 +382,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(initState.sidebarOpen);
   const [chatPanelOpen, setChatPanelOpen] = useState(initState.chatPanelOpen);
   const [editorPanelOpen, setEditorPanelOpen] = useState(initState.editorPanelOpen);
-  const [panelWidths, setPanelWidths] = useState({ workspace: 238, chat: 340 });
+  const [panelWidths, setPanelWidths] = useState(() => initialPanelWidths());
   const [themeMode, setThemeMode] = useState<ThemeMode>(initState.themeMode);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'error' }>>([]);
   const toastIdRef = useRef(0);
@@ -449,7 +455,7 @@ function App() {
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set());
   const [collapsedTemporarySessionIds, setCollapsedTemporarySessionIds] = useState<string[]>([]);
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
-  const [activeToolPanel, setActiveToolPanel] = useState<'wechat' | 'git' | 'harness' | 'settings' | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<'connectors' | 'git' | 'harness' | 'settings' | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [runtimeConfigState, setRuntimeConfigState] = useState<LoadState>('idle');
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
@@ -472,6 +478,8 @@ function App() {
   const [wechatStatus, setWechatStatus] = useState<WechatStatus | null>(null);
   const [wechatSetup, setWechatSetup] = useState<WechatSetupSession | null>(null);
   const [wechatState, setWechatState] = useState<LoadState>('idle');
+  const [browserStatus, setBrowserStatus] = useState<BrowserConnectorStatus | null>(null);
+  const [browserLoading, setBrowserLoading] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -583,6 +591,8 @@ function App() {
   );
   const activeChatLastMessage = activeChatSession?.messages[activeChatSession.messages.length - 1] ?? null;
   const activeChatSessionArchived = Boolean(activeChatSession?.archivedAt);
+  const activeChatSessionRunning = Boolean(activeChatSession && hasRunningAssistantMessage(activeChatSession));
+  const activeChatSessionQueuedCount = activeChatSession ? countQueuedAssistantMessages(activeChatSession) : 0;
   const allScheduledTasks = useMemo(
     () => {
       const allowedSessionIds = new Set(
@@ -773,16 +783,18 @@ function App() {
 
   useEffect(() => {
     if (!activeChatSession || getSessionKind(activeChatSession) !== 'assistant') return;
-    const runningMessage = [...activeChatSession.messages]
-      .reverse()
-      .find((message) => message.role === 'assistant' && message.status === 'running' && message.runId);
-    if (!runningMessage?.runId || activeRunIdRef.current === runningMessage.runId) return;
-    attachRunStream({
-      runId: runningMessage.runId,
-      sessionId: activeChatSession.id,
-      messageId: runningMessage.id,
-      projectId: activeChatSession.projectId,
-    });
+    const pendingMessages = activeChatSession.messages
+      .filter((message) => message.role === 'assistant' && (message.status === 'running' || message.status === 'queued') && message.runId);
+
+    for (const message of pendingMessages) {
+      if (!message.runId || streamCloseByRunIdRef.current.has(message.runId)) continue;
+      attachRunStream({
+        runId: message.runId,
+        sessionId: activeChatSession.id,
+        messageId: message.id,
+        projectId: activeChatSession.projectId,
+      });
+    }
   }, [activeChatSession?.id, activeChatSession?.messages]);
 
   useEffect(() => {
@@ -892,7 +904,7 @@ function App() {
 
   useEffect(() => {
     if (activeWorkspaceScope === 'project' && !selectedProjectId) {
-      setActiveWorkspaceScope(selectedTemporaryProjectId ? 'temporary' : 'global');
+      setActiveWorkspaceScope('temporary');
     }
   }, [activeWorkspaceScope, selectedProjectId, selectedTemporaryProjectId]);
 
@@ -913,13 +925,22 @@ function App() {
   }, [renameEntryFocusKey]);
 
   useEffect(() => {
-    if (activeToolPanel === 'wechat') {
+    if (activeToolPanel === 'connectors') {
       void loadWechatStatus();
+      void loadBrowserStatus();
     }
     if (activeToolPanel === 'settings') {
       void loadRuntimeConfig();
     }
   }, [activeToolPanel]);
+
+  useEffect(() => {
+    if (activeToolPanel !== 'connectors' || !wechatSetup || wechatStatus?.state === 'connected') return;
+    const timer = window.setInterval(() => {
+      void loadWechatStatus();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [activeToolPanel, wechatSetup?.sessionId, wechatStatus?.state]);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -1750,7 +1771,7 @@ function App() {
     try {
       const status = await apiClient.getWechatStatus();
       setWechatStatus(status);
-      setWechatSetup(status.setupSession);
+      setWechatSetup(status.state === 'connected' ? null : status.setupSession);
       setWechatState('idle');
     } catch {
       setWechatState('error');
@@ -1763,32 +1784,43 @@ function App() {
     await loadWechatStatus();
   }
 
-  function attachRunStream(binding: RunStreamBinding) {
-    if (activeRunIdRef.current === binding.runId) return;
+  async function loadBrowserStatus() {
+    setBrowserLoading(true);
+    try {
+      const status = await apiClient.getBrowserConnectorStatus();
+      setBrowserStatus(status);
+    } catch {
+      // keep previous status
+    } finally {
+      setBrowserLoading(false);
+    }
+  }
 
-    activeStreamCloseRef.current?.();
-    activeRunIdRef.current = binding.runId;
-    runStreamBindingRef.current = binding;
+  function attachRunStream(binding: RunStreamBinding) {
+    if (streamCloseByRunIdRef.current.has(binding.runId)) return;
+
+    runStreamBindingsRef.current.set(binding.runId, binding);
     seedSeenStreamEvents(binding);
-    setRunState('running');
+    setRunState((current) => current === 'running' ? current : 'queued');
     setRunError(null);
 
     void apiClient.getRunEventSnapshot(binding.runId)
       .then((snapshot) => {
-        if (runStreamBindingRef.current?.runId !== binding.runId) return;
+        if (!runStreamBindingsRef.current.has(binding.runId)) return;
         replayMissingStreamEvents(binding, snapshot.events);
       })
       .catch(() => {
         // The live SSE stream remains authoritative; a missing snapshot only means there is nothing to replay.
       });
 
-    activeStreamCloseRef.current = apiClient.streamRunEvents(binding.runId, {
+    const closeStream = apiClient.streamRunEvents(binding.runId, {
       onEvent: (event) => replayMissingStreamEvents(binding, [event]),
       onError: (error) => {
-        if (runStreamBindingRef.current?.runId !== binding.runId) return;
-        activeStreamCloseRef.current = null;
-        activeRunIdRef.current = null;
-        runStreamBindingRef.current = null;
+        if (!runStreamBindingsRef.current.has(binding.runId)) return;
+        streamCloseByRunIdRef.current.delete(binding.runId);
+        runStreamBindingsRef.current.delete(binding.runId);
+        if (activeRunIdRef.current === binding.runId) activeRunIdRef.current = null;
+        if (runStreamBindingRef.current?.runId === binding.runId) runStreamBindingRef.current = null;
         updateMessageInSession(binding.sessionId, binding.messageId, (message) => ({
           ...message,
           status: 'error',
@@ -1796,6 +1828,7 @@ function App() {
         }));
       },
     });
+    streamCloseByRunIdRef.current.set(binding.runId, closeStream);
   }
 
   function replayMissingStreamEvents(binding: RunStreamBinding, events: StreamEvent[]) {
@@ -1907,6 +1940,10 @@ function App() {
     if (!messageText) {
       return;
     }
+    if (activeChatSessionQueuedCount >= 3) {
+      showToast('当前会话已有 3 条消息排队，请等待前面的任务开始后再发送。', 'info');
+      return;
+    }
     await submitPromptWith(messageText);
   }
 
@@ -1917,6 +1954,10 @@ function App() {
 
     const session = await ensureAssistantChatSession();
     if (!session) {
+      return;
+    }
+    if (countQueuedAssistantMessages(session) >= 3) {
+      showToast('当前会话已有 3 条消息排队，请等待前面的任务开始后再发送。', 'info');
       return;
     }
 
@@ -1942,7 +1983,7 @@ function App() {
     setReferencedFiles([]);
     setReferencedSnippets([]);
     closeReferenceMenu();
-    setRunState('running');
+    setRunState(activeChatSessionRunning ? 'queued' : 'running');
     setRunError(null);
     setCurrentRun(null);
 
@@ -1987,13 +2028,15 @@ function App() {
           await refreshWorkspaceAfterRun(runProjectId);
         }
       } else {
-        const assistantMessage = createChatMessage('assistant', '', {
+        const assistantStatus = response.run.status === 'pending' ? 'queued' : 'running';
+        const assistantMessage = createChatMessage('assistant', assistantStatus === 'queued' ? QUEUED_ASSISTANT_MESSAGE : '', {
           referencedFiles: response.run.referencedFiles,
           referencedSnippets: response.run.referencedSnippets ?? [],
-          status: 'running',
+          status: assistantStatus,
           runId: response.run.id,
         });
         appendMessageToSession(session.id, assistantMessage);
+        setRunState(assistantStatus);
         attachRunStream({
           runId: response.run.id,
           sessionId: session.id,
@@ -2141,11 +2184,12 @@ function App() {
 
   async function stopRun() {
     const runId = activeRunIdRef.current;
-    const closeStream = activeStreamCloseRef.current;
+    const closeStream = runId ? streamCloseByRunIdRef.current.get(runId) : null;
     activeRunIdRef.current = null;
-    activeStreamCloseRef.current = null;
     runStreamBindingRef.current = null;
     if (runId) seenRunStreamEventsRef.current.delete(runId);
+    if (runId) streamCloseByRunIdRef.current.delete(runId);
+    if (runId) runStreamBindingsRef.current.delete(runId);
     closeStream?.();
     if (runId) {
       try {
@@ -2154,7 +2198,7 @@ function App() {
         // cancel request may fail if run already ended; safe to ignore
       }
     }
-    setRunState('idle');
+    setRunState(streamCloseByRunIdRef.current.size > 0 ? 'queued' : 'idle');
   }
 
   async function submitAssistantImagePrompt(session: ChatSession, messageText: string) {
@@ -2262,6 +2306,14 @@ function App() {
   function handleRunStreamEvent(sessionId: string, messageId: string, runProjectId: string, event: StreamEvent) {
     autoScrollRef.current = true;
 
+    if (event.type === 'run.start') {
+      const binding = runStreamBindingsRef.current.get(event.runId) ?? null;
+      activeRunIdRef.current = event.runId;
+      runStreamBindingRef.current = binding;
+      activeStreamCloseRef.current = streamCloseByRunIdRef.current.get(event.runId) ?? null;
+      setRunState('running');
+    }
+
     if (event.type === 'file.changed' || event.type === 'image.generated') {
       const revealPath = event.type === 'image.generated' ? event.attachment.path : event.path;
       if (isTemporaryProjectId(runProjectId)) {
@@ -2290,9 +2342,11 @@ function App() {
     }
 
     if (event.type === 'run.end') {
-      activeStreamCloseRef.current = null;
-      activeRunIdRef.current = null;
-      runStreamBindingRef.current = null;
+      streamCloseByRunIdRef.current.get(event.runId)?.();
+      streamCloseByRunIdRef.current.delete(event.runId);
+      runStreamBindingsRef.current.delete(event.runId);
+      if (activeRunIdRef.current === event.runId) activeRunIdRef.current = null;
+      if (runStreamBindingRef.current?.runId === event.runId) runStreamBindingRef.current = null;
       seenRunStreamEventsRef.current.delete(event.runId);
       if (streamFlushTimerRef.current) {
         clearTimeout(streamFlushTimerRef.current);
@@ -2300,7 +2354,7 @@ function App() {
       }
       flushStreamBatch();
       const streamEndStatus = event.status === 'cancelled' ? 'idle' as const : event.status === 'success' ? 'success' as const : 'error' as const;
-      setRunState(streamEndStatus);
+      setRunState(streamCloseByRunIdRef.current.size > 0 ? 'queued' : streamEndStatus);
       if (streamEndStatus !== 'idle') notifyRunComplete(streamEndStatus);
       if (event.errorMessage) {
         setRunError(userFacingRunError(event.errorMessage));
@@ -2371,6 +2425,9 @@ function App() {
             for (const event of update.events) {
               if (event.type === 'text.delta') {
                 content += event.delta;
+              } else if (event.type === 'run.start') {
+                content = content === QUEUED_ASSISTANT_MESSAGE ? '' : content;
+                finalStatus = 'running';
               } else if (event.type === 'image.generated') {
                 if (!attachments.some((attachment) => attachment.id === event.attachment.id || attachment.path === event.attachment.path)) {
                   attachments.push(event.attachment);
@@ -2621,7 +2678,7 @@ function App() {
     const dragged: DragEntryDraft = { workspaceScope, projectId, entryPath: entry.path, entryType: entry.type };
     setDragEntry(dragged);
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('application/x-viwork-entry', JSON.stringify(dragged));
+    event.dataTransfer.setData('application/x-viforge-entry', JSON.stringify(dragged));
   }
 
   function handleDropTargetDragOver(event: ReactDragEvent, target: WorkspaceTarget) {
@@ -2683,7 +2740,7 @@ function App() {
   function contentAreaColumns(): string {
     const sidebarCol = sidebarOpen ? `${panelWidths.workspace}px ` : '';
     if (editorPanelOpen && chatPanelOpen) {
-      return `${sidebarCol}1fr 6px ${panelWidths.chat}px`;
+      return `${sidebarCol}minmax(0, 1fr) 6px minmax(${CHAT_PANEL_MIN_WIDTH}px, ${panelWidths.chat}px)`;
     }
     if (editorPanelOpen) {
       return `${sidebarCol}1fr`;
@@ -3343,7 +3400,7 @@ function App() {
         onToggleEditor={() => setEditorPanelOpen((v) => !v)}
         onToggleChat={() => setChatPanelOpen((v) => !v)}
         onToggleTheme={() => setThemeMode(nextThemeMode(themeMode))}
-        onOpenWechat={() => setActiveToolPanel('wechat')}
+        onOpenConnectors={() => setActiveToolPanel('connectors')}
         onOpenGitSync={() => setActiveToolPanel('git')}
         onOpenHarness={openHarnessStandalone}
         onOpenSchedules={() => void openScheduleOverview()}
@@ -3430,90 +3487,16 @@ function App() {
                 <div className="workspace-section">
                   <button
                     type="button"
-                    className={`workspace-section-root${dropTargetClass('global', null, '')}`}
-                    title={WORKSPACE_SECTIONS[0].description}
-                    onClick={() => {
-                      setActiveWorkspaceScope('global');
-                    }}
-                    onDragOver={(event) => handleDropTargetDragOver(event, { workspaceScope: 'global', projectId: null, parentPath: '' })}
-                    onDragLeave={() => setDragOverTargetKey(null)}
-                    onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'global', projectId: null, parentPath: '' })}
-                    onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'global', projectId: null })}
-                  >
-                    <span className="node-icon"><Diamond size={14} /></span>
-                    <span className="node-main">
-                      <strong>{WORKSPACE_SECTIONS[0].title}</strong>
-                      <small>{WORKSPACE_SECTIONS[0].description}</small>
-                    </span>
-                  </button>
-                  <div className="file-tree nested-tree global-tree">
-                    {globalEntriesState === 'error' ? <p className="inline-error">{globalEntriesError}</p> : null}
-                    {globalEntriesState === 'loading' ? <p className="muted">正在加载全局文件...</p> : null}
-                    {renderCreateEntryDraft('global', null, '', 0)}
-                    {visibleGlobalEntries.map((entry) => (
-                      <Fragment key={entry.path}>
-                        {renderRenameEntryDraft(entry, 'global', null) ?? (
-                          <button
-                            type="button"
-                            className={`file-node global-file-node ${entry.type === 'directory' ? `directory-node${dropTargetClass('global', null, entry.path)}` : 'document-node'}`}
-                            draggable
-                            style={{ '--tree-depth': String(pathDepth(entry.path)) } as React.CSSProperties}
-                            onDragStart={(event) => handleEntryDragStart(event, 'global', null, entry)}
-                            onDragEnd={() => {
-                              setDragEntry(null);
-                              setDragOverTargetKey(null);
-                            }}
-                            onDragOver={entry.type === 'directory' ? (event) => handleDropTargetDragOver(event, { workspaceScope: 'global', projectId: null, parentPath: entry.path }) : undefined}
-                            onDragLeave={entry.type === 'directory' ? () => setDragOverTargetKey(null) : undefined}
-                            onDrop={entry.type === 'directory' ? (event) => void handleDropOnDirectory(event, { workspaceScope: 'global', projectId: null, parentPath: entry.path }) : undefined}
-                            onClick={() => {
-                              selectEntryForPreview('global', null, entry);
-                              if (entry.type === 'file') {
-                                setEditorPanelOpen(true);
-                              }
-                              if (entry.type === 'directory') {
-                                toggleGlobalDirectory(entry.path);
-                              }
-                            }}
-                            onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'global', entry })}
-                            title={entry.path}
-                          >
-                            <span className="file-node-label">
-                              {entry.type === 'directory' ? (
-                                <span className="file-node-chevron">
-                                  {collapsedGlobalPaths.includes(entry.path) ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-                                </span>
-                              ) : null}
-                              <span className="file-node-icon">
-                                {entry.type === 'directory'
-                                  ? collapsedGlobalPaths.includes(entry.path) ? <Folder size={13} /> : <FolderOpen size={13} />
-                                  : fileIconForPath(entry.path)}
-                              </span>
-                              <span>{entry.name}</span>
-                            </span>
-                          </button>
-                        )}
-                        {entry.type === 'directory' ? renderCreateEntryDraft('global', null, entry.path, pathDepth(entry.path) + 1) : null}
-                      </Fragment>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="workspace-section">
-                  <button
-                    type="button"
                     className="workspace-section-root"
-                    title={WORKSPACE_SECTIONS[1].description}
+                    title={WORKSPACE_SECTIONS[1].title}
                     onContextMenu={(event) => openSidebarContextMenu(event, { projectId: null })}
                   >
                     <span className="node-icon"><FolderOpen size={14} /></span>
                     <span className="node-main">
                       <strong>{WORKSPACE_SECTIONS[1].title}</strong>
-                      <small>{WORKSPACE_SECTIONS[1].description}</small>
                     </span>
                   </button>
                   <div className="project-list">
-                    {projects.length === 0 ? <p className="muted">{ACTIVE_PRODUCT_PROFILE.workspaceSections.project.emptyText}</p> : null}
                     {projects.map((project) => {
                       const isSelectedProject = project.id === selectedProjectId;
                       const isProjectCollapsed = collapsedProjectIds.has(project.id);
@@ -3550,18 +3533,18 @@ function App() {
                             onDrop={(event) => void handleDropOnDirectory(event, { workspaceScope: 'project', projectId: project.id, parentPath: '' })}
                             onContextMenu={(event) => openSidebarContextMenu(event, { workspaceScope: 'project', projectId: project.id })}
                           >
-                            {isSelectedProject ? (
-                              <span className="file-node-chevron">
-                                {isProjectCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-                              </span>
-                            ) : null}
+                            <span className={`file-node-chevron project-root-chevron ${isSelectedProject ? '' : 'placeholder'}`}>
+                              {isSelectedProject
+                                ? isProjectCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />
+                                : <ChevronRight size={10} />}
+                            </span>
                             <span className="node-icon">{showTree ? <FolderOpen size={14} /> : <Folder size={14} />}</span>
                             <span className="node-main">
                               <strong>{project.name}</strong>
                             </span>
                           </button>
                           {showTree ? (
-                            <div className="file-tree nested-tree">
+                            <div className="file-tree nested-tree project-tree">
                               {entriesState === 'error' ? <p className="inline-error">{entriesError}</p> : null}
                               {entriesState === 'loading' ? <p className="muted">正在加载文件...</p> : null}
                               {renderCreateEntryDraft('project', project.id, '', 0)}
@@ -4092,8 +4075,8 @@ function App() {
                   ref={composerRef}
                   className="composer__textarea"
                   value={prompt}
-                  placeholder={activeChatSessionArchived ? '归档会话只读，恢复后可继续对话' : chatScope === 'project' && selectedProjectId ? '描述这一场戏、角色动机、对白要求或图片需求，输入 @ 引用项目文件' : '继续临时会话，可直接对话或生成图片'}
-                  disabled={activeChatSessionArchived}
+                  placeholder={activeChatSessionArchived ? '归档会话只读，恢复后可继续对话' : activeChatSessionQueuedCount >= 3 ? '当前会话已有 3 条消息排队，请稍后再发送' : activeChatSessionRunning ? '当前会话正在运行，继续发送将进入后台队列' : chatScope === 'project' && selectedProjectId ? '描述这一场戏、角色动机、对白要求或图片需求，输入 @ 引用项目文件' : '继续临时会话，可直接对话或生成图片'}
+                  disabled={activeChatSessionArchived || activeChatSessionQueuedCount >= 3}
                   onChange={handleComposerChange}
                   onClick={(event) => updateReferenceMenu(prompt, event.currentTarget.selectionStart ?? prompt.length)}
                   onKeyDown={handleComposerKeyDown}
@@ -4112,10 +4095,10 @@ function App() {
                   <button
                     type="button"
                     className="composer__send"
-                    disabled={activeChatSessionArchived || !prompt.trim()}
+                    disabled={activeChatSessionArchived || activeChatSessionQueuedCount >= 3 || !prompt.trim()}
                     onClick={() => void submitPrompt()}
                     aria-label="发送"
-                    title="发送"
+                    title={activeChatSessionQueuedCount >= 3 ? '当前会话排队已满' : activeChatSessionRunning ? '发送并排队' : '发送'}
                   >
                     <Send size={16} />
                   </button>
@@ -4137,18 +4120,17 @@ function App() {
               <button type="button" onClick={() => setActiveToolPanel(null)}>关闭</button>
             </div>
 
-            {activeToolPanel === 'wechat' ? (
-              <div className="wechat-panel">
-                {wechatState === 'loading' ? <p className="muted">正在读取微信接入状态...</p> : null}
-
-                <WechatPanelBody
-                  wechatStatus={wechatStatus}
-                  wechatSetup={wechatSetup}
-                  wechatState={wechatState}
-                  onCreateSetup={() => void createWechatSetup()}
-                  onDisconnect={async () => { await apiClient.disconnectWechat(); await loadWechatStatus(); }}
-                />
-              </div>
+            {activeToolPanel === 'connectors' ? (
+              <ConnectorsPanel
+                browserStatus={browserStatus}
+                browserLoading={browserLoading}
+                onRefreshBrowser={() => void loadBrowserStatus()}
+                wechatStatus={wechatStatus}
+                wechatSetup={wechatSetup}
+                wechatLoading={wechatState === 'loading'}
+                onCreateWechatSetup={() => void createWechatSetup()}
+                onDisconnectWechat={async () => { await apiClient.disconnectWechat(); await loadWechatStatus(); }}
+              />
             ) : null}
 
             {activeToolPanel === 'git' ? (
@@ -4966,6 +4948,25 @@ function readStoredPanelVisibility(): { sidebarOpen: boolean; editorPanelOpen: b
   }
 }
 
+function initialPanelWidths(): { workspace: number; chat: number } {
+  const visibility = readStoredPanelVisibility();
+  if (typeof window === 'undefined') {
+    return { workspace: DEFAULT_WORKSPACE_PANEL_WIDTH, chat: 520 };
+  }
+
+  const railWidth = 52;
+  const availableWidth = window.innerWidth
+    - railWidth
+    - (visibility.sidebarOpen ? DEFAULT_WORKSPACE_PANEL_WIDTH : 0)
+    - (visibility.editorPanelOpen && visibility.chatPanelOpen ? 6 : 0);
+  const matchedEditorWidth = Math.floor(availableWidth / 2);
+  const maxWidth = Math.max(CHAT_PANEL_MIN_WIDTH, window.innerWidth - 96);
+  return {
+    workspace: DEFAULT_WORKSPACE_PANEL_WIDTH,
+    chat: clamp(matchedEditorWidth, CHAT_PANEL_MIN_WIDTH, maxWidth),
+  };
+}
+
 function writeStoredPanelVisibility(value: { sidebarOpen: boolean; editorPanelOpen: boolean; chatPanelOpen: boolean }): void {
   if (typeof window === 'undefined') return;
 
@@ -5155,11 +5156,23 @@ function runStatusLabel(runState: RunState, run: AgentRun | null): string {
     return '未运行';
   }
 
+  if (runState === 'queued') {
+    return '排队中';
+  }
+
   if (runState === 'running') {
     return '运行中';
   }
 
   return run?.status ?? runState;
+}
+
+function hasRunningAssistantMessage(session: ChatSession): boolean {
+  return session.messages.some((message) => message.role === 'assistant' && message.status === 'running');
+}
+
+function countQueuedAssistantMessages(session: ChatSession): number {
+  return session.messages.filter((message) => message.role === 'assistant' && message.status === 'queued').length;
 }
 
 function eventSummary(event: RunEvent): string {
@@ -5363,59 +5376,6 @@ function readInitialStoredState(): {
     themeMode: readStoredThemeMode(),
   };
 }
-
-const WechatPanelBody = memo(function WechatPanelBody({
-  wechatStatus,
-  wechatSetup,
-  wechatState,
-  onCreateSetup,
-  onDisconnect,
-}: {
-  wechatStatus: WechatStatus | null;
-  wechatSetup: WechatSetupSession | null;
-  wechatState: LoadState;
-  onCreateSetup: () => void;
-  onDisconnect: () => Promise<unknown>;
-}): JSX.Element {
-  const isConnected = wechatStatus?.state === "connected";
-
-  return (
-    <>
-      <p className={`status-pill ${isConnected ? "success" : "idle"}`}>
-        {isConnected ? `已连接：${wechatStatus!.connection?.displayName}` : "未连接"}
-      </p>
-
-      {isConnected ? (
-        <div className="wechat-card">
-          <p className="muted">
-            微信已连接 · 用户: {wechatStatus!.connection?.displayName}
-            <br />
-            连接时间: {wechatStatus!.connection?.connectedAt ? new Date(wechatStatus!.connection!.connectedAt).toLocaleString() : "-"}
-          </p>
-          <button type="button" className="wechat-small-btn" style={{ marginTop: 8 }} onClick={() => void onDisconnect()}>
-            解绑微信
-          </button>
-        </div>
-      ) : (
-        <div className="wechat-card">
-          <button type="button" onClick={() => void onCreateSetup()}>生成连接码</button>
-          {wechatSetup ? (
-            <div className="wechat-qr-wrap">
-              <img
-                src={resolveApiUrl(`/api/wechat/setup-sessions/${encodeURIComponent(wechatSetup.sessionId)}/qr`)}
-                alt="微信扫码连接"
-                width={200}
-                height={200}
-              />
-              <p className="muted" style={{ fontSize: "0.7rem", marginTop: 6 }}>请用微信扫描二维码，等待自动连接</p>
-            </div>
-          ) : null}
-        </div>
-      )}
-      <p className="muted">扫码后自动完成绑定。微信入站消息会自动通过创作助手处理。</p>
-    </>
-  );
-});
 
 const ScheduleOverviewBody = memo(function ScheduleOverviewBody({
   tasks,
@@ -5740,16 +5700,18 @@ function formatScheduleNextRun(task: ScheduledTask): string {
   return `下次 ${formatChatTime(task.nextRunAt)}`;
 }
 
-function toolPanelEyebrow(panel: 'wechat' | 'git' | 'harness' | 'settings' | null): string {
+function toolPanelEyebrow(panel: 'connectors' | 'git' | 'harness' | 'settings' | null): string {
+  if (panel === 'connectors') return 'Connectors';
   if (panel === 'git') return 'Version Control';
   if (panel === 'settings') return 'Runtime';
-  return 'Remote WeChat';
+  return '';
 }
 
-function toolPanelTitle(panel: 'wechat' | 'git' | 'harness' | 'settings' | null): string {
+function toolPanelTitle(panel: 'connectors' | 'git' | 'harness' | 'settings' | null): string {
+  if (panel === 'connectors') return '连接器';
   if (panel === 'git') return '版本管理与安全备份';
   if (panel === 'settings') return '运行设置';
-  return '远程微信接入';
+  return '';
 }
 
 function RuntimeSettingsPanel({
@@ -5789,7 +5751,7 @@ function RuntimeSettingsPanel({
   }, [config]);
 
   const busy = state === 'loading';
-  const canSelectDesktopDataRoot = Boolean(config?.desktop.enabled && window.viworkDesktop?.selectDataRoot);
+  const canSelectDesktopDataRoot = Boolean(config?.desktop.enabled && window.viforgeDesktop?.selectDataRoot);
   const modelInput = (): NonNullable<UpdateRuntimeConfigInput['modelProvider']> => ({
     baseUrl,
     ...(apiKey.trim() ? { apiKey } : {}),
@@ -5820,7 +5782,7 @@ function RuntimeSettingsPanel({
               type="button"
               disabled={busy || !canSelectDesktopDataRoot}
               onClick={async () => {
-                const result = await window.viworkDesktop?.selectDataRoot();
+                const result = await window.viforgeDesktop?.selectDataRoot();
                 if (!result || result.canceled || !result.dataRoot) return;
                 setLocalDataRoot(result.dataRoot);
                 setDataRootRestartRequired(Boolean(result.restartRequired));
@@ -5866,8 +5828,8 @@ function RuntimeSettingsPanel({
       </section>
 
       <section className="runtime-settings-section">
-        <h3>本地优先与浏览器边界</h3>
-        <p className="runtime-settings-status">工作区、聊天会话、Agent 记忆、Harness 产物和日志默认保存在本机数据目录。浏览器工具只连接用户通过 Playwriter 授权的标签页；登录、发布、删除、付款、授权等高风险动作需要用户确认。</p>
+        <h3>本地数据存储</h3>
+        <p className="runtime-settings-status">工作区、聊天会话、Agent 记忆、Harness 产物和日志默认保存在本机数据目录。</p>
       </section>
 
       <div className="runtime-settings-actions">

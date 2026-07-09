@@ -22,7 +22,7 @@ export const DEFAULT_GLOBAL_DIRECTORIES = [
 export const DEFAULT_GLOBAL_FILES: TemplateFile[] = [
   {
     path: 'Agent 配置/config.toml',
-    content: '# viwork agent runtime\n[viwork]\nmax_revision_rounds = 5\n',
+    content: '# viforge agent runtime\n[viforge]\nmax_revision_rounds = 5\n',
   },
   {
     path: '知识库/改编知识/小说改编原则.md',

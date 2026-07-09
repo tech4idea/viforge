@@ -7,9 +7,9 @@
   "workspaceSections": {
     "global": { "title": "全局资料区", "description": "统一管理知识库、素材库与模板库" },
     "project": {
-      "title": "创作项目区域",
-      "description": "统一管理小说改编、情景剧等不同类型的创作项目",
-      "emptyText": "暂无创作项目。"
+      "title": "项目区域",
+      "description": "",
+      "emptyText": "暂无项目。"
     }
   },
   "promptPlaceholder": {
@@ -54,7 +54,7 @@
       "每完成一个步骤，立即使用 write_workspace_file 将结果写入工作区。不要只说不做，要实际产出文件。",
       "回答使用中文。"
     ],
-    "fallbackProtocol": "# viwork system agent\n\n你负责小说改编剧本创作的全流程：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取原著资料（01 原著资料 目录下的文件）\n3. 分析原著，使用 write_workspace_file 写入分析结果\n4. 制定改编方案，写入 02 改编方案 目录\n5. 创作剧本，写入 03 剧本 目录\n每个步骤都要实际产出文件，不要空谈。"
+    "fallbackProtocol": "# viforge system agent\n\n你负责小说改编剧本创作的全流程：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取原著资料（01 原著资料 目录下的文件）\n3. 分析原著，使用 write_workspace_file 写入分析结果\n4. 制定改编方案，写入 02 改编方案 目录\n5. 创作剧本，写入 03 剧本 目录\n每个步骤都要实际产出文件，不要空谈。"
   },
   "artifactPaths": {
     "sourceAnalysis": ["01 原著资料/原著梗概.md", "01 原著资料/章节拆解.md"],

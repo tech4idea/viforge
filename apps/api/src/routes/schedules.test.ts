@@ -15,7 +15,7 @@ import { createScheduleRoutes } from './schedules';
 let root: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-schedules-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-schedules-'));
 });
 
 afterEach(async () => {

@@ -6,7 +6,7 @@ import type { WechatStore } from '../wechat/wechatStore';
 import { createWechatSendContext } from '../wechat/wechatStore';
 import type { ScheduleStore } from './scheduleStore';
 import { computeNextRunAt } from './scheduleTime';
-import type { AgentRun, ChatMessage, ScheduledTask, StreamEvent } from '@viwork/shared';
+import type { AgentRun, ChatMessage, ScheduledTask, StreamEvent } from '@viforge/shared';
 
 export type ScheduleRunNowResult = {
   task: ScheduledTask;
@@ -270,9 +270,10 @@ async function startTaskAsStreamingChatRun(task: ScheduledTask, context: {
     wechat: createWechatSendContext({ wechatStore: context.wechatStore, ilinkClient: context.ilinkClient }),
   });
 
-  await context.chatSessionStore.updateMessage(task.sessionId, assistantMessage.id, { ...assistantMessage, runId: run.id });
+  const assistantStatus = run.status === 'pending' ? 'queued' : 'running';
+  await context.chatSessionStore.updateMessage(task.sessionId, assistantMessage.id, { ...assistantMessage, runId: run.id, status: assistantStatus });
 
-  return { run, userMessage, assistantMessage: { ...assistantMessage, runId: run.id } };
+  return { run, userMessage, assistantMessage: { ...assistantMessage, runId: run.id, status: assistantStatus } };
 }
 
 async function finalizeStreamingTaskRun(task: ScheduledTask, assistantMessageId: string, runId: string, context: {
@@ -311,8 +312,8 @@ async function finalizeStreamingTaskRun(task: ScheduledTask, assistantMessageId:
 }
 
 function resolveScheduleChatModel(): string | undefined {
-  return process.env.VIWORK_WECHAT_CHAT_MODEL
-    || process.env.VIWORK_AIGC_HUB_WECHAT_MODEL
+  return process.env.VIFORGE_WECHAT_CHAT_MODEL
+    || process.env.VIFORGE_AIGC_HUB_WECHAT_MODEL
     || 'minimax/minimax-m2.7';
 }
 

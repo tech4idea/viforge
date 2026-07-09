@@ -59,7 +59,7 @@ app.route('/api', createWechatRoutes(createWechatStore(...)));
 - `02 改编方案`
 - `03 剧本`
 
-创建项目时由 `createDefaultWorkspaceFilesForProfile(profile, topic)` 生成项目文档，并把 `productId` 写入项目 metadata。初始化全局区时，API 会按默认 profile 补齐 `Agent 配置/AGENTS.md` 和 `Agent 配置/skills/*/SKILL.md`。`createWorkspaceStore(root, { productProfile })` 支持测试或部署显式注入默认 profile；未注入时读取 `VIWORK_PRODUCT` 解析默认 profile。正式项目和临时会话都可以在创建时传入 `productId`，后续 `getProjectProductProfile(projectId)` 会根据 metadata 解析 profile，旧项目缺少 `productId` 时回退到当前默认 profile。
+创建项目时由 `createDefaultWorkspaceFilesForProfile(profile, topic)` 生成项目文档，并把 `productId` 写入项目 metadata。初始化全局区时，API 会按默认 profile 补齐 `Agent 配置/AGENTS.md` 和 `Agent 配置/skills/*/SKILL.md`。`createWorkspaceStore(root, { productProfile })` 支持测试或部署显式注入默认 profile；未注入时读取 `VIFORGE_PRODUCT` 解析默认 profile。正式项目和临时会话都可以在创建时传入 `productId`，后续 `getProjectProductProfile(projectId)` 会根据 metadata 解析 profile，旧项目缺少 `productId` 时回退到当前默认 profile。
 
 ## API Client
 

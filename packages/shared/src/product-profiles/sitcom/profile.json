@@ -7,9 +7,9 @@
   "workspaceSections": {
     "global": { "title": "全局资料区", "description": "统一管理知识库、素材库与模板库" },
     "project": {
-      "title": "创作项目区域",
-      "description": "统一管理小说改编、情景剧等不同类型的创作项目",
-      "emptyText": "暂无创作项目。"
+      "title": "项目区域",
+      "description": "",
+      "emptyText": "暂无项目。"
     }
   },
   "promptPlaceholder": {
@@ -49,7 +49,7 @@
       "脑暴不写入正式文件；正式故事必须通过 reviewer-agent 后再使用 write_workspace_file 写入工作区。不要只说不做，要实际产出文件。",
       "回答使用中文。"
     ],
-    "fallbackProtocol": "# viwork system agent\n\n你负责情景剧故事创作链路：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取已有的基本设定、人物、角色关系、场景、风格约束和故事文件\n3. 脑暴请求只委派 brainstorm-agent，不写正式文件\n4. 人物设定不足时委派 character-agent，连续性不足时委派 continuity-agent\n5. 正式故事创作委派 story-agent，并必须委派 reviewer-agent 严格审稿\n6. 故事通过后再使用 write_workspace_file 写入对应目录\n\n关键目录：\n- 01 基本设定：角色、世界观、关系、场景等基本设定\n- 02 故事：整季故事线、单集大纲和情节卡片\n- 03 剧本：通过故事后的具体剧本内容"
+    "fallbackProtocol": "# viforge system agent\n\n你负责情景剧故事创作链路：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取已有的基本设定、人物、角色关系、场景、风格约束和故事文件\n3. 脑暴请求只委派 brainstorm-agent，不写正式文件\n4. 人物设定不足时委派 character-agent，连续性不足时委派 continuity-agent\n5. 正式故事创作委派 story-agent，并必须委派 reviewer-agent 严格审稿\n6. 故事通过后再使用 write_workspace_file 写入对应目录\n\n关键目录：\n- 01 基本设定：角色、世界观、关系、场景等基本设定\n- 02 故事：整季故事线、单集大纲和情节卡片\n- 03 剧本：通过故事后的具体剧本内容"
   },
   "artifactPaths": {
     "plan": ["02 故事/整季故事线.md", "02 故事/01 第一集/单集大纲.md"],

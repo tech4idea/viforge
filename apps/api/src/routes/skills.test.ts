@@ -12,7 +12,7 @@ let root: string;
 let app: Hono;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-skills-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-skills-'));
   app = new Hono().route('/api', createSkillsRoutes(createSkillStore({
     agentConfigSkillsRoot: path.join(root, 'agent-config-skills'),
   })));

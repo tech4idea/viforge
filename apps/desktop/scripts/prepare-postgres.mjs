@@ -12,7 +12,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, '..');
 const hostPlatform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
 const hostArch = process.arch === 'arm64' ? 'arm64' : 'x64';
-const platformArch = process.env.VIWORK_POSTGRES_PLATFORM_ARCH || `${hostPlatform}-${hostArch}`;
+const platformArch = process.env.VIFORGE_POSTGRES_PLATFORM_ARCH || `${hostPlatform}-${hostArch}`;
 const targetRoot = path.join(desktopRoot, 'resources', 'postgres', platformArch);
 const bundledLibRoot = path.join(targetRoot, 'lib');
 const requiredBinaries = platformArch.startsWith('win32-')
@@ -22,14 +22,14 @@ const pgvectorLibraries = platformArch.startsWith('win32-') ? ['vector.dll'] : [
 const libraryRootCandidates = [path.join(targetRoot, 'lib'), path.join(targetRoot, '16', 'lib')];
 const defaultBinaryReleaseRepo = 'YukeonWayne/pg_pgvector_binary';
 
-if (process.env.VIWORK_POSTGRES_BUNDLE_SOURCE) {
+if (process.env.VIFORGE_POSTGRES_BUNDLE_SOURCE) {
   await mkdir(path.dirname(targetRoot), { recursive: true });
   await rm(targetRoot, { recursive: true, force: true });
-  await cp(process.env.VIWORK_POSTGRES_BUNDLE_SOURCE, targetRoot, { recursive: true, dereference: true });
+  await cp(process.env.VIFORGE_POSTGRES_BUNDLE_SOURCE, targetRoot, { recursive: true, dereference: true });
 }
 
-if (process.env.VIWORK_POSTGRES_BUNDLE_LIB_SOURCE) {
-  await copyLinuxRuntimeLibraries(process.env.VIWORK_POSTGRES_BUNDLE_LIB_SOURCE);
+if (process.env.VIFORGE_POSTGRES_BUNDLE_LIB_SOURCE) {
+  await copyLinuxRuntimeLibraries(process.env.VIFORGE_POSTGRES_BUNDLE_LIB_SOURCE);
 }
 
 await ensurePostgresBundleAvailable();
@@ -42,7 +42,7 @@ for (const binary of requiredBinaries) {
   }
 }
 const pgvectorReady = await hasPgvectorExtension();
-if (!pgvectorReady && process.env.VIWORK_REQUIRE_PGVECTOR === '1') {
+if (!pgvectorReady && process.env.VIFORGE_REQUIRE_PGVECTOR === '1') {
   missing.push(`${targetRoot}/{lib,16/lib}/vector extension files`);
   missing.push(path.join(targetRoot, 'share', 'extension', 'vector.control'));
 }
@@ -61,7 +61,7 @@ if (missing.length > 0) {
     `Missing bundled PostgreSQL files for ${platformArch}:`,
     ...missing.map((item) => `  - ${item}`),
     '',
-    'Set VIWORK_POSTGRES_BUNDLE_SOURCE to a PostgreSQL distribution root, or publish a matching zip asset to the configured GitHub release repo before packaging.',
+    'Set VIFORGE_POSTGRES_BUNDLE_SOURCE to a PostgreSQL distribution root, or publish a matching zip asset to the configured GitHub release repo before packaging.',
     `Expected layout: apps/desktop/resources/postgres/${platformArch}/bin/<postgres binaries>`,
   ].join('\n'));
   process.exit(1);
@@ -96,13 +96,13 @@ async function hasPgvectorExtension() {
 
 async function ensurePostgresBundleAvailable() {
   if (await localBundleSatisfiesRequirements()) return;
-  if (process.env.VIWORK_POSTGRES_BUNDLE_SOURCE) return;
+  if (process.env.VIFORGE_POSTGRES_BUNDLE_SOURCE) return;
 
   const releaseAsset = await resolvePostgresReleaseAsset();
   if (!releaseAsset) return;
 
   console.info(`Downloading PostgreSQL bundle for ${platformArch}: ${releaseAsset.name}`);
-  const downloadRoot = await mkdtemp(path.join(tmpdir(), `viwork-postgres-bundle-${platformArch}-`));
+  const downloadRoot = await mkdtemp(path.join(tmpdir(), `viforge-postgres-bundle-${platformArch}-`));
   const archivePath = path.join(downloadRoot, releaseAsset.name);
   const extractRoot = path.join(downloadRoot, 'extract');
   await mkdir(extractRoot, { recursive: true });
@@ -133,26 +133,26 @@ async function hasRequiredBinaries() {
 
 async function localBundleSatisfiesRequirements() {
   if (!(await hasRequiredBinaries())) return false;
-  if (process.env.VIWORK_REQUIRE_PGVECTOR !== '1') return true;
+  if (process.env.VIFORGE_REQUIRE_PGVECTOR !== '1') return true;
   return hasPgvectorExtension();
 }
 
 async function resolvePostgresReleaseAsset() {
-  if (process.env.VIWORK_POSTGRES_BUNDLE_ASSET_URL) {
+  if (process.env.VIFORGE_POSTGRES_BUNDLE_ASSET_URL) {
     return {
-      name: process.env.VIWORK_POSTGRES_BUNDLE_ASSET_NAME || path.basename(new URL(process.env.VIWORK_POSTGRES_BUNDLE_ASSET_URL).pathname),
-      downloadUrl: process.env.VIWORK_POSTGRES_BUNDLE_ASSET_URL,
-      sha256: process.env.VIWORK_POSTGRES_BUNDLE_SHA256,
+      name: process.env.VIFORGE_POSTGRES_BUNDLE_ASSET_NAME || path.basename(new URL(process.env.VIFORGE_POSTGRES_BUNDLE_ASSET_URL).pathname),
+      downloadUrl: process.env.VIFORGE_POSTGRES_BUNDLE_ASSET_URL,
+      sha256: process.env.VIFORGE_POSTGRES_BUNDLE_SHA256,
     };
   }
 
-  const repo = process.env.VIWORK_POSTGRES_BUNDLE_RELEASE_REPO || defaultBinaryReleaseRepo;
-  const releaseTag = process.env.VIWORK_POSTGRES_BUNDLE_RELEASE_TAG;
+  const repo = process.env.VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO || defaultBinaryReleaseRepo;
+  const releaseTag = process.env.VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG;
   const releases = releaseTag
     ? [await githubJson(`https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(releaseTag)}`)]
     : await githubJson(`https://api.github.com/repos/${repo}/releases?per_page=30`);
   const releaseList = Array.isArray(releases) ? releases : [releases];
-  const requestedAssetName = process.env.VIWORK_POSTGRES_BUNDLE_ASSET_NAME;
+  const requestedAssetName = process.env.VIFORGE_POSTGRES_BUNDLE_ASSET_NAME;
 
   for (const release of releaseList) {
     const assets = Array.isArray(release?.assets) ? release.assets : [];
@@ -175,7 +175,7 @@ async function resolvePostgresReleaseAsset() {
 }
 
 function parseReleaseAssetSha256(digest) {
-  if (process.env.VIWORK_POSTGRES_BUNDLE_SHA256) return process.env.VIWORK_POSTGRES_BUNDLE_SHA256;
+  if (process.env.VIFORGE_POSTGRES_BUNDLE_SHA256) return process.env.VIFORGE_POSTGRES_BUNDLE_SHA256;
   if (typeof digest === 'string' && digest.startsWith('sha256:')) return digest.slice('sha256:'.length);
   return undefined;
 }
@@ -183,7 +183,7 @@ function parseReleaseAssetSha256(digest) {
 async function githubJson(url) {
   const text = await httpGetText(url, {
     accept: 'application/vnd.github+json',
-    authorization: process.env.VIWORK_POSTGRES_BUNDLE_GITHUB_TOKEN || process.env.GITHUB_TOKEN,
+    authorization: process.env.VIFORGE_POSTGRES_BUNDLE_GITHUB_TOKEN || process.env.GITHUB_TOKEN,
   });
   return JSON.parse(text);
 }
@@ -218,7 +218,7 @@ function downloadFile(url, destination, options = {}) {
     const request = https.get(url, {
       headers: requestHeaders({
         accept: options.githubAssetApi ? 'application/octet-stream' : undefined,
-        authorization: process.env.VIWORK_POSTGRES_BUNDLE_GITHUB_TOKEN || process.env.GITHUB_TOKEN,
+        authorization: process.env.VIFORGE_POSTGRES_BUNDLE_GITHUB_TOKEN || process.env.GITHUB_TOKEN,
       }),
     }, (response) => {
       if (isRedirect(response.statusCode) && response.headers.location) {
@@ -243,7 +243,7 @@ function downloadFile(url, destination, options = {}) {
 
 function requestHeaders(options = {}) {
   return {
-    'user-agent': 'viwork-desktop-packager',
+    'user-agent': 'viforge-desktop-packager',
     ...(options.accept ? { accept: options.accept } : {}),
     ...(options.authorization ? { authorization: `Bearer ${options.authorization}` } : {}),
   };
@@ -438,14 +438,14 @@ function runLdd(binaryPath) {
 }
 
 async function smokeTestLinuxInitdb() {
-  const smokeRoot = path.join(tmpdir(), `viwork-postgres-smoke-${process.pid}-${Date.now()}`);
+  const smokeRoot = path.join(tmpdir(), `viforge-postgres-smoke-${process.pid}-${Date.now()}`);
   const dataDir = path.join(smokeRoot, 'data');
   await mkdir(dataDir, { recursive: true });
   try {
     await runPostgresCommand(path.join(targetRoot, 'bin', 'initdb'), [
       '-D', dataDir,
       '-L', path.join(targetRoot, 'share'),
-      '-U', 'viwork_smoke',
+      '-U', 'viforge_smoke',
       '--auth=trust',
       '--encoding=UTF8',
     ]);

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { WechatSetupSession, WechatStatus } from '@viwork/shared';
+import type { WechatSetupSession, WechatStatus } from '@viforge/shared';
 import type { PendingSessionAction, WechatRouteState } from './wechatTypes';
 
 export type { PendingSessionAction, PendingSessionOption, WechatRouteState } from './wechatTypes';
@@ -205,7 +205,7 @@ export function createWechatStore(statePath: string): WechatStore {
       const session: WechatSetupSession = {
         sessionId,
         status: 'qr_ready',
-        qrUrl: s.ilink.qrUrl ?? `viwork-wechat://pair/${sessionId}`,
+        qrUrl: s.ilink.qrUrl ?? `viforge-wechat://pair/${sessionId}`,
         expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       };
       await writeState({ ...s, setupSession: session });

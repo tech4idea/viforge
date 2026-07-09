@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { PRODUCT_PROFILES } from '@viwork/shared';
-import type { AgentLayerConfig, AgentSpec, AgentSpecReleaseAuditCategory, AgentSpecReleaseForceReason, AgentSpecReleaseGate, ChatMessage, ChatSession, EvalRun, HarnessSummary, HarnessVersionDiff, HumanReviewRubric, MemoryPolicy, Project, PromptBlock, RetrievalPolicy, RunInputSnapshot, WorkspaceManifest } from '@viwork/shared';
+import { PRODUCT_PROFILES } from '@viforge/shared';
+import type { AgentLayerConfig, AgentSpec, AgentSpecReleaseAuditCategory, AgentSpecReleaseForceReason, AgentSpecReleaseGate, ChatMessage, ChatSession, EvalRun, HarnessSummary, HarnessVersionDiff, HumanReviewRubric, MemoryPolicy, Project, PromptBlock, RetrievalPolicy, RunInputSnapshot, WorkspaceManifest } from '@viforge/shared';
 
 import type { ApiClient } from '../api';
 
@@ -14,7 +14,7 @@ type FixtureAssertionKind = 'changed-file' | 'heading' | 'forbidden-write' | 'ma
 type PromptBlockGroupKey = 'system' | 'agent' | 'quality' | 'tool' | 'other';
 type HarnessTab = 'config' | 'fixtures' | 'eval' | 'review' | 'release';
 
-const HARNESS_VIEW_STATE_KEY = 'viwork:harness:view-state:v1';
+const HARNESS_VIEW_STATE_KEY = 'viforge:harness:view-state:v1';
 
 type HarnessViewState = Partial<{
   activeHarnessTab: HarnessTab;
@@ -2590,9 +2590,9 @@ function defaultMemoryPolicy(productId: string) {
     productId,
     status: 'draft' as const,
     namespaces: {
-      session: ['viwork', productId, 'sessions', '{sessionId}', 'memories'],
-      workspace: ['viwork', productId, 'workspaces', '{projectId}', 'memories'],
-      global: ['viwork', productId, 'users', '{userId}', 'global', 'memories'],
+      session: ['viforge', productId, 'sessions', '{sessionId}', 'memories'],
+      workspace: ['viforge', productId, 'workspaces', '{projectId}', 'memories'],
+      global: ['viforge', productId, 'users', '{userId}', 'global', 'memories'],
     },
     recallOrder: ['session', 'workspace', 'global'] as Array<'session' | 'workspace' | 'global'>,
     writeRules: {

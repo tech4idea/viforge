@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { AigcHubModelListResponse, AigcHubModelMetadata } from '@viwork/shared';
+import type { AigcHubModelListResponse, AigcHubModelMetadata } from '@viforge/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL } from '../env';
@@ -11,10 +11,10 @@ export function createAigcHubRoutes(): Hono {
   const routes = new Hono();
 
   routes.get('/aigc-hub/models', async (context) => {
-    const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-    const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+    const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
+    const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
     if (!gatewayBaseUrl || !gatewayApiKey) {
-      return context.json({ configured: false, models: [], error: '未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY。' } satisfies AigcHubModelListResponse);
+      return context.json({ configured: false, models: [], error: '未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY。' } satisfies AigcHubModelListResponse);
     }
 
     try {

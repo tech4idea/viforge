@@ -2,7 +2,7 @@ import { stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 
-import type { GitLogEntry, GitSyncResult, ProjectGitStatus } from '@viwork/shared';
+import type { GitLogEntry, GitSyncResult, ProjectGitStatus } from '@viforge/shared';
 
 export type GitService = {
   initProjectRepo(projectRoot: string, branch: string): Promise<void>;
@@ -43,8 +43,8 @@ export function createGitService(): GitService {
 
   async function ensureGitIdentity(root: string): Promise<void> {
     const repo = git(root);
-    await repo.addConfig('user.name', 'viwork');
-    await repo.addConfig('user.email', 'viwork@local');
+    await repo.addConfig('user.name', 'viforge');
+    await repo.addConfig('user.email', 'viforge@local');
   }
 
   return {

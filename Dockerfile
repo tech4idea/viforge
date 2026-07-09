@@ -27,20 +27,20 @@ FROM source AS api-runtime
 ENV NODE_ENV=production
 ENV PORT=3001
 
-RUN apk add --no-cache git && git config --global user.name viwork && git config --global user.email viwork@local
+RUN apk add --no-cache git && git config --global user.name viforge && git config --global user.email viforge@local
 
 EXPOSE 3001
 
-CMD ["pnpm", "--filter", "@viwork/api", "start"]
+CMD ["pnpm", "--filter", "@viforge/api", "start"]
 
 FROM source AS web-build
 
-ARG VIWORK_PRODUCT=novel-adaptation
+ARG VIFORGE_PRODUCT=novel-adaptation
 ARG VITE_API_BASE_URL=
-ENV VIWORK_PRODUCT=$VIWORK_PRODUCT
+ENV VIFORGE_PRODUCT=$VIFORGE_PRODUCT
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-RUN pnpm --filter @viwork/web build
+RUN pnpm --filter @viforge/web build
 
 FROM nginx:1.27-alpine AS web-runtime
 

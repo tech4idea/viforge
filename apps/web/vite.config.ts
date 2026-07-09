@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react()],
   define: {
-    'import.meta.env.VIWORK_PRODUCT': JSON.stringify(process.env.VIWORK_PRODUCT ?? ''),
+    'import.meta.env.VIFORGE_PRODUCT': JSON.stringify(process.env.VIFORGE_PRODUCT ?? ''),
   },
   build: {
     chunkSizeWarningLimit: 3000,

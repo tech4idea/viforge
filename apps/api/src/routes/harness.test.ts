@@ -21,11 +21,11 @@ let originalAllowInMemory: string | undefined;
 
 beforeEach(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
-  originalAllowInMemory = process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY;
+  originalAllowInMemory = process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY;
   delete process.env.DATABASE_URL;
-  process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY = '1';
+  process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY = '1';
 
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-harness-routes-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-harness-routes-'));
   store = createWorkspaceStore(path.join(root, 'workspaces'));
   harnessStore = createHarnessStore(path.join(root, 'harness'), store);
   app = new Hono()
@@ -35,7 +35,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
-  restoreEnv('VIWORK_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
+  restoreEnv('VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -685,7 +685,7 @@ describe('harness routes', () => {
   it('runs the LangGraph eval executor against an isolated fixture workspace', async () => {
     const memoryRecord = {
       id: 'mem-fixture-owner-group',
-      namespace: ['viwork', 'sitcom', 'workspaces', 'fixture', 'memories'],
+      namespace: ['viforge', 'sitcom', 'workspaces', 'fixture', 'memories'],
       scope: 'workspace' as const,
       memoryType: 'decision' as const,
       authority: 'user_explicit' as const,
@@ -1371,9 +1371,9 @@ describe('harness routes', () => {
         productId: 'sitcom',
         status: 'active',
         namespaces: {
-          session: ['viwork', 'sitcom', 'sessions', '{sessionId}', 'memories'],
-          workspace: ['viwork', 'sitcom', 'workspaces', '{projectId}', 'memories'],
-          global: ['viwork', 'sitcom', 'users', '{userId}', 'global', 'memories'],
+          session: ['viforge', 'sitcom', 'sessions', '{sessionId}', 'memories'],
+          workspace: ['viforge', 'sitcom', 'workspaces', '{projectId}', 'memories'],
+          global: ['viforge', 'sitcom', 'users', '{userId}', 'global', 'memories'],
         },
         recallOrder: ['session', 'workspace', 'global'],
         writeRules: { user_explicit: 'allow', agent_inferred: 'confirm_for_long_term' },

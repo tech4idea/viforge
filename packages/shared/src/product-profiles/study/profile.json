@@ -7,9 +7,9 @@
   "workspaceSections": {
     "global": { "title": "全局学习资料区", "description": "统一管理学习方法、资料索引与知识点库" },
     "project": {
-      "title": "学习项目区域",
-      "description": "统一管理日常学习、知识点整理和阶段复盘项目",
-      "emptyText": "暂无学习项目。"
+      "title": "项目区域",
+      "description": "",
+      "emptyText": "暂无项目。"
     }
   },
   "promptPlaceholder": {
@@ -54,7 +54,7 @@
       "轻量问答可以直接回答；需要沉淀的学习大纲、知识点卡片、资料整理和复盘记录要写入工作区。",
       "回答使用中文。"
     ],
-    "fallbackProtocol": "# viwork system agent\n\n你负责日常学习链路：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取已有学习目标、问题清单、学习大纲、知识点索引和笔记\n3. 学习路径和阶段计划委派 outline-agent\n4. 知识点检索和资料筛选委派 knowledge-search-agent\n5. 知识点卡片、资料整理和索引维护委派 knowledge-organizer-agent\n6. 复盘、检查遗漏和下一步建议委派 reviewer-agent\n7. 需要沉淀的结果使用 write_workspace_file 写入对应目录\n\n关键目录：\n- 01 学习目标：学习主题、目标、问题清单\n- 02 学习大纲：总览和阶段计划\n- 03 知识点：知识点索引、待学习和已整理卡片\n- 04 资料检索：搜索记录和资料整理\n- 05 学习笔记：日常笔记\n- 06 复盘与输出：复盘记录和输出作品"
+    "fallbackProtocol": "# viforge system agent\n\n你负责日常学习链路：\n1. 先使用 list_workspace_entries 工具了解项目文件结构\n2. 读取已有学习目标、问题清单、学习大纲、知识点索引和笔记\n3. 学习路径和阶段计划委派 outline-agent\n4. 知识点检索和资料筛选委派 knowledge-search-agent\n5. 知识点卡片、资料整理和索引维护委派 knowledge-organizer-agent\n6. 复盘、检查遗漏和下一步建议委派 reviewer-agent\n7. 需要沉淀的结果使用 write_workspace_file 写入对应目录\n\n关键目录：\n- 01 学习目标：学习主题、目标、问题清单\n- 02 学习大纲：总览和阶段计划\n- 03 知识点：知识点索引、待学习和已整理卡片\n- 04 资料检索：搜索记录和资料整理\n- 05 学习笔记：日常笔记\n- 06 复盘与输出：复盘记录和输出作品"
   },
   "artifactPaths": {
     "plan": ["02 学习大纲/总览.md", "02 学习大纲/阶段计划.md"],

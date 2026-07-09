@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { RuntimeConfig, UpdateRuntimeConfigInput } from '@viwork/shared';
+import type { RuntimeConfig, UpdateRuntimeConfigInput } from '@viforge/shared';
 
 import {
   AIGC_HUB_API_KEY,
@@ -73,7 +73,7 @@ export function createRuntimeConfigStore(configPath = CONFIG_PATH): RuntimeConfi
         },
       };
 
-      if (process.env.VIWORK_DESKTOP === '1') {
+      if (process.env.VIFORGE_DESKTOP === '1') {
         next.database = { mode: 'embedded-postgres', vectorStore: 'pgvector' };
       } else if (next.database?.mode && next.database.mode !== 'external-postgres') {
         next.database.connectionString = '';
@@ -95,15 +95,15 @@ export async function loadRuntimeConfigIntoEnv(): Promise<RuntimeConfig> {
 
 export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
   const model = config.modelProvider;
-  if (model?.baseUrl !== undefined) process.env.VIWORK_AIGC_HUB_BASE_URL = model.baseUrl;
-  if (model?.apiKey !== undefined) process.env.VIWORK_AIGC_HUB_API_KEY = model.apiKey;
-  if (model?.chatModel !== undefined) process.env.VIWORK_AIGC_HUB_CHAT_MODEL = model.chatModel;
-  if (model?.imageModel !== undefined) process.env.VIWORK_AIGC_HUB_IMAGE_MODEL = model.imageModel;
-  if (model?.embeddingModel !== undefined) process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL = model.embeddingModel;
-  if (model?.embeddingDims !== undefined) process.env.VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS = String(model.embeddingDims);
+  if (model?.baseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_BASE_URL = model.baseUrl;
+  if (model?.apiKey !== undefined) process.env.VIFORGE_AIGC_HUB_API_KEY = model.apiKey;
+  if (model?.chatModel !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_MODEL = model.chatModel;
+  if (model?.imageModel !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL = model.imageModel;
+  if (model?.embeddingModel !== undefined) process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL = model.embeddingModel;
+  if (model?.embeddingDims !== undefined) process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS = String(model.embeddingDims);
 
   const database = effectiveDatabaseConfig(config.database);
-  if (database?.mode !== undefined) process.env.VIWORK_DATABASE_MODE = database.mode;
+  if (database?.mode !== undefined) process.env.VIFORGE_DATABASE_MODE = database.mode;
   if (database?.mode === 'external-postgres') {
     if (database.connectionString) {
       process.env.DATABASE_URL = database.connectionString;
@@ -111,7 +111,7 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
       delete process.env.DATABASE_URL;
     }
   } else if (database?.mode === 'embedded-postgres') {
-    if (process.env.VIWORK_DESKTOP === '1') {
+    if (process.env.VIFORGE_DESKTOP === '1') {
       delete process.env.DATABASE_URL;
     } else if (!process.env.DATABASE_URL) {
       delete process.env.DATABASE_URL;
@@ -124,23 +124,23 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
 function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): RuntimeConfig {
   const model = config.modelProvider ?? {};
   const database = effectiveDatabaseConfig(config.database);
-  const databaseMode = database.mode ?? process.env.VIWORK_DATABASE_MODE as RuntimeConfig['database']['mode'] | undefined ?? (process.env.VIWORK_DESKTOP === '1' ? 'embedded-postgres' : 'external-postgres');
+  const databaseMode = database.mode ?? process.env.VIFORGE_DATABASE_MODE as RuntimeConfig['database']['mode'] | undefined ?? (process.env.VIFORGE_DESKTOP === '1' ? 'embedded-postgres' : 'external-postgres');
   const configuredConnectionString = databaseMode === 'external-postgres'
     ? database.connectionString ?? process.env.DATABASE_URL ?? DATABASE_URL
     : databaseMode === 'embedded-postgres'
-      ? process.env.VIWORK_DESKTOP === '1' ? process.env.DATABASE_URL ?? DATABASE_URL : ''
+      ? process.env.VIFORGE_DESKTOP === '1' ? process.env.DATABASE_URL ?? DATABASE_URL : ''
       : database.connectionString ?? '';
   const connectionStringConfigured = databaseMode === 'embedded-postgres' || Boolean(configuredConnectionString);
   const displayConnectionString = configuredConnectionString || defaultConnectionStringForDisplay(databaseMode);
 
   return {
     modelProvider: {
-      baseUrl: model.baseUrl || process.env.VIWORK_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL,
-      apiKeyConfigured: Boolean(model.apiKey ?? process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY),
-      chatModel: model.chatModel || process.env.VIWORK_AIGC_HUB_CHAT_MODEL || AIGC_HUB_CHAT_MODEL || DEFAULT_CHAT_MODEL,
-      imageModel: model.imageModel ?? process.env.VIWORK_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL,
-      embeddingModel: model.embeddingModel ?? process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? EMBEDDING_MODEL,
-      embeddingDims: model.embeddingDims ?? Number(process.env.VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
+      baseUrl: model.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL,
+      apiKeyConfigured: Boolean(model.apiKey ?? process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY),
+      chatModel: model.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || AIGC_HUB_CHAT_MODEL || DEFAULT_CHAT_MODEL,
+      imageModel: model.imageModel ?? process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL,
+      embeddingModel: model.embeddingModel ?? process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? EMBEDDING_MODEL,
+      embeddingDims: model.embeddingDims ?? Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
     },
     database: {
       mode: databaseMode,
@@ -152,23 +152,23 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
       statusMessage: databaseStatusMessage(databaseMode, configuredConnectionString),
     },
     desktop: {
-      enabled: process.env.VIWORK_DESKTOP === '1',
-      dataRoot: process.env.VIWORK_DESKTOP_DATA_ROOT,
+      enabled: process.env.VIFORGE_DESKTOP === '1',
+      dataRoot: process.env.VIFORGE_DESKTOP_DATA_ROOT,
     },
     restartRequired,
   };
 }
 
 function effectiveDatabaseConfig(database: StoredRuntimeConfig['database']): NonNullable<StoredRuntimeConfig['database']> {
-  if (process.env.VIWORK_DESKTOP === '1') {
+  if (process.env.VIFORGE_DESKTOP === '1') {
     return { mode: 'embedded-postgres', vectorStore: 'pgvector' };
   }
   return database ?? {};
 }
 
 function databaseStatusMessage(mode: RuntimeConfig['database']['mode'], connectionString: string): string {
-  if (mode === 'embedded-postgres' && process.env.VIWORK_EMBEDDED_POSTGRES_STATUS === 'error') {
-    return process.env.VIWORK_EMBEDDED_POSTGRES_ERROR || '内置 PostgreSQL 启动失败，请检查数据路径和日志。';
+  if (mode === 'embedded-postgres' && process.env.VIFORGE_EMBEDDED_POSTGRES_STATUS === 'error') {
+    return process.env.VIFORGE_EMBEDDED_POSTGRES_ERROR || '内置 PostgreSQL 启动失败，请检查数据路径和日志。';
   }
   if (mode === 'embedded-postgres' && connectionString) return '内置 PostgreSQL 已启动，LangGraph memory 使用本地 pgvector。';
   if (mode === 'embedded-postgres') return '桌面模式启动时会拉起内置 PostgreSQL，LangGraph memory 使用本地 pgvector。';
@@ -179,13 +179,13 @@ function databaseStatusMessage(mode: RuntimeConfig['database']['mode'], connecti
 
 function defaultConnectionStringForDisplay(mode: RuntimeConfig['database']['mode']): string {
   if (mode !== 'embedded-postgres') return '';
-  const port = Number(process.env.VIWORK_EMBEDDED_POSTGRES_PORT ?? DEFAULT_DATABASE_PORT);
-  return `postgresql://127.0.0.1:${port}/viwork`;
+  const port = Number(process.env.VIFORGE_EMBEDDED_POSTGRES_PORT ?? DEFAULT_DATABASE_PORT);
+  return `postgresql://127.0.0.1:${port}/viforge`;
 }
 
 function embeddedDatabaseStatus(): RuntimeConfig['database']['status'] {
-  if (process.env.VIWORK_EMBEDDED_POSTGRES_STATUS === 'error') return 'error';
-  return process.env.DATABASE_URL || process.env.VIWORK_DESKTOP !== '1' ? 'ready' : 'starting';
+  if (process.env.VIFORGE_EMBEDDED_POSTGRES_STATUS === 'error') return 'error';
+  return process.env.DATABASE_URL || process.env.VIFORGE_DESKTOP !== '1' ? 'ready' : 'starting';
 }
 
 function cleanModelProviderInput(input: UpdateRuntimeConfigInput['modelProvider']): StoredRuntimeConfig['modelProvider'] {

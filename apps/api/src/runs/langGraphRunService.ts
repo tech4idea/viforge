@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viwork/shared';
+import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viforge/shared';
 import { z } from 'zod';
 
 import { LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
@@ -464,7 +464,7 @@ function createSpecialistDelegationTool({
   return createTool({
     id: 'delegate_to_specialist_agent',
     description: [
-      '将明确需要专业创作能力的子任务交给一个 viwork specialist agent。',
+      '将明确需要专业创作能力的子任务交给一个 viforge specialist agent。',
       '普通问候、解释、简单修改、文件读写和一般对话不要使用此工具，由主 agent 直接完成。',
       '只有在任务明确属于脑暴、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作、学习大纲、知识点搜索、知识点整理或审稿复盘时才委派。',
     ].join('\n'),
@@ -679,13 +679,13 @@ async function runAgentStream(
   signal?: AbortSignal,
 ): Promise<string> {
   return withPhoenixSpan(`langgraph.${agent.id ?? 'agent'}.stream`, {
-    'viwork.run_id': runId,
-    'viwork.trace_id': input.traceId,
-    'viwork.project_id': input.projectId,
-    'viwork.session_id': input.sessionId,
-    'viwork.product_id': productId,
-    'viwork.source': input.source ?? 'web',
-    'viwork.agent_id': agent.id ?? 'agent',
+    'viforge.run_id': runId,
+    'viforge.trace_id': input.traceId,
+    'viforge.project_id': input.projectId,
+    'viforge.session_id': input.sessionId,
+    'viforge.product_id': productId,
+    'viforge.source': input.source ?? 'web',
+    'viforge.agent_id': agent.id ?? 'agent',
     'langgraph.thread_id': memoryThread,
     'input.value': JSON.stringify(textLogValue(prompt)),
   }, async (span) => {
@@ -714,13 +714,13 @@ async function runAgentGenerate(
   maxSteps: number,
 ): Promise<{ text: string }> {
   return withPhoenixSpan(`langgraph.${agent.id ?? 'agent'}.generate`, {
-    'viwork.run_id': runId,
-    'viwork.trace_id': input.traceId,
-    'viwork.project_id': input.projectId,
-    'viwork.session_id': input.sessionId,
-    'viwork.product_id': productId,
-    'viwork.source': input.source ?? 'web',
-    'viwork.agent_id': agent.id ?? 'agent',
+    'viforge.run_id': runId,
+    'viforge.trace_id': input.traceId,
+    'viforge.project_id': input.projectId,
+    'viforge.session_id': input.sessionId,
+    'viforge.product_id': productId,
+    'viforge.source': input.source ?? 'web',
+    'viforge.agent_id': agent.id ?? 'agent',
     'langgraph.thread_id': memoryThread,
     'input.value': JSON.stringify(textLogValue(prompt)),
   }, async (span) => {
@@ -951,7 +951,7 @@ function buildSystemInstructions(productProfile: ProductProfile, layerConfig?: N
   const protocol = readSystemAgentProtocol(productProfile);
   return [
     ...productProfile.mastra.systemIntro,
-    '## viwork 多 agent 工作协议',
+    '## viforge 多 agent 工作协议',
     protocol,
   ].join('\n\n');
 }
@@ -982,14 +982,14 @@ async function detectChoiceRequest(
     return;
   }
 
-  const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  const apiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   if (!apiKey) {
     appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.unconfigured', runId });
     return;
   }
 
   try {
-    const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+    const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
     const model = 'minimax/minimax-m2.7';
     const headers = buildAigcHubHeaders({ apiKey, contentType: 'application/json' });
 

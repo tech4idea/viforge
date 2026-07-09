@@ -26,7 +26,7 @@ ViForge P0 的发布目标是：用户可以通过开源仓库理解产品定位
 - 是否存在高风险商标冲突。
 - GitHub 仓库名、npm 包名、安装包应用名、窗口标题、桌面快捷方式名称是否一致。
 - README 首屏是否能讲清楚 ViForge 不是单一小说/剧本工具，也不是通用 coding desktop 的复制品。
-- 仓库内部是否继续允许 `viwork` 作为工程代号；若允许，需要明确用户可见命名逐步收敛到 ViForge。
+- 仓库内部是否继续允许 `viforge` 作为工程代号；若允许，需要明确用户可见命名逐步收敛到 ViForge。
 
 P0 建议口径：
 
@@ -149,11 +149,11 @@ README 首屏建议包含：
 P0 发布前至少运行：
 
 ```bash
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
-pnpm --filter @viwork/web build
-pnpm --filter @viwork/api test
-pnpm --filter @viwork/web test
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
+pnpm --filter @viforge/web build
+pnpm --filter @viforge/api test
+pnpm --filter @viforge/web test
 pnpm desktop:pack
 ```
 
@@ -200,7 +200,7 @@ pnpm desktop:dist
 - 桌面打包配置会把 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 放入 release resources。
 - Windows `win32-x64` PostgreSQL bundle 检查通过，并确认包含 pgvector `vector.control` 与 `vector.dll`。
 - Linux 桌面目录包可以构建，且 release resources 中包含 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md`。
-- `pnpm --filter @viwork/api typecheck`、`pnpm --filter @viwork/web typecheck`、`pnpm --filter @viwork/desktop build`、`pnpm --filter @viwork/api test`、`pnpm --filter @viwork/web test` 和 `pnpm --filter @viwork/web build` 已在 P0 分支通过。
+- `pnpm --filter @viforge/api typecheck`、`pnpm --filter @viforge/web typecheck`、`pnpm --filter @viforge/desktop build`、`pnpm --filter @viforge/api test`、`pnpm --filter @viforge/web test` 和 `pnpm --filter @viforge/web build` 已在 P0 分支通过。
 - `pnpm desktop:pack` 已在 Linux/WSL 环境通过，输出 `release/desktop/linux-unpacked`，并确认 release resources 中包含 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md`。
 - `pnpm licenses:list` 可生成依赖 license 摘要；输出中包含 `AFL-2.1 OR BSD-3-Clause`、`MPL-2.0 OR Apache-2.0`、`Python-2.0`、`WTFPL`、`WTFPL OR ISC` 等需要发布前人工确认的条目。
 

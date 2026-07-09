@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { computeNextRunAt } from './scheduleTime';
-import type { ScheduledTask } from '@viwork/shared';
+import type { ScheduledTask } from '@viforge/shared';
 
 describe('scheduleTime', () => {
   it('computes next run time for recurring schedules without parsing user text', () => {

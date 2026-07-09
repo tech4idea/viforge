@@ -2,13 +2,13 @@ import {
   Diamond,
   FileText,
   GitBranch,
+  Globe,
   LayoutPanelLeft,
   MessageCircle,
   Clock,
   Moon,
   Palette,
   Settings,
-  Smartphone,
   Sun,
 } from './icons';
 
@@ -29,7 +29,7 @@ export function ActivityRail({
   onToggleEditor,
   onToggleChat,
   onToggleTheme,
-  onOpenWechat,
+  onOpenConnectors,
   onOpenGitSync,
   onOpenHarness,
   onOpenSchedules,
@@ -43,7 +43,7 @@ export function ActivityRail({
   onToggleEditor: () => void;
   onToggleChat: () => void;
   onToggleTheme: () => void;
-  onOpenWechat: () => void;
+  onOpenConnectors: () => void;
   onOpenGitSync: () => void;
   onOpenHarness: () => void;
   onOpenSchedules: () => void;
@@ -100,11 +100,11 @@ export function ActivityRail({
       <button
         type="button"
         className="rail-button"
-        onClick={onOpenWechat}
-        aria-label="微信接入"
-        title="微信接入"
+        onClick={onOpenConnectors}
+        aria-label="连接器"
+        title="连接器"
       >
-        <Smartphone size={20} />
+        <Globe size={20} />
       </button>
 
       <button

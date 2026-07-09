@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import type { ChatMessage } from '@viwork/shared';
+import type { ChatMessage } from '@viforge/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createChatSessionStore } from './chatSessionStore';
@@ -10,7 +10,7 @@ import { createChatSessionStore } from './chatSessionStore';
 let root: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-chat-store-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-chat-store-'));
 });
 
 afterEach(async () => {

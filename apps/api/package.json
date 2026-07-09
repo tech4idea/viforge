@@ -1,5 +1,5 @@
 {
-  "name": "@viwork/api",
+  "name": "@viforge/api",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -29,7 +29,7 @@
     "@opentelemetry/sdk-trace-base": "^2.7.1",
     "@opentelemetry/sdk-trace-node": "^2.7.1",
     "@opentelemetry/semantic-conventions": "^1.41.1",
-    "@viwork/shared": "workspace:*",
+    "@viforge/shared": "workspace:*",
     "hono": "^4.6.15",
     "pg": "^8.16.3",
     "playwriter": "^0.4.0",

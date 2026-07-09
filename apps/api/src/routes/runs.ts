@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import type { RunEvent, StreamEvent } from '@viwork/shared';
+import type { RunEvent, StreamEvent } from '@viforge/shared';
 
 import { appendJsonLog } from '../logger';
 import { traceIdFromRequest } from '../aigcHubHeaders';

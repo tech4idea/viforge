@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TheaterSkill } from '@viwork/shared';
+import type { TheaterSkill } from '@viforge/shared';
 
 const DEFAULT_AGENT_SKILL_NAMES = new Set([
   'brainstorm-agent',

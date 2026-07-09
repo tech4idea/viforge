@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import type { ChatMessage } from '@viwork/shared';
+import type { ChatMessage } from '@viforge/shared';
 
 import type { ChatSessionStore } from '../chat/chatSessionStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -41,7 +41,7 @@ const chatMessageSchema = z.object({
     createdAt: z.string().min(1),
   })).default([]),
   streamEvents: z.array(z.unknown()).default([]),
-  status: z.enum(['idle', 'running', 'success', 'error']).optional(),
+  status: z.enum(['idle', 'queued', 'running', 'success', 'error']).optional(),
 });
 
 const updateSessionSchema = z.object({

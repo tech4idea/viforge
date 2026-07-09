@@ -14,7 +14,7 @@ let root: string;
 let app: Hono;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-chat-sessions-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-chat-sessions-'));
   const workspaceStore = createWorkspaceStore(path.join(root, 'workspaces'));
   app = new Hono()
     .route('/api', createProjectsRoutes(workspaceStore))

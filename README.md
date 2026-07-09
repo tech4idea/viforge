@@ -4,8 +4,6 @@ ViForge is a local-first AI collaboration workbench for creative and knowledge w
 
 ViForge is not a single-purpose scriptwriting tool, and it is not another generic coding desktop shell. The product direction is human-in-the-loop creative collaboration: people provide taste, intent, direction, constraints, and review; agents help read, organize, generate, revise, inspect, and preserve reusable working methods.
 
-The repository is still named `viwork` in several internal package names and environment variables. User-facing product naming is moving to ViForge.
-
 ## Positioning
 
 ViForge focuses on:
@@ -61,7 +59,7 @@ Build an installer:
 pnpm desktop:dist
 ```
 
-Desktop packaging requires PostgreSQL resources under `apps/desktop/resources/postgres/<platform>-<arch>` or an external bundle supplied through `VIWORK_POSTGRES_BUNDLE_SOURCE`. See [docs/current/19-desktop-release-guide.md](./docs/current/19-desktop-release-guide.md).
+Desktop packaging requires PostgreSQL resources under `apps/desktop/resources/postgres/<platform>-<arch>` or an external bundle supplied through `VIFORGE_POSTGRES_BUNDLE_SOURCE`. See [docs/current/19-desktop-release-guide.md](./docs/current/19-desktop-release-guide.md).
 
 ## Model Configuration
 
@@ -71,13 +69,13 @@ Common variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `VIWORK_AIGC_HUB_BASE_URL` | OpenAI-compatible base URL |
-| `VIWORK_AIGC_HUB_API_KEY` | API key for the configured provider |
-| `VIWORK_AIGC_HUB_CHAT_MODEL` | Text/chat model id |
-| `VIWORK_AIGC_HUB_IMAGE_MODEL` | Image generation/edit model id |
-| `VIWORK_AIGC_HUB_EMBEDDING_MODEL` | Embedding model id |
-| `VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS` | Embedding dimension for LangGraph Store |
-| `VIWORK_PRODUCT` | Default product profile: `novel-adaptation`, `sitcom`, or `study` |
+| `VIFORGE_AIGC_HUB_BASE_URL` | OpenAI-compatible base URL |
+| `VIFORGE_AIGC_HUB_API_KEY` | API key for the configured provider |
+| `VIFORGE_AIGC_HUB_CHAT_MODEL` | Text/chat model id |
+| `VIFORGE_AIGC_HUB_IMAGE_MODEL` | Image generation/edit model id |
+| `VIFORGE_AIGC_HUB_EMBEDDING_MODEL` | Embedding model id |
+| `VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS` | Embedding dimension for LangGraph Store |
+| `VIFORGE_PRODUCT` | Default product profile: `novel-adaptation`, `sitcom`, or `study` |
 
 Runtime settings store API keys locally. The API only returns whether a key is configured; it does not echo the stored secret back to the web UI.
 
@@ -91,7 +89,7 @@ Desktop mode asks the user to choose a data directory on first launch. That dire
 - Embedded PostgreSQL data: `<dataRoot>/postgres-data`
 - Chat sessions, agent memory, Harness artifacts, and related local runtime data under the configured data root or workspaces root
 
-Service/development mode defaults to `~/.viwork/data/<productId>/workspaces` unless `WORKSPACES_ROOT` is set.
+Service/development mode defaults to `~/.viforge/data/<productId>/workspaces` unless `WORKSPACES_ROOT` is set.
 
 Do not commit runtime data or secrets. In particular, avoid staging `apps/api/data/`, `var/`, `release/`, `apps/web/dist/`, `apps/desktop/dist/`, `node_modules/`, `.env`, and local tool folders.
 
@@ -114,11 +112,11 @@ The ViForge name is a product name and may be subject to separate trademark or b
 ## Common Commands
 
 ```bash
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
-pnpm --filter @viwork/web build
-pnpm --filter @viwork/api test
-pnpm --filter @viwork/web test
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
+pnpm --filter @viforge/web build
+pnpm --filter @viforge/api test
+pnpm --filter @viforge/web test
 pnpm desktop:pack
 ```
 

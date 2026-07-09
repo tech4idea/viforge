@@ -74,7 +74,7 @@ apps/api/data/chat-sessions.json
 前端还会把每个正式项目最近打开的会话 id、最近打开的临时会话 id 和最近/归档视图写入 localStorage：
 
 ```text
-viwork.activeChatSession.v1
+viforge.activeChatSession.v1
 ```
 
 页面刷新后，前端会在后端会话列表加载完成后校验该 id 是否仍存在；存在则恢复到上次会话，不存在则回退到当前视图的最新会话。聊天记录区域在恢复会话或收到新消息时自动滚动到最后一条消息。
@@ -130,7 +130,7 @@ const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
 
 - `sessionId`：图片临时会话 id。未传时后端会创建新的临时项目和图片会话。
 - `prompt`
-- `model`：可选，默认使用 API 服务端 `VIWORK_AIGC_HUB_IMAGE_MODEL`，未配置时为 `gpt-image-1`
+- `model`：可选，默认使用 API 服务端 `VIFORGE_AIGC_HUB_IMAGE_MODEL`，未配置时为 `gpt-image-1`
 - `aspectRatio`：`1:1`、`16:9`、`9:16`、`4:3`、`3:4`
 - `thinkingLevel`：可选，保留在附件元数据中。当前 AIGC Hub `/v1/images/generations` 兼容请求不会向上游传递该字段。
 - `count`：1 到 4
@@ -139,12 +139,12 @@ const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
 后端使用 AIGC Hub 网关，不直连上游模型。配置读取 API 服务进程环境变量：
 
 ```text
-VIWORK_AIGC_HUB_BASE_URL=http://127.0.0.1:8000/v1
-VIWORK_AIGC_HUB_API_KEY=hub_...
-VIWORK_AIGC_HUB_IMAGE_MODEL=gpt-image-1
+VIFORGE_AIGC_HUB_BASE_URL=http://127.0.0.1:8000/v1
+VIFORGE_AIGC_HUB_API_KEY=hub_...
+VIFORGE_AIGC_HUB_IMAGE_MODEL=gpt-image-1
 ```
 
-请求会发送到 `POST ${VIWORK_AIGC_HUB_BASE_URL}/images/generations`，并使用 `Authorization: Bearer <VIWORK_AIGC_HUB_API_KEY>`。如果没有配置 base URL 或 API key，接口返回明确错误。不要把图片生成接到 Codex runtime 上。
+请求会发送到 `POST ${VIFORGE_AIGC_HUB_BASE_URL}/images/generations`，并使用 `Authorization: Bearer <VIFORGE_AIGC_HUB_API_KEY>`。如果没有配置 base URL 或 API key，接口返回明确错误。不要把图片生成接到 Codex runtime 上。
 
 图片文件落在图片临时会话工作目录：
 

@@ -84,7 +84,7 @@ describe('api client', () => {
 
     await client.listGlobalWorkspaceEntries();
     await client.readGlobalWorkspaceFile('Agent 配置/config.toml');
-    await client.writeGlobalWorkspaceFile('Agent 配置/config.toml', '# viwork agent runtime');
+    await client.writeGlobalWorkspaceFile('Agent 配置/config.toml', '# viforge agent runtime');
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/base/api/global/files',

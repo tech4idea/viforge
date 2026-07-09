@@ -11,7 +11,7 @@ import {
   type Project,
   type WorkspaceEntry,
   type WorkspaceFile,
-} from '@viwork/shared';
+} from '@viforge/shared';
 
 import { PRODUCT_PROFILE, WORKSPACES_ROOT } from '../env';
 import { readProductSkillPrompt, readProductSystemAgentPrompt } from '../productProfilePrompts';
@@ -153,7 +153,7 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
     await migrateGlobalAgentConfig(rootPath);
     await Promise.all(productProfile.globalDirectories.map((directory) => mkdir(path.join(rootPath, directory), { recursive: true })));
     await removeLegacyDefaultAgentSkills(rootPath);
-    await ensureViworkAgentConfig(rootPath);
+    await ensureViforgeAgentConfig(rootPath);
     await ensureProductAgentPrompts(rootPath);
     await Promise.all(
       defaultGlobalFiles.map(async (file) => {
@@ -214,16 +214,16 @@ export function createWorkspaceStore(root = WORKSPACES_ROOT, options: { productP
     return content.includes(defaultFragments[skillName] ?? '__never__');
   }
 
-  async function ensureViworkAgentConfig(rootPath: string): Promise<void> {
+  async function ensureViforgeAgentConfig(rootPath: string): Promise<void> {
     const configPath = path.join(rootPath, GLOBAL_AGENT_CONFIG_DIR, 'config.toml');
-    const defaultConfig = '# viwork agent runtime\n[viwork]\nmax_revision_rounds = 5\n';
+    const defaultConfig = '# viforge agent runtime\n[viforge]\nmax_revision_rounds = 5\n';
     try {
       const content = await readFile(configPath, 'utf8');
-      if (/\[viwork\][\s\S]*max_revision_rounds\s*=/.test(content)) {
+      if (/\[viforge\][\s\S]*max_revision_rounds\s*=/.test(content)) {
         return;
       }
       const separator = content.endsWith('\n') ? '\n' : '\n\n';
-      await writeFile(configPath, `${content}${separator}[viwork]\nmax_revision_rounds = 5\n`, 'utf8');
+      await writeFile(configPath, `${content}${separator}[viforge]\nmax_revision_rounds = 5\n`, 'utf8');
     } catch (error) {
       if (!isNotFoundError(error)) {
         throw error;

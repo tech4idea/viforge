@@ -89,7 +89,7 @@ await build({
   format: 'esm',
   sourcemap: true,
   banner: {
-    js: "import { createRequire as __viworkCreateRequire } from 'node:module'; const require = __viworkCreateRequire(import.meta.url);",
+    js: "import { createRequire as __viforgeCreateRequire } from 'node:module'; const require = __viforgeCreateRequire(import.meta.url);",
   },
   external: [
     'electron',
@@ -105,7 +105,7 @@ await build({
   format: 'esm',
   sourcemap: true,
   banner: {
-    js: "import { createRequire as __viworkCreateRequire } from 'node:module'; import { fileURLToPath as __viworkFileURLToPath } from 'node:url'; import * as __viworkPath from 'node:path'; const require = __viworkCreateRequire(import.meta.url); const __dirname = __viworkPath.dirname(__viworkFileURLToPath(import.meta.url));",
+    js: "import { createRequire as __viforgeCreateRequire } from 'node:module'; import { fileURLToPath as __viforgeFileURLToPath } from 'node:url'; import * as __viforgePath from 'node:path'; const require = __viforgeCreateRequire(import.meta.url); const __dirname = __viforgePath.dirname(__viforgeFileURLToPath(import.meta.url));",
   },
   external: [
     'electron',

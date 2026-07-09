@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ProductProfile, TheaterSkill } from '@viwork/shared';
+import type { ProductProfile, TheaterSkill } from '@viforge/shared';
 
 import { PRODUCT_PROFILE } from '../env';
 

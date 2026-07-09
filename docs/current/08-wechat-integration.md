@@ -2,7 +2,7 @@
 
 ## 目标
 
-微信接入要把个人微信对话变成 viwork 情景剧创作工作台的远程入口。用户可以在微信里完成四类操作：
+微信接入要把个人微信对话变成 viforge 情景剧创作工作台的远程入口。用户可以在微信里完成四类操作：
 
 - 切换到指定项目目录。
 - 切换到草稿区，也就是临时会话工作目录。
@@ -11,7 +11,7 @@
 
 当前代码里的微信实现仍是本地模拟接口，不是真实微信开放平台 OAuth，也不是企业微信。后续真实接入建议参考 cc-connect 的个人微信通道，使用腾讯 ilink 机器人 HTTP 网关：`getUpdates` 长轮询接收消息，`sendMessage` 下发回复。
 
-微信创作 run 默认优先使用 `VIWORK_WECHAT_CHAT_MODEL`，未配置时回退到 `minimax/minimax-m2.7`。这个入口不复用前端会话上一次选择的文本模型，避免微信消息被路由到不支持 coding plan 能力的上游模型后返回 404。
+微信创作 run 默认优先使用 `VIFORGE_WECHAT_CHAT_MODEL`，未配置时回退到 `minimax/minimax-m2.7`。这个入口不复用前端会话上一次选择的文本模型，避免微信消息被路由到不支持 coding plan 能力的上游模型后返回 404。
 
 ## 参考方案：cc-connect Weixin / ilink
 
@@ -36,7 +36,7 @@ Route：[apps/api/src/routes/wechat.ts](../../apps/api/src/routes/wechat.ts)
 持久化文件：
 
 ```text
-~/.viwork/data/<productId>/wechat.json
+~/.viforge/data/<productId>/wechat.json
 ```
 
 当前状态结构：
@@ -55,7 +55,7 @@ Route：[apps/api/src/routes/wechat.ts](../../apps/api/src/routes/wechat.ts)
 `createSetupSession()` 目前只生成本地模拟连接码：
 
 ```text
-viwork-wechat://pair/<sessionId>
+viforge-wechat://pair/<sessionId>
 ```
 
 `acceptInbound()` 当前只做三件事：
@@ -407,9 +407,9 @@ export type WechatIlinkClient = {
 相关测试命令：
 
 ```bash
-pnpm --filter @viwork/api test
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
+pnpm --filter @viforge/api test
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
 ```
 
 重点测试文件：

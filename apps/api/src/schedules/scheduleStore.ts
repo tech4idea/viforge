@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ScheduledTask } from '@viwork/shared';
+import type { ScheduledTask } from '@viforge/shared';
 
 type ScheduleState = {
   tasks: ScheduledTask[];

@@ -64,6 +64,18 @@ async function handlePendingResponse(
     const option = pending.sessionOptions.find((item) => item.index === selectedIndex);
     if (option) {
       await wechatStore.setPendingSessionAction(externalUserId, null);
+      if (option.type === 'new_session') {
+        return {
+          type: 'confirmed',
+          replyText: `已准备在「${option.projectName}」下新建会话。`,
+          action: {
+            type: 'new_session',
+            projectName: option.projectName,
+            projectId: option.projectId,
+            originalPrompt: pending.originalPrompt,
+          },
+        };
+      }
       return {
         type: 'confirmed',
         replyText: `已切换到「${option.projectName}」下的会话「${option.sessionTitle}」。`,
@@ -73,7 +85,7 @@ async function handlePendingResponse(
           projectId: option.projectId,
           sessionId: option.sessionId,
           sessionTitle: option.sessionTitle,
-          originalPrompt: '',
+          originalPrompt: pending.originalPrompt,
         },
       };
     }
@@ -88,7 +100,7 @@ async function handlePendingResponse(
         type: 'new_session',
         projectName: pending.projectName,
         projectId: pending.projectId,
-        originalPrompt: '',
+        originalPrompt: pending.originalPrompt,
       },
     };
   }
@@ -100,6 +112,18 @@ async function handlePendingResponse(
 
   if (CANCEL_RE.test(trimmed)) {
     await wechatStore.setPendingSessionAction(externalUserId, null);
+    if (pending.originalPrompt.trim()) {
+      return {
+        type: 'confirmed',
+        replyText: '未选择项目，本次将进入新的临时会话。',
+        action: {
+          type: 'new_session',
+          projectName: '临时会话',
+          projectId: null,
+          originalPrompt: pending.originalPrompt,
+        },
+      };
+    }
     return { type: 'continue' };
   }
 
@@ -131,6 +155,24 @@ async function classifyAndRoute(
 ): Promise<SessionRoutingResult> {
   const route = await wechatStore.getRouteState(externalUserId);
   const activeSessionId = await wechatStore.getActiveChatSessionId(externalUserId);
+  const projects = await workspaceStore.listProjects();
+
+  if (!activeSessionId && (!route.projectId || route.scope !== 'project')) {
+    if (projects.length === 0) {
+      return { type: 'continue' };
+    }
+
+    const allSessions = await listProjectSessionOptions(chatSessionStore, projects);
+    const { replyText, sessionOptions } = buildProjectSessionSelectionReply(allSessions);
+    await wechatStore.setPendingSessionAction(externalUserId, {
+      type: 'switch_session',
+      projectName: '项目选择',
+      projectId: projects[0]?.id ?? '',
+      originalPrompt: text,
+      sessionOptions,
+    });
+    return { type: 'pending_confirmation', replyText };
+  }
 
   let sessionContext = '当前无活跃会话。';
   if (activeSessionId) {
@@ -144,7 +186,6 @@ async function classifyAndRoute(
     }
   }
 
-  const projects = await workspaceStore.listProjects();
   const projectList = projects.map((p) => `「${p.name}」`).join('、') || '（无项目）';
 
   const classificationPrompt = [
@@ -222,12 +263,7 @@ async function classifyAndRoute(
   }
 
   case 'switch_session': {
-    const allSessions = await Promise.all(
-      projects.map(async (p) => {
-        const sessions = await chatSessionStore.listProjectSessions(p.id, { includeArchived: false });
-        return { project: p, sessions: sessions.slice(0, 5) };
-      }),
-    );
+    const allSessions = await listProjectSessionOptions(chatSessionStore, projects);
 
     if (target) {
       const matchProject = projects.find((p) => p.name.toLowerCase().includes(target.toLowerCase()));
@@ -288,31 +324,7 @@ async function classifyAndRoute(
       }
     }
 
-    const lines: string[] = ['可选项目和会话：', ''];
-    const sessionOptions: NonNullable<Extract<PendingSessionAction, { type: 'switch_session' }>['sessionOptions']> = [];
-    let idx = 1;
-    for (const entry of allSessions) {
-      lines.push(`【${entry.project.name}】`);
-      if (entry.sessions.length === 0) {
-        lines.push('  （暂无会话）');
-      } else {
-        for (const s of entry.sessions) {
-          const title = s.title ?? '未命名会话';
-          const msgCount = s.messages.length ?? 0;
-          lines.push(`  ${idx}. ${title}（${msgCount} 条）`);
-          sessionOptions.push({
-            index: idx,
-            projectId: entry.project.id,
-            projectName: entry.project.name,
-            sessionId: s.id,
-            sessionTitle: title,
-          });
-          idx++;
-        }
-      }
-      lines.push('');
-    }
-    lines.push('回复项目名称或会话序号切换，回复「新建」创建新会话。');
+    const { replyText, sessionOptions } = buildProjectSessionSelectionReply(allSessions);
     await wechatStore.setPendingSessionAction(externalUserId, {
       type: 'switch_session',
       projectName: route.projectName ?? '当前项目',
@@ -320,12 +332,64 @@ async function classifyAndRoute(
       originalPrompt: text,
       sessionOptions,
     });
-    return { type: 'pending_confirmation', replyText: lines.join('\n') };
+    return { type: 'pending_confirmation', replyText };
   }
 
   default:
     assertNever(intent);
   }
+}
+
+async function listProjectSessionOptions(
+  chatSessionStore: ChatSessionStore,
+  projects: Awaited<ReturnType<WorkspaceStore['listProjects']>>,
+) {
+  return Promise.all(
+    projects.map(async (p) => {
+      const sessions = await chatSessionStore.listProjectSessions(p.id, { includeArchived: false, kind: 'assistant' });
+      return { project: p, sessions: sessions.slice(0, 5) };
+    }),
+  );
+}
+
+function buildProjectSessionSelectionReply(
+  allSessions: Awaited<ReturnType<typeof listProjectSessionOptions>>,
+): { replyText: string; sessionOptions: NonNullable<Extract<PendingSessionAction, { type: 'switch_session' }>['sessionOptions']> } {
+  const lines: string[] = ['请选择要接入的项目或会话：', ''];
+  const sessionOptions: NonNullable<Extract<PendingSessionAction, { type: 'switch_session' }>['sessionOptions']> = [];
+  let idx = 1;
+
+  for (const entry of allSessions) {
+    lines.push(`【${entry.project.name}】`);
+    lines.push(`  ${idx}. 新建会话`);
+    sessionOptions.push({
+      index: idx,
+      type: 'new_session',
+      projectId: entry.project.id,
+      projectName: entry.project.name,
+      sessionTitle: '新建会话',
+    });
+    idx++;
+
+    for (const s of entry.sessions) {
+      const title = s.title ?? '未命名会话';
+      const msgCount = s.messages.length ?? 0;
+      lines.push(`  ${idx}. ${title}（${msgCount} 条）`);
+      sessionOptions.push({
+        index: idx,
+        type: 'session',
+        projectId: entry.project.id,
+        projectName: entry.project.name,
+        sessionId: s.id,
+        sessionTitle: title,
+      });
+      idx++;
+    }
+    lines.push('');
+  }
+
+  lines.push('回复序号选择；回复「取消」或不选择项目时，本次消息会进入新的临时会话。');
+  return { replyText: lines.join('\n'), sessionOptions };
 }
 
 function parseRoutingIntent(value: unknown): RoutingIntent {

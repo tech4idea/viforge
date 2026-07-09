@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import type { GlobalGitConfig, ProjectGitConfig } from '@viwork/shared';
+import type { GlobalGitConfig, ProjectGitConfig } from '@viforge/shared';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { GitService } from '../storage/gitService';
 import type { WorkspaceStore } from '../storage/workspaceStore';

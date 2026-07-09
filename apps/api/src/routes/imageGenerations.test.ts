@@ -19,7 +19,7 @@ let originalApiKey: string | undefined;
 let originalModel: string | undefined;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-image-generations-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-image-generations-'));
   const chatStore = createChatSessionStore(path.join(root, 'chat-sessions.json'));
   const workspaceStore = createWorkspaceStore(path.join(root, 'workspaces'));
   app = new Hono()
@@ -28,19 +28,19 @@ beforeEach(async () => {
     .route('/api', createImageGenerationRoutes(chatStore, workspaceStore));
 
   originalFetch = globalThis.fetch;
-  originalBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL;
-  originalApiKey = process.env.VIWORK_AIGC_HUB_API_KEY;
-  originalModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL;
-  process.env.VIWORK_AIGC_HUB_BASE_URL = 'http://127.0.0.1:8000/v1';
-  process.env.VIWORK_AIGC_HUB_API_KEY = 'hub_test_key';
-  process.env.VIWORK_AIGC_HUB_IMAGE_MODEL = 'gpt-image-1';
+  originalBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL;
+  originalApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY;
+  originalModel = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL;
+  process.env.VIFORGE_AIGC_HUB_BASE_URL = 'http://127.0.0.1:8000/v1';
+  process.env.VIFORGE_AIGC_HUB_API_KEY = 'hub_test_key';
+  process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL = 'gpt-image-1';
 });
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
-  restoreEnv('VIWORK_AIGC_HUB_BASE_URL', originalBaseUrl);
-  restoreEnv('VIWORK_AIGC_HUB_API_KEY', originalApiKey);
-  restoreEnv('VIWORK_AIGC_HUB_IMAGE_MODEL', originalModel);
+  restoreEnv('VIFORGE_AIGC_HUB_BASE_URL', originalBaseUrl);
+  restoreEnv('VIFORGE_AIGC_HUB_API_KEY', originalApiKey);
+  restoreEnv('VIFORGE_AIGC_HUB_IMAGE_MODEL', originalModel);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -128,8 +128,8 @@ describe('image generation routes', () => {
   });
 
   it('requires AIGC Hub configuration', async () => {
-    process.env.VIWORK_AIGC_HUB_BASE_URL = '';
-    process.env.VIWORK_AIGC_HUB_API_KEY = '';
+    process.env.VIFORGE_AIGC_HUB_BASE_URL = '';
+    process.env.VIFORGE_AIGC_HUB_API_KEY = '';
 
     const response = await app.request('/api/image-generations', {
       method: 'POST',
@@ -139,7 +139,7 @@ describe('image generation routes', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: '未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。',
+      error: '未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。',
     });
   });
 });

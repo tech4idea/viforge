@@ -12,7 +12,7 @@ let root: string;
 let store: WorkspaceStore;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-mock-run-service-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-mock-run-service-'));
   store = createWorkspaceStore(root);
 });
 

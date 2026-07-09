@@ -68,7 +68,7 @@ export type ChatMessage = {
   referencedFiles: ReferencedFile[];
   referencedSnippets?: ReferencedChatSnippet[];
   streamEvents: StreamEvent[];
-  status?: 'idle' | 'running' | 'success' | 'error';
+  status?: 'idle' | 'queued' | 'running' | 'success' | 'error';
 };
 
 export type ChatMessageAttachment = {
@@ -370,6 +370,36 @@ export type WechatSetupSession = {
   status: 'qr_ready' | 'connected' | 'cancelled';
   qrUrl: string;
   expiresAt: string;
+};
+
+export type BrowserConnectorStatus = {
+  relayReachable: boolean;
+  connectedBrowsers: number;
+  connections: BrowserConnectorConnection[];
+  tabs: BrowserConnectorTab[];
+  relayError?: string;
+  cliAvailable: boolean;
+  cliError?: string;
+  portConflict: boolean;
+  portConflictDetail?: string;
+  installSteps: string[];
+};
+
+export type BrowserConnectorConnection = {
+  extensionId: string;
+  stableKey?: string;
+  browser?: string | null;
+  profile?: {
+    email?: string;
+    id?: string;
+  } | null;
+  activeTargets: number;
+};
+
+export type BrowserConnectorTab = {
+  id: string;
+  title?: string;
+  url?: string;
 };
 
 export type ProjectGitConfig = {

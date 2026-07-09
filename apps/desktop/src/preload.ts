@@ -6,6 +6,6 @@ type SelectDataRootResult = {
   restartRequired?: boolean;
 };
 
-contextBridge.exposeInMainWorld('viworkDesktop', {
-  selectDataRoot: async (): Promise<SelectDataRootResult> => ipcRenderer.invoke('viwork:select-data-root') as Promise<SelectDataRootResult>,
+contextBridge.exposeInMainWorld('viforgeDesktop', {
+  selectDataRoot: async (): Promise<SelectDataRootResult> => ipcRenderer.invoke('viforge:select-data-root') as Promise<SelectDataRootResult>,
 });

@@ -1,4 +1,4 @@
-import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunImageGenerationOptions, RunSource } from '@viwork/shared';
+import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunImageGenerationOptions, RunSource } from '@viforge/shared';
 
 export type WechatSendContext = {
   sendText(input: { text: string }): Promise<void>;

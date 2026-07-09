@@ -15,7 +15,7 @@ let app: Hono;
 let store: WorkspaceStore;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-run-routes-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-run-routes-'));
   store = createWorkspaceStore(root);
   app = new Hono().route('/api', createRunsRoutes(createMockRunService(store)));
 });

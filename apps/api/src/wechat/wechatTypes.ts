@@ -7,9 +7,10 @@ export type WechatRouteState = {
 
 export type PendingSessionOption = {
   index: number;
+  type: 'session' | 'new_session';
   projectId: string;
   projectName: string;
-  sessionId: string;
+  sessionId?: string;
   sessionTitle: string;
 };
 

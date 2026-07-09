@@ -1,10 +1,10 @@
 # Agent 创作流程设计讨论
 
-本文用于明确 viwork 的多 agent 创作流程，并记录 V1 已采用的产品和技术方案。
+本文用于明确 viforge 的多 agent 创作流程，并记录 V1 已采用的产品和技术方案。
 
 ## 方案摘要
 
-viwork 的 agent 系统应围绕“创作质量闭环”设计，而不是围绕前端可选 agent 列表设计。
+viforge 的 agent 系统应围绕“创作质量闭环”设计，而不是围绕前端可选 agent 列表设计。
 
 推荐 V1 形态：
 
@@ -468,12 +468,12 @@ Agent 配置/skills/*/SKILL.md
 
 ## V1 已落地内容
 
-1. 默认全局 `Agent 配置/AGENTS.md` 已升级为 viwork system agent。
+1. 默认全局 `Agent 配置/AGENTS.md` 已升级为 viforge system agent。
 2. 默认 skills 已切换为 `brainstorm-agent`、`story-agent`、`screenwriter-agent`、`reviewer-agent`。
 3. 默认 workspace 模板已新增 `02 故事/<集数>/故事正文.md`，并统一剧本正式产物为 `03 剧本/<集数>/剧本.md`。
 4. 后端已支持解析 system agent 输出的 agent trace JSON block，并转成结构化 `agent.*` stream event。
 5. 前端已展示当前阶段/agent/状态/返工轮次、agent timeline、打回详情、最终写入路径和未保存状态。
-6. 全局 `Agent 配置/config.toml` 已加入 `[viwork].max_revision_rounds = 5` 默认配置。
+6. 全局 `Agent 配置/config.toml` 已加入 `[viforge].max_revision_rounds = 5` 默认配置。
 
 ## 后续演进建议
 

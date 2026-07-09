@@ -11,7 +11,7 @@ import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store';
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { z } from 'zod';
 
-import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viwork/shared';
+import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viforge/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, PRODUCT_PROFILE } from '../env';
@@ -34,7 +34,7 @@ let postgresMemoryBackend: Promise<LangGraphMemoryBackend> | null = null;
 async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
   const databaseUrl = process.env.DATABASE_URL ?? '';
   if (!databaseUrl) {
-    if (process.env.VIWORK_LANGGRAPH_ALLOW_IN_MEMORY !== '1') {
+    if (process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY !== '1') {
       throw new Error('LangGraph PostgreSQL is not configured. Start embedded PostgreSQL in desktop mode or set DATABASE_URL for service mode.');
     }
 
@@ -68,21 +68,21 @@ async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promis
 }
 
 function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0]['index'] | undefined {
-  if (process.env.VIWORK_PGVECTOR_AVAILABLE === '0') return undefined;
-  if (!process.env.VIWORK_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
+  if (process.env.VIFORGE_PGVECTOR_AVAILABLE === '0') return undefined;
+  if (!process.env.VIFORGE_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
 
   return {
-    dims: Number(process.env.VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
+    dims: Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
     embed: createMemoryEmbeddings(),
     fields: ['content', 'memory'],
   };
 }
 
 function createMemoryEmbeddings(): OpenAIEmbeddings {
-  const baseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
-  const apiKey = process.env.VIWORK_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+  const apiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
-    model: process.env.VIWORK_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
+    model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
     apiKey,
     configuration: {
       baseURL: trimTrailingSlashes(baseUrl),
@@ -112,7 +112,7 @@ export type LangGraphAgentInput = string | Array<{ role: 'user' | 'assistant'; c
 
 export type LangGraphToolset = ReturnType<typeof createWorkspaceTools> & Record<string, unknown>;
 
-type ViworkTool = StructuredToolInterface & {
+type ViforgeTool = StructuredToolInterface & {
   id: string;
   execute?: (input: Record<string, unknown>, options?: unknown) => Promise<unknown>;
 };
@@ -122,12 +122,12 @@ export function createTool<Schema extends z.AnyZodObject>(fields: {
   description: string;
   inputSchema: Schema;
   execute: (input: z.infer<Schema>) => Promise<unknown> | unknown;
-}): ViworkTool {
+}): ViforgeTool {
   const created = tool(async (input: z.infer<Schema>) => fields.execute(input), {
     name: fields.id,
     description: fields.description,
     schema: fields.inputSchema,
-  }) as unknown as ViworkTool;
+  }) as unknown as ViforgeTool;
   created.id = fields.id;
   created.execute = async (input) => fields.execute(input as z.infer<Schema>);
   return created;
@@ -318,8 +318,8 @@ type ProjectMemoryStore = {
 };
 
 function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
-  const workingMemoryNamespace = (resourceId: string) => ['viwork', 'projects', resourceId, 'working-memory'];
-  const semanticMemoryNamespace = (resourceId: string) => ['viwork', 'projects', resourceId, 'memories'];
+  const workingMemoryNamespace = (resourceId: string) => ['viforge', 'projects', resourceId, 'working-memory'];
+  const semanticMemoryNamespace = (resourceId: string) => ['viforge', 'projects', resourceId, 'memories'];
 
   return {
     async getWorkingMemory({ resourceId }) {
@@ -558,7 +558,7 @@ export function createWorkspaceTools(
       inputSchema: z.object({}),
       execute: async () => {
         if (!options.browserService) {
-          return { enabled: false, error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+          return { enabled: false, error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
         }
         return options.browserService.status();
       },
@@ -599,7 +599,7 @@ export function createWorkspaceTools(
       }),
       execute: async ({ url, sessionId }) => {
         if (!options.browserService) {
-          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
         }
         return safeBrowserToolCall(() => options.browserService!.navigate({ url, sessionId }));
       },
@@ -615,7 +615,7 @@ export function createWorkspaceTools(
       }),
       execute: async ({ sessionId }) => {
         if (!options.browserService) {
-          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
         }
         return safeBrowserToolCall(() => options.browserService!.snapshot({ sessionId }));
       },
@@ -634,7 +634,7 @@ export function createWorkspaceTools(
       }),
       execute: async ({ code, sessionId, timeoutMs }) => {
         if (!options.browserService) {
-          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIWORK_PLAYWRITER_HOST。' };
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
         }
         return safeBrowserToolCall(() => options.browserService!.evaluate({ code, sessionId, timeoutMs }));
       },
@@ -814,7 +814,7 @@ export function createWorkspaceTools(
         '当用户明确要求生成、绘制、出图、生成角色图/场景图/剧照/分镜图/海报时使用。',
         '普通视觉描述或提示词整理不需要调用此工具。',
         '缺省以时间戳命名；可通过 outputDir / fileName 自定义保存目录和文件主名（扩展名自动追加）。',
-        '不要猜测或填写模型名；工具会自动使用前端/微信会话配置的图片模型，未配置时使用 VIWORK_AIGC_HUB_IMAGE_MODEL。',
+        '不要猜测或填写模型名；工具会自动使用前端/微信会话配置的图片模型，未配置时使用 VIFORGE_AIGC_HUB_IMAGE_MODEL。',
       ].join('\n'),
       inputSchema: z.object({
         prompt: z.string().min(1),
@@ -832,12 +832,12 @@ export function createWorkspaceTools(
       execute: async ({ prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
-        const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-        const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
 
         if (!gatewayBaseUrl || !gatewayApiKey) {
-          throw new Error('未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。');
+          throw new Error('未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。');
         }
 
         const response = await requestAigcHubImages(gatewayBaseUrl, gatewayApiKey, {
@@ -921,12 +921,12 @@ export function createWorkspaceTools(
       execute: async ({ imagePath, prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
-        const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-        const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
 
         if (!gatewayBaseUrl || !gatewayApiKey) {
-          throw new Error('未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY，无法通过 AIGC Hub 编辑图片。');
+          throw new Error('未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY，无法通过 AIGC Hub 编辑图片。');
         }
 
         const source = await store.readWorkspaceFileBytes(projectId, imagePath);
@@ -1142,7 +1142,7 @@ function isEditsEndpointUnsupported(error: unknown): boolean {
 }
 
 async function resolveImageModel(gatewayBaseUrl: string, gatewayApiKey: string, configuredModel?: string): Promise<string> {
-  const envModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
+  const envModel = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
 
   if (configuredModel && configuredModel !== envModel) {
     const models = await requestAigcHubModels(gatewayBaseUrl, gatewayApiKey);
@@ -1483,7 +1483,7 @@ function selectKnowledgeFixture(entries: KnowledgeBaseEntry[], query: string, ta
 function projectMemoryMessageToRecord(message: ProjectMemoryMessage, projectId: string): MemoryRecord {
   return {
     id: message.id,
-    namespace: ['viwork', PRODUCT_PROFILE.id, 'workspaces', projectId, 'memories'],
+    namespace: ['viforge', PRODUCT_PROFILE.id, 'workspaces', projectId, 'memories'],
     scope: 'workspace',
     memoryType: 'summary',
     authority: 'agent_inferred',
@@ -1740,8 +1740,8 @@ export async function createAgentRegistry(
     const configuredInstructions = options.layerConfig?.systemAgent.instructionOverride?.trim() || instructions;
     const agentInstructions = [configuredInstructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
     return createLangGraphAgentClient({
-      id: 'viwork-system-agent',
-      name: 'viwork 系统调度',
+      id: 'viforge-system-agent',
+      name: 'viforge 系统调度',
       instructions: agentInstructions,
       model: modelConfig,
       tools: toolsOverride ?? tools,
@@ -1793,22 +1793,22 @@ export function buildModelConfig(options: {
   traceId?: string;
 }): { model: string; baseUrl: string; apiKey: string; headers: Record<string, string> } {
   const rawId = options.model
-    || process.env.VIWORK_AIGC_HUB_CHAT_MODEL
+    || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
-    || process.env.VIWORK_LANGGRAPH_MODEL
+    || process.env.VIFORGE_LANGGRAPH_MODEL
     || 'MiniMax-M3';
 
   const baseUrl = options.baseUrl
-    || process.env.VIWORK_AIGC_HUB_BASE_URL
+    || process.env.VIFORGE_AIGC_HUB_BASE_URL
     || process.env.AIGC_HUB_BASE_URL
-    || process.env.VIWORK_LANGGRAPH_BASE_URL
+    || process.env.VIFORGE_LANGGRAPH_BASE_URL
     || process.env.OPENAI_BASE_URL
     || 'https://api.yukeon.top/v1';
 
   const apiKey = options.apiKey
-    || process.env.VIWORK_AIGC_HUB_API_KEY
+    || process.env.VIFORGE_AIGC_HUB_API_KEY
     || process.env.AIGC_HUB_API_KEY
-    || process.env.VIWORK_LANGGRAPH_API_KEY
+    || process.env.VIFORGE_LANGGRAPH_API_KEY
     || process.env.OPENAI_API_KEY
     || process.env.CODEX_API_KEY
     || '';
@@ -1882,30 +1882,28 @@ function isLangGraphTool(value: unknown): value is StructuredToolInterface {
 
 function langGraphRunnableConfig(agentId: string, options: Record<string, unknown>) {
   const memory = options.memory as { thread?: string; resource?: string } | undefined;
-  const viworkRunId = typeof options.runId === 'string' ? options.runId : undefined;
-  const traceId = typeof options.traceId === 'string' ? options.traceId : viworkRunId;
+  const viforgeRunId = typeof options.runId === 'string' ? options.runId : undefined;
+  const traceId = typeof options.traceId === 'string' ? options.traceId : viforgeRunId;
   const projectId = typeof memory?.resource === 'string' ? memory.resource : undefined;
   const productId = typeof options.productId === 'string' ? options.productId : undefined;
   const source = typeof options.source === 'string' ? options.source : undefined;
   const maxSteps = typeof options.maxSteps === 'number' ? options.maxSteps : 25;
-  const isEvalRun = source === 'eval';
-
   return {
     version: 'v2' as const,
     recursionLimit: maxSteps * 2,
     runName: agentId,
-    tags: [agentId, 'viwork', 'langgraph', productId, source].filter((tag): tag is string => Boolean(tag)),
+    tags: [agentId, 'viforge', 'langgraph', productId, source].filter((tag): tag is string => Boolean(tag)),
     metadata: {
-      viwork_run_id: viworkRunId,
-      viwork_trace_id: traceId,
-      viwork_agent_id: agentId,
-      viwork_project_id: projectId,
-      viwork_product_id: productId,
-      viwork_source: source,
+      viforge_run_id: viforgeRunId,
+      viforge_trace_id: traceId,
+      viforge_agent_id: agentId,
+      viforge_project_id: projectId,
+      viforge_product_id: productId,
+      viforge_source: source,
     },
-    ...(isEvalRun ? { callbacks: [] } : {}),
+    callbacks: [],
     configurable: {
-      thread_id: memory?.thread ?? viworkRunId ?? `${agentId}-${Date.now()}`,
+      thread_id: memory?.thread ?? viforgeRunId ?? `${agentId}-${Date.now()}`,
       resource_id: memory?.resource,
     },
   };

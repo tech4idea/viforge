@@ -10,7 +10,7 @@ import type {
   GeminiImageModel,
   GeminiImageThinkingLevel,
   ImageGenerationResponse,
-} from '@viwork/shared';
+} from '@viforge/shared';
 
 import type { ChatSessionStore } from '../chat/chatSessionStore';
 import { buildAigcHubHeaders, gatewayTraceIdFromResponse, traceIdFromRequest } from '../aigcHubHeaders';
@@ -64,11 +64,11 @@ export function createImageGenerationRoutes(chatStore: ChatSessionStore, workspa
       return context.json({ error: 'Invalid image generation request' }, 400);
     }
 
-    const gatewayBaseUrl = process.env.VIWORK_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-    const gatewayApiKey = process.env.VIWORK_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
-    const defaultModel = process.env.VIWORK_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
+    const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
+    const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+    const defaultModel = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
     if (!gatewayBaseUrl || !gatewayApiKey) {
-      return context.json({ error: '未配置 VIWORK_AIGC_HUB_BASE_URL 或 VIWORK_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。' }, 400);
+      return context.json({ error: '未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。' }, 400);
     }
 
     const selectedModel = parsed.data.model || defaultModel || undefined;
@@ -122,6 +122,9 @@ async function generateImages(input: {
 
   if (!session) {
     throw new Error('图片会话不存在');
+  }
+  if (hasRunningAssistantMessage(session.messages)) {
+    throw new Error('当前会话正在运行，请等待完成或停止后再发送。');
   }
   if (input.model && isLegacyGeminiImageModel(input.model)) {
     assertSupportedThinkingLevel(input.model, input.thinkingLevel);
@@ -206,6 +209,10 @@ async function generateImages(input: {
   });
 
   return { session: updatedSession, userMessage, assistantMessage, gatewayTraceId };
+}
+
+function hasRunningAssistantMessage(messages: ChatMessage[]): boolean {
+  return messages.some((message) => message.role === 'assistant' && message.status === 'running');
 }
 
 async function createImageSession(chatStore: ChatSessionStore, workspaceStore: WorkspaceStore, productId?: string) {

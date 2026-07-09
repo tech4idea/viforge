@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { StreamEvent } from '@viwork/shared';
+import type { StreamEvent } from '@viforge/shared';
 
 import { createRunBus } from './runBus';
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunSource } from '@viwork/shared';
+import type { AgentRun, ReferencedChatSnippet, ReferencedFile, RunEvent, RunSource } from '@viforge/shared';
 
 import type { WorkspaceStore } from '../storage/workspaceStore';
 

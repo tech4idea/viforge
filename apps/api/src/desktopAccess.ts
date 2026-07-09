@@ -1,9 +1,9 @@
 import type { Context, Hono } from 'hono';
 
-const DESKTOP_TOKEN_COOKIE = 'viwork_desktop_token';
+const DESKTOP_TOKEN_COOKIE = 'viforge_desktop_token';
 
 export function installDesktopAccessGuard(app: Hono): void {
-  const expectedToken = process.env.VIWORK_DESKTOP_ACCESS_TOKEN;
+  const expectedToken = process.env.VIFORGE_DESKTOP_ACCESS_TOKEN;
   if (!expectedToken) return;
 
   app.use('*', async (context, next) => {

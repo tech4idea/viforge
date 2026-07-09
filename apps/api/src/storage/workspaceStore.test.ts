@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { DEFAULT_DIRECTORIES, DEFAULT_GLOBAL_DIRECTORIES, DEFAULT_SITCOM_FILES, createDefaultGlobalWorkspaceFilesForProfile, resolveProductProfile } from '@viwork/shared';
+import { DEFAULT_DIRECTORIES, DEFAULT_GLOBAL_DIRECTORIES, DEFAULT_SITCOM_FILES, createDefaultGlobalWorkspaceFilesForProfile, resolveProductProfile } from '@viforge/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createWorkspaceStore } from './workspaceStore';
@@ -10,7 +10,7 @@ import { createWorkspaceStore } from './workspaceStore';
 let root: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'viwork-workspaces-'));
+  root = await mkdtemp(path.join(tmpdir(), 'viforge-workspaces-'));
 });
 
 afterEach(async () => {
@@ -169,7 +169,7 @@ describe('workspaceStore', () => {
     ]));
   });
 
-  it('adds the viwork agent runtime config without overwriting existing Codex config', async () => {
+  it('adds the viforge agent runtime config without overwriting existing Codex config', async () => {
     await mkdir(path.join(root, '_global', 'Agent 配置'), { recursive: true });
     await writeFile(path.join(root, '_global', 'Agent 配置', 'config.toml'), 'model = "gpt-5"\n', 'utf8');
 
@@ -177,7 +177,7 @@ describe('workspaceStore', () => {
     await store.listGlobalWorkspaceEntries();
 
     await expect(readFile(path.join(root, '_global', 'Agent 配置', 'config.toml'), 'utf8')).resolves.toBe(
-      'model = "gpt-5"\n\n[viwork]\nmax_revision_rounds = 5\n',
+      'model = "gpt-5"\n\n[viforge]\nmax_revision_rounds = 5\n',
     );
   });
 

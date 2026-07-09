@@ -1,6 +1,6 @@
 # 双产品维护与配置化方案
 
-本文讨论后续如何同时维护两个 viwork 产品形态：
+本文讨论后续如何同时维护两个 viforge 产品形态：
 
 - 情景剧创作工作台
 - 小说改编剧本工作台
@@ -9,7 +9,7 @@
 
 ## 结论
 
-建议不要维护两个长期分叉应用。更稳妥的方式是把当前 monorepo 抽象成一个共享 viwork platform，再用 `product profile` 配置不同创作域。
+建议不要维护两个长期分叉应用。更稳妥的方式是把当前 monorepo 抽象成一个共享 viforge platform，再用 `product profile` 配置不同创作域。
 
 基础能力保持一套：
 
@@ -93,8 +93,8 @@ export type ProductProfile = {
 运行时通过环境变量或构建变量选择：
 
 ```bash
-VIWORK_PRODUCT=novel-adaptation pnpm --filter @viwork/api dev
-VIWORK_PRODUCT=novel-adaptation pnpm --filter @viwork/web dev
+VIFORGE_PRODUCT=novel-adaptation pnpm --filter @viforge/api dev
+VIFORGE_PRODUCT=novel-adaptation pnpm --filter @viforge/web dev
 ```
 
 如果前后端都从 `packages/shared` 读取同一个 profile，合同会更稳。后续也可以让 API 暴露：
@@ -219,8 +219,8 @@ apps/web/src/product-profile.ts
 两个产品如果共用一套机器，建议工作区根目录按产品隔离：
 
 ```text
-~/.viwork/data/sitcom/workspaces
-~/.viwork/data/novel-adaptation/workspaces
+~/.viforge/data/sitcom/workspaces
+~/.viforge/data/novel-adaptation/workspaces
 ```
 
 否则全局 `Agent 配置`、知识库、模板库会互相覆盖。
@@ -228,13 +228,13 @@ apps/web/src/product-profile.ts
 可以用：
 
 ```bash
-WORKSPACES_ROOT=~/.viwork/data/novel-adaptation/workspaces
+WORKSPACES_ROOT=~/.viforge/data/novel-adaptation/workspaces
 ```
 
 更好的默认值是让 `WORKSPACES_ROOT` 自动带上 product id：
 
 ```ts
-~/.viwork/data/<productId>/workspaces
+~/.viforge/data/<productId>/workspaces
 ```
 
 这样两个产品共享代码，但数据天然隔离。
@@ -254,7 +254,7 @@ WORKSPACES_ROOT=~/.viwork/data/novel-adaptation/workspaces
 - 把当前小说改编模板迁移到 `novel-adaptation` profile。
 - 把情景剧旧模板恢复为 `sitcom` profile。
 - `workspaceStore`、`MastraRunService`、`web` 都从 profile 读取领域配置。
-- 加 `VIWORK_PRODUCT` 或 `/api/product-profile`。
+- 加 `VIFORGE_PRODUCT` 或 `/api/product-profile`。
 
 ### 第三阶段：显式 Mastra workflow
 
@@ -276,8 +276,8 @@ pnpm dev:novel
 或两套 Docker compose env：
 
 ```text
-VIWORK_PRODUCT=sitcom
-VIWORK_PRODUCT=novel-adaptation
+VIFORGE_PRODUCT=sitcom
+VIFORGE_PRODUCT=novel-adaptation
 ```
 
 基础能力升级只改一次，产品差异只改 profile。

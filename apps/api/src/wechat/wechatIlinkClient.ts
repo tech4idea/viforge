@@ -307,7 +307,7 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
 
     async sendText({ to, text, contextToken }) {
       if (!session) throw new Error('Not connected');
-      const clientId = `viwork-${randomBytes(3).toString('hex')}`;
+      const clientId = `viforge-${randomBytes(3).toString('hex')}`;
       await apiPost<Record<string, unknown>>('/ilink/bot/sendmessage', {
         msg: {
           from_user_id: '',
@@ -326,7 +326,7 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
 
       const fileName = ensureImageName(name, mimeType);
       const { downloadEncryptedQueryParam, aesKeyBase64, fileSizeCiphertext } = await uploadEncryptedMedia(to, bytes, mimeType, fileName);
-      const clientId = `viwork-img-${randomBytes(3).toString('hex')}`;
+      const clientId = `viforge-img-${randomBytes(3).toString('hex')}`;
 
       await apiPost<Record<string, unknown>>('/ilink/bot/sendmessage', {
         msg: {
@@ -359,7 +359,7 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
       const mediaType = ilinkMediaType(mimeType);
       const fileName = name.trim() || `file-${Date.now()}`;
       const { downloadEncryptedQueryParam, aesKeyBase64, fileSizeCiphertext } = await uploadEncryptedMedia(to, bytes, mimeType, fileName, mediaType);
-      const clientId = `viwork-file-${randomBytes(3).toString('hex')}`;
+      const clientId = `viforge-file-${randomBytes(3).toString('hex')}`;
 
       const cdnMedia = {
         encrypt_query_param: downloadEncryptedQueryParam,

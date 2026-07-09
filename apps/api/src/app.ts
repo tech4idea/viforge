@@ -20,6 +20,7 @@ import { createWechatRoutes } from './routes/wechat';
 import { createGitRoutes } from './routes/git';
 import { createScheduleRoutes } from './routes/schedules';
 import { createRuntimeConfigRoutes } from './routes/runtimeConfig';
+import { createBrowserRoutes } from './routes/browser';
 import { createGitService } from './storage/gitService';
 import { createGitConfigStore } from './storage/gitConfigStore';
 import { createSkillStore } from './skills/skillStore';
@@ -35,6 +36,7 @@ import { createWechatSessionRouter, type WechatSessionRouter } from './wechat/we
 import { assertNever, type PendingSessionAction } from './wechat/wechatTypes';
 import type { WechatIlinkClient } from './wechat/wechatIlinkClient';
 import type { WechatPoller } from './wechat/wechatPoller';
+import { createQueuedRunService } from './runs/queuedRunService';
 import { WORKSPACES_ROOT } from './env';
 import { installDesktopAccessGuard } from './desktopAccess';
 import { initializePhoenixTracing } from './observability/phoenix';
@@ -57,6 +59,7 @@ export function createApp(): Hono {
   app.route('/api', createProjectsRoutes(workspaceStore));
   app.route('/api', createAigcHubRoutes());
   app.route('/api', createRuntimeConfigRoutes(createRuntimeConfigStore()));
+  app.route('/api', createBrowserRoutes());
 
   // WeChat + ilink (zero-config: uses official WeChat https://ilinkai.weixin.qq.com)
   const wechatStore = createWechatStore(path.join(WORKSPACES_ROOT, '..', 'wechat.json'));
@@ -83,9 +86,10 @@ export function createApp(): Hono {
     harnessStore,
     scheduleService,
   });
-  scheduleService.setRunService(langGraphRunService, runBus);
+  const queuedRunService = createQueuedRunService(langGraphRunService, runBus);
+  scheduleService.setRunService(queuedRunService, runBus);
   scheduleService.start();
-  app.route('/api', createRunsRoutes(langGraphRunService, runBus, harnessStore));
+  app.route('/api', createRunsRoutes(queuedRunService, runBus, harnessStore));
   app.route('/api', createRunEventsRoutes(runBus));
   app.route('/api', createHarnessRoutes(harnessStore));
 
@@ -97,7 +101,7 @@ export function createApp(): Hono {
 
   app.route('/api', createGitRoutes(gitService, gitConfigStore, workspaceStore));
 
-  const assistantChatBridge = createAssistantChatBridge(chatSessionStore, langGraphRunService, runBus, wechatStore, ilinkClient);
+  const assistantChatBridge = createAssistantChatBridge(chatSessionStore, queuedRunService, runBus, wechatStore, ilinkClient);
   const sessionRouter: WechatSessionRouter = createWechatSessionRouter(wechatStore, chatSessionStore, workspaceStore);
 
   const wechatPoller: WechatPoller = createWechatPoller(ilinkClient, wechatStore, async (update) => {
@@ -275,8 +279,8 @@ export function createApp(): Hono {
   }));
   app.route('/api', createScheduleRoutes(scheduleStore, scheduleService));
 
-  if (process.env.VIWORK_STATIC_WEB_ROOT) {
-    mountStaticWeb(app, process.env.VIWORK_STATIC_WEB_ROOT);
+  if (process.env.VIFORGE_STATIC_WEB_ROOT) {
+    mountStaticWeb(app, process.env.VIFORGE_STATIC_WEB_ROOT);
   }
 
   return app;
@@ -291,6 +295,17 @@ async function executeConfirmedSessionAction(
 ): Promise<void> {
   switch (action.type) {
   case 'new_session':
+    await wechatStore.setRouteState(externalUserId, action.projectId ? {
+      scope: 'project',
+      projectId: action.projectId,
+      projectName: action.projectName,
+      lastCommandAt: new Date().toISOString(),
+    } : {
+      scope: 'temporary',
+      projectId: null,
+      projectName: '临时会话',
+      lastCommandAt: new Date().toISOString(),
+    });
     await wechatStore.setActiveChatSessionId(externalUserId, null);
     console.info('[wechat] cleared active session for new session', { externalUserId });
     return;

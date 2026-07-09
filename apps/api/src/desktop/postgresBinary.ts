@@ -20,8 +20,8 @@ type EmbeddedPostgresRuntime = {
   port: number;
 };
 
-const DEFAULT_DATABASE = 'viwork';
-const DEFAULT_USER = 'viwork';
+const DEFAULT_DATABASE = 'viforge';
+const DEFAULT_USER = 'viforge';
 
 let runtime: Promise<EmbeddedPostgresRuntime> | null = null;
 let shutdownRegistered = false;
@@ -35,7 +35,7 @@ export async function ensureEmbeddedPostgres(options: EmbeddedPostgresOptions = 
 }
 
 async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<EmbeddedPostgresRuntime> {
-  const dataRoot = options.dataRoot ?? path.join(os.homedir(), '.viwork', 'desktop');
+  const dataRoot = options.dataRoot ?? path.join(os.homedir(), '.viforge', 'desktop');
   const dataDir = path.join(dataRoot, 'postgres-data');
   const binDir = options.binDir ?? resolveBundledPostgresBinDir();
   const initdb = executablePath(binDir, 'initdb');
@@ -43,10 +43,10 @@ async function startEmbeddedPostgres(options: EmbeddedPostgresOptions): Promise<
   const postgres = executablePath(binDir, 'postgres');
   const createdb = executablePath(binDir, 'createdb');
   const psql = executablePath(binDir, 'psql');
-  const preferredPort = options.port ?? Number(process.env.VIWORK_EMBEDDED_POSTGRES_PORT ?? '15432');
+  const preferredPort = options.port ?? Number(process.env.VIFORGE_EMBEDDED_POSTGRES_PORT ?? '15432');
   const database = options.database ?? DEFAULT_DATABASE;
   const user = options.user ?? DEFAULT_USER;
-  const password = options.password ?? process.env.VIWORK_EMBEDDED_POSTGRES_PASSWORD ?? randomBytes(18).toString('base64url');
+  const password = options.password ?? process.env.VIFORGE_EMBEDDED_POSTGRES_PASSWORD ?? randomBytes(18).toString('base64url');
 
   await assertExecutable(initdb, 'initdb');
   await assertExecutable(pgCtl, 'pg_ctl');
@@ -164,7 +164,7 @@ async function ensureDatabase(input: { createdb: string; psql: string; port: num
   }
   await runCommand(input.psql, [...baseArgs, '-d', 'postgres', '-c', `ALTER USER ${quoteIdentifier(input.user)} WITH PASSWORD '${escapeSqlLiteral(input.password)}'`]);
   if (!(await pgvectorExtensionAvailable(input.psql))) {
-    process.env.VIWORK_PGVECTOR_AVAILABLE = '0';
+    process.env.VIFORGE_PGVECTOR_AVAILABLE = '0';
     console.warn('[desktop] pgvector extension is not available in the embedded PostgreSQL bundle; LangGraph memory will use PostgreSQL text search only.');
     return;
   }
@@ -173,7 +173,7 @@ async function ensureDatabase(input: { createdb: string; psql: string; port: num
     ignoreStderrIncludes: 'extension "vector" already exists',
     allowFailure: true,
   });
-  process.env.VIWORK_PGVECTOR_AVAILABLE = vectorReady ? '1' : '0';
+  process.env.VIFORGE_PGVECTOR_AVAILABLE = vectorReady ? '1' : '0';
   if (!vectorReady) {
     console.warn('[desktop] pgvector extension is not available in the embedded PostgreSQL bundle; LangGraph memory will use PostgreSQL text search only.');
   }
@@ -201,7 +201,7 @@ function escapeSqlLiteral(value: string): string {
 }
 
 function resolveBundledPostgresBinDir(): string {
-  if (process.env.VIWORK_POSTGRES_BIN_DIR) return process.env.VIWORK_POSTGRES_BIN_DIR;
+  if (process.env.VIFORGE_POSTGRES_BIN_DIR) return process.env.VIFORGE_POSTGRES_BIN_DIR;
   const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   return path.resolve(process.cwd(), 'resources', 'postgres', `${platform}-${arch}`, 'bin');
@@ -213,7 +213,7 @@ function executablePath(binDir: string, name: string): string {
 
 async function assertExecutable(filePath: string, name: string): Promise<void> {
   if (await exists(filePath)) return;
-  throw new Error(`Embedded PostgreSQL ${name} binary was not found at ${filePath}. Set VIWORK_POSTGRES_BIN_DIR or install the desktop resource bundle.`);
+  throw new Error(`Embedded PostgreSQL ${name} binary was not found at ${filePath}. Set VIFORGE_POSTGRES_BIN_DIR or install the desktop resource bundle.`);
 }
 
 async function exists(filePath: string): Promise<boolean> {

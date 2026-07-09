@@ -1,4 +1,4 @@
-import type { WorkspaceTreeNode } from '@viwork/shared';
+import type { WorkspaceTreeNode } from '@viforge/shared';
 import type { WorkspaceEntry } from './api';
 import { ACTIVE_PRODUCT_PROFILE } from './product-profile';
 

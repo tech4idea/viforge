@@ -8,20 +8,20 @@ import { createRuntimeConfigRoutes } from './runtimeConfig';
 import { applyRuntimeConfigToEnv, createRuntimeConfigStore } from '../runtimeConfigStore';
 
 const tempDirs: string[] = [];
-const originalDesktop = process.env.VIWORK_DESKTOP;
-const originalDatabaseMode = process.env.VIWORK_DATABASE_MODE;
+const originalDesktop = process.env.VIFORGE_DESKTOP;
+const originalDatabaseMode = process.env.VIFORGE_DATABASE_MODE;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 
 afterEach(async () => {
-  restoreEnv('VIWORK_DESKTOP', originalDesktop);
-  restoreEnv('VIWORK_DATABASE_MODE', originalDatabaseMode);
+  restoreEnv('VIFORGE_DESKTOP', originalDesktop);
+  restoreEnv('VIFORGE_DATABASE_MODE', originalDatabaseMode);
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 describe('runtime config routes', () => {
   it('returns desktop-friendly default OpenAI-compatible model values', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);
     const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
 
@@ -37,22 +37,22 @@ describe('runtime config routes', () => {
   });
 
   it('forces embedded PostgreSQL in desktop mode even when legacy config points to an external database', async () => {
-    process.env.VIWORK_DESKTOP = '1';
-    process.env.DATABASE_URL = 'postgresql://legacy:password@db.example.test:5432/viwork';
+    process.env.VIFORGE_DESKTOP = '1';
+    process.env.DATABASE_URL = 'postgresql://legacy:password@db.example.test:5432/viforge';
 
     applyRuntimeConfigToEnv({
       database: {
         mode: 'external-postgres',
-        connectionString: 'postgresql://writer:password@db.example.test:5432/viwork',
+        connectionString: 'postgresql://writer:password@db.example.test:5432/viforge',
         vectorStore: 'pgvector',
       },
     });
 
-    expect(process.env.VIWORK_DATABASE_MODE).toBe('embedded-postgres');
+    expect(process.env.VIFORGE_DATABASE_MODE).toBe('embedded-postgres');
     expect(process.env.DATABASE_URL).toBeUndefined();
   });
   it('validates model test requests without requiring network when the API key is missing', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);
     const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
 
@@ -70,7 +70,7 @@ describe('runtime config routes', () => {
   });
 
   it('persists OpenAI-compatible model and database configuration without returning secrets', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);
     const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
 
@@ -87,7 +87,7 @@ describe('runtime config routes', () => {
         },
         database: {
           mode: 'external-postgres',
-          connectionString: 'postgresql://writer:password@db.example.test:5432/viwork',
+          connectionString: 'postgresql://writer:password@db.example.test:5432/viforge',
           vectorStore: 'pgvector',
         },
       }),
@@ -105,7 +105,7 @@ describe('runtime config routes', () => {
     expect(saved.database).toMatchObject({
       mode: 'external-postgres',
       connectionStringConfigured: true,
-      connectionString: 'postgresql://writer:***@db.example.test:5432/viwork',
+      connectionString: 'postgresql://writer:***@db.example.test:5432/viforge',
       vectorStore: 'pgvector',
     });
 
@@ -118,7 +118,7 @@ describe('runtime config routes', () => {
   });
 
   it('does not carry an external connection string into embedded PostgreSQL mode', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'viwork-runtime-config-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);
     const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
 
@@ -128,7 +128,7 @@ describe('runtime config routes', () => {
       body: JSON.stringify({
         database: {
           mode: 'external-postgres',
-          connectionString: 'postgresql://writer:password@db.example.test:5432/viwork',
+          connectionString: 'postgresql://writer:password@db.example.test:5432/viforge',
           vectorStore: 'pgvector',
         },
       }),
@@ -144,7 +144,7 @@ describe('runtime config routes', () => {
     expect(await embeddedResponse.json()).toMatchObject({
       database: {
         mode: 'embedded-postgres',
-        connectionString: 'postgresql://127.0.0.1:15432/viwork',
+        connectionString: 'postgresql://127.0.0.1:15432/viforge',
         vectorStore: 'pgvector',
       },
     });

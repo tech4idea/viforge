@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { StreamEvent } from '@viwork/shared';
+import type { StreamEvent } from '@viforge/shared';
 
 import type { RunBus } from '../runs/runBus';
 

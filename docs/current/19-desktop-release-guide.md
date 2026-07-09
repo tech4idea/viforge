@@ -62,8 +62,8 @@ share/
 推荐来源是 PostgreSQL 官方稳定版本源码，或官方安装包提取出的可重定位目录。不要依赖来路不明的第三方 binary。当前项目提供源码构建脚本：
 
 ```powershell
-$env:VIWORK_POSTGRES_SOURCE_DIR="C:\path\to\postgresql-16.10"
-pnpm --filter @viwork/desktop build:postgres
+$env:VIFORGE_POSTGRES_SOURCE_DIR="C:\path\to\postgresql-16.10"
+pnpm --filter @viforge/desktop build:postgres
 ```
 
 当前 `build:postgres` 脚本主要覆盖 Linux/macOS 的 `configure && make install` 流程。Windows 更稳妥的做法是：
@@ -87,25 +87,25 @@ postgres-18.4-pgvector-0.8.3-win32-x64.zip
 如果 GitHub Release asset 带有 `sha256:` digest，脚本会自动校验；也可以显式覆盖：
 
 ```powershell
-$env:VIWORK_POSTGRES_BUNDLE_SHA256="dd3f5f..."
+$env:VIFORGE_POSTGRES_BUNDLE_SHA256="dd3f5f..."
 ```
 
 复制或自动下载后运行检查：
 
 ```powershell
-$env:VIWORK_POSTGRES_PLATFORM_ARCH="win32-x64"
-pnpm --filter @viwork/desktop prepare:postgres
+$env:VIFORGE_POSTGRES_PLATFORM_ARCH="win32-x64"
+pnpm --filter @viforge/desktop prepare:postgres
 ```
 
 可选环境变量：
 
 ```powershell
-$env:VIWORK_POSTGRES_BUNDLE_RELEASE_REPO="YukeonWayne/pg_pgvector_binary"
-$env:VIWORK_POSTGRES_BUNDLE_RELEASE_TAG="v18.4-pgvector0.8.3-win32-x64"
-$env:VIWORK_POSTGRES_BUNDLE_ASSET_NAME="postgres-18.4-pgvector-0.8.3-win32-x64.zip"
+$env:VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO="YukeonWayne/pg_pgvector_binary"
+$env:VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG="v18.4-pgvector0.8.3-win32-x64"
+$env:VIFORGE_POSTGRES_BUNDLE_ASSET_NAME="postgres-18.4-pgvector-0.8.3-win32-x64.zip"
 ```
 
-如果仓库或 release 是私有的，给构建环境设置 `VIWORK_POSTGRES_BUNDLE_GITHUB_TOKEN` 或 `GITHUB_TOKEN`，token 只需要 release 资源读取权限。
+如果仓库或 release 是私有的，给构建环境设置 `VIFORGE_POSTGRES_BUNDLE_GITHUB_TOKEN` 或 `GITHUB_TOKEN`，token 只需要 release 资源读取权限。
 
 ## 5. 准备 pgvector
 
@@ -114,8 +114,8 @@ LangGraph Store 的语义检索需要 pgvector。正式安装包建议包含 pgv
 下载 pgvector release 源码，例如 `v0.8.0`：
 
 ```powershell
-$env:VIWORK_PGVECTOR_SOURCE_DIR="C:\path\to\pgvector-0.8.0"
-pnpm --filter @viwork/desktop build:pgvector
+$env:VIFORGE_PGVECTOR_SOURCE_DIR="C:\path\to\pgvector-0.8.0"
+pnpm --filter @viforge/desktop build:pgvector
 ```
 
 脚本会使用 `apps/desktop/resources/postgres/<platform>-<arch>/bin/pg_config` 编译并安装 pgvector。完成后应能看到：
@@ -128,9 +128,9 @@ apps/desktop/resources/postgres/win32-x64/lib/vector.dll
 发布前建议强制检查 pgvector：
 
 ```powershell
-$env:VIWORK_REQUIRE_PGVECTOR="1"
-$env:VIWORK_POSTGRES_PLATFORM_ARCH="win32-x64"
-pnpm --filter @viwork/desktop prepare:postgres
+$env:VIFORGE_REQUIRE_PGVECTOR="1"
+$env:VIFORGE_POSTGRES_PLATFORM_ARCH="win32-x64"
+pnpm --filter @viforge/desktop prepare:postgres
 ```
 
 ## 6. 构建目录版
@@ -194,10 +194,10 @@ CI 中至少运行：
 
 ```bash
 pnpm install
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
-pnpm --filter @viwork/desktop build
-VIWORK_REQUIRE_PGVECTOR=1 pnpm --filter @viwork/desktop prepare:postgres
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
+pnpm --filter @viforge/desktop build
+VIFORGE_REQUIRE_PGVECTOR=1 pnpm --filter @viforge/desktop prepare:postgres
 pnpm desktop:dist
 ```
 
@@ -205,18 +205,18 @@ Windows GitHub Actions 可以直接使用：
 
 ```yaml
 - name: Verify or download PostgreSQL bundle
-  run: pnpm --filter @viwork/desktop prepare:postgres
+  run: pnpm --filter @viforge/desktop prepare:postgres
   env:
-    VIWORK_POSTGRES_PLATFORM_ARCH: win32-x64
-    VIWORK_REQUIRE_PGVECTOR: '1'
-    VIWORK_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
-    VIWORK_POSTGRES_BUNDLE_RELEASE_TAG: v18.4-pgvector0.8.3-win32-x64
+    VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
+    VIFORGE_REQUIRE_PGVECTOR: '1'
+    VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
+    VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: v18.4-pgvector0.8.3-win32-x64
 
 - name: Build installer
   run: pnpm desktop:dist
   env:
-    VIWORK_POSTGRES_PLATFORM_ARCH: win32-x64
-    VIWORK_REQUIRE_PGVECTOR: '1'
+    VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
+    VIFORGE_REQUIRE_PGVECTOR: '1'
 ```
 
 ## 9. 推送前检查清单
@@ -225,10 +225,10 @@ Windows GitHub Actions 可以直接使用：
 
 ```bash
 git status --short
-pnpm --filter @viwork/api typecheck
-pnpm --filter @viwork/web typecheck
-pnpm --filter @viwork/desktop build
-pnpm --filter @viwork/api test -- runtimeConfig.test.ts desktopAccess.test.ts
+pnpm --filter @viforge/api typecheck
+pnpm --filter @viforge/web typecheck
+pnpm --filter @viforge/desktop build
+pnpm --filter @viforge/api test -- runtimeConfig.test.ts desktopAccess.test.ts
 pnpm desktop:pack
 ```
 
@@ -244,6 +244,6 @@ PostgreSQL binary bundle 目前被 `.gitignore` 排除，发布流程应通过 C
 
 ## 10. 当前已知注意点
 
-- 没有 pgvector 时应用仍能启动，但 LangGraph 长期记忆会退化为文本检索。正式包建议强制 `VIWORK_REQUIRE_PGVECTOR=1`。
+- 没有 pgvector 时应用仍能启动，但 LangGraph 长期记忆会退化为文本检索。正式包建议强制 `VIFORGE_REQUIRE_PGVECTOR=1`。
 - Linux/WSL 下运行图形应用可能受沙箱或显示环境限制，目录包能构建不代表 GUI 可在 WSL 中正常打开。
 - GitHub Actions 生成 macOS 包若要分发给普通用户，还需要 Apple Developer 签名和 notarization；内部测试可先跳过。

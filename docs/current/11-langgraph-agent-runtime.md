@@ -1,6 +1,6 @@
 # LangGraph Agent 运行时
 
-本文记录 LangGraph 作为 viwork 创作 agent 引擎的当前实现。当前 API 默认通过 LangGraph/LangChain 执行常规文本创作 run，不再依赖 Mastra runtime。
+本文记录 LangGraph 作为 viforge 创作 agent 引擎的当前实现。当前 API 默认通过 LangGraph/LangChain 执行常规文本创作 run，不再依赖 Mastra runtime。
 
 ## 当前依赖
 
@@ -15,17 +15,17 @@ API 侧核心依赖：
 
 模型调用仍走 AIGC Hub 的 OpenAI-compatible `/v1/chat/completions` 接口。默认配置优先级：
 
-- `VIWORK_AIGC_HUB_CHAT_MODEL` / `AIGC_HUB_CHAT_MODEL`
-- `VIWORK_LANGGRAPH_MODEL`
+- `VIFORGE_AIGC_HUB_CHAT_MODEL` / `AIGC_HUB_CHAT_MODEL`
+- `VIFORGE_LANGGRAPH_MODEL`
 - 默认 `ds/deepseek-v4-pro`
 
 网关地址和密钥优先读取：
 
-- `VIWORK_AIGC_HUB_BASE_URL` / `AIGC_HUB_BASE_URL`
-- `VIWORK_LANGGRAPH_BASE_URL`
+- `VIFORGE_AIGC_HUB_BASE_URL` / `AIGC_HUB_BASE_URL`
+- `VIFORGE_LANGGRAPH_BASE_URL`
 - `OPENAI_BASE_URL`
-- `VIWORK_AIGC_HUB_API_KEY` / `AIGC_HUB_API_KEY`
-- `VIWORK_LANGGRAPH_API_KEY`
+- `VIFORGE_AIGC_HUB_API_KEY` / `AIGC_HUB_API_KEY`
+- `VIFORGE_LANGGRAPH_API_KEY`
 - `OPENAI_API_KEY` / `CODEX_API_KEY`
 
 ## 启动方式
@@ -33,7 +33,7 @@ API 侧核心依赖：
 正常启动 API 即使用 LangGraph：
 
 ```bash
-pnpm --filter @viwork/api dev
+pnpm --filter @viforge/api dev
 ```
 
 入口位于 [apps/api/src/runs/langGraphRunService.ts](../../apps/api/src/runs/langGraphRunService.ts)。API 组合入口 [apps/api/src/app.ts](../../apps/api/src/app.ts) 装配 `createLangGraphRunService(workspaceStore, runBus)`。
@@ -46,7 +46,7 @@ LangGraph run service 实现统一的 `RunService` 接口：
 2. 后端发布 `run.start` 和 `thread.started`。
 3. 构造创作 prompt，包含用户输入、引用文件和引用聊天片段。
 4. 创建 LangGraph ReAct agent，并通过 LangChain `ChatOpenAI` 调用 AIGC Hub。
-5. 暴露 viwork 业务级 workspace tools，而不是 raw shell：
+5. 暴露 viforge 业务级 workspace tools，而不是 raw shell：
    - `list_workspace_entries`
    - `read_workspace_file`
    - `write_workspace_file`
@@ -71,7 +71,7 @@ LangGraph run service 实现统一的 `RunService` 接口：
 
 ## Playwriter Browser Tools
 
-LangGraph runtime 现在通过 Playwriter 暴露浏览器能力，目标是连接用户已登录、已授权的真实浏览器标签页，而不是启动一个全新的无状态浏览器。API 通过 Playwriter CLI 执行浏览器动作，CLI 路径默认 `playwriter`，可用 `VIWORK_PLAYWRITER_BIN` 覆盖。API 默认连接 `VIWORK_PLAYWRITER_HOST`，未设置时使用 `http://127.0.0.1:19988`；如 Playwriter relay 配置了 token，可设置 `VIWORK_PLAYWRITER_TOKEN`。默认 session id 可用 `VIWORK_PLAYWRITER_SESSION_ID` 覆盖，未设置时会自动创建并复用 session。桌面版会由 Electron 主进程自动启动本机 relay，用户只需要安装浏览器扩展并授权标签页；普通 Web/API 部署仍需要手动启动 `playwriter serve`。
+LangGraph runtime 现在通过 Playwriter 暴露浏览器能力，目标是连接用户已登录、已授权的真实浏览器标签页，而不是启动一个全新的无状态浏览器。API 通过 Playwriter CLI 执行浏览器动作，CLI 路径默认 `playwriter`，可用 `VIFORGE_PLAYWRITER_BIN` 覆盖。API 默认连接 `VIFORGE_PLAYWRITER_HOST`，未设置时使用 `http://127.0.0.1:19988`；如 Playwriter relay 配置了 token，可设置 `VIFORGE_PLAYWRITER_TOKEN`。默认 session id 可用 `VIFORGE_PLAYWRITER_SESSION_ID` 覆盖，未设置时会自动创建并复用 session。桌面版会由 Electron 主进程自动启动本机 relay，用户只需要安装浏览器扩展并授权标签页；普通 Web/API 部署仍需要手动启动 `playwriter serve`。
 
 Agent 可用工具：
 
@@ -90,7 +90,7 @@ npm i -g playwriter
 playwriter serve --host 127.0.0.1
 ```
 
-浏览器侧需要安装 remorses/playwriter 的 Chrome 扩展，并在要授权给 agent 的标签页点击扩展图标。需要独立 session 时可先执行 `playwriter session new`，再把返回的 id 设置为 `VIWORK_PLAYWRITER_SESSION_ID`。
+浏览器侧需要安装 remorses/playwriter 的 Chrome 扩展，并在要授权给 agent 的标签页点击扩展图标。需要独立 session 时可先执行 `playwriter session new`，再把返回的 id 设置为 `VIFORGE_PLAYWRITER_SESSION_ID`。
 默认不需要手动创建 session；ViForge 会在首次浏览器工具调用时自动创建并复用 Playwriter session。
    - `file.changed`
    - `image.generated`
@@ -105,7 +105,7 @@ playwriter serve --host 127.0.0.1
 
 ### 1. 主 Agent 默认工作
 
-每次 run 会创建一个 `viwork-system-agent` 作为主 agent。主 agent 接收完整用户请求、引用文件和引用聊天片段，默认直接处理普通问候、问答解释、资料整理、轻量润色、局部文件写入和一般创作讨论。
+每次 run 会创建一个 `viforge-system-agent` 作为主 agent。主 agent 接收完整用户请求、引用文件和引用聊天片段，默认直接处理普通问候、问答解释、资料整理、轻量润色、局部文件写入和一般创作讨论。
 
 主 agent 的 instructions 由两部分组成：
 
@@ -170,12 +170,12 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 - `PostgresSaver`，schema 为 `langgraph`，用于 LangGraph checkpoint 表。
 - `PostgresStore`，schema 为 `langgraph_store`，用于 LangGraph Store 表。
 
-运行态必须配置 PostgreSQL：桌面单机模式由 API 启动内置 PostgreSQL binary 并写入 `DATABASE_URL`，服务模式应通过外部 PostgreSQL 或 Docker Compose 注入 `DATABASE_URL`。`MemorySaver` + `InMemoryStore` 只作为自动化测试后备，需显式设置 `VIWORK_LANGGRAPH_ALLOW_IN_MEMORY=1`，不作为产品运行模式暴露。
+运行态必须配置 PostgreSQL：桌面单机模式由 API 启动内置 PostgreSQL binary 并写入 `DATABASE_URL`，服务模式应通过外部 PostgreSQL 或 Docker Compose 注入 `DATABASE_URL`。`MemorySaver` + `InMemoryStore` 只作为自动化测试后备，需显式设置 `VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY=1`，不作为产品运行模式暴露。
 
-项目长期记忆由 viwork 自己的工具层实现：
+项目长期记忆由 viforge 自己的工具层实现：
 
-- `read_project_memory` / `update_project_memory`：读写 `['viwork', 'projects', projectId, 'working-memory']` 命名空间下的结构化 Markdown 记忆。
-- `remember_project_memory` / `recall_project_memory`：读写 `['viwork', 'projects', projectId, 'memories']` 命名空间下的精选长期记忆，并通过 LangGraph Store 的 `search()` 检索。
+- `read_project_memory` / `update_project_memory`：读写 `['viforge', 'projects', projectId, 'working-memory']` 命名空间下的结构化 Markdown 记忆。
+- `remember_project_memory` / `recall_project_memory`：读写 `['viforge', 'projects', projectId, 'memories']` 命名空间下的精选长期记忆，并通过 LangGraph Store 的 `search()` 检索。
 
 这些工具会额外发布 Harness 可消费的运行事件：
 
@@ -193,7 +193,7 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 
 语义检索配置：
 
-- 有 AIGC Hub API key 时，`PostgresStore` 启用 vector index，embedding 模型使用 `VIWORK_AIGC_HUB_EMBEDDING_MODEL`，维度默认 `1024`，可用 `VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS` 覆盖。
+- 有 AIGC Hub API key 时，`PostgresStore` 启用 vector index，embedding 模型使用 `VIFORGE_AIGC_HUB_EMBEDDING_MODEL`，维度默认 `1024`，可用 `VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS` 覆盖。
 - 未配置 embedding key 时，`PostgresStore` 仍持久化长期记忆，`search()` 退化为 PostgreSQL 文本搜索。
 
 前端聊天会话 JSON 只负责 UI 历史展示，不再手动拼接进 prompt；多轮上下文由 LangGraph checkpointer 依据 `thread_id` 自动恢复。

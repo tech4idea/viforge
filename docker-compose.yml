@@ -3,15 +3,15 @@ services:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-viwork}
-      POSTGRES_USER: ${POSTGRES_USER:-viwork}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-viwork}
+      POSTGRES_DB: ${POSTGRES_DB:-viforge}
+      POSTGRES_USER: ${POSTGRES_USER:-viforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-viforge}
     ports:
-      - "${VIWORK_POSTGRES_PORT:-25432}:5432"
+      - "${VIFORGE_POSTGRES_PORT:-25432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-viwork}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-viforge}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -20,7 +20,7 @@ services:
     image: qdrant/qdrant:v1.13.2
     restart: unless-stopped
     ports:
-      - "${VIWORK_QDRANT_PORT:-16333}:6333"
+      - "${VIFORGE_QDRANT_PORT:-16333}:6333"
     volumes:
       - qdrant-data:/qdrant/storage
 
@@ -28,40 +28,40 @@ services:
     build:
       context: .
       target: api-runtime
-    image: viwork-api:latest
+    image: viforge-api:latest
     restart: unless-stopped
     ports:
-      - "${VIWORK_API_PORT:-13001}:3001"
+      - "${VIFORGE_API_PORT:-13001}:3001"
     environment:
       PORT: 3001
-      VIWORK_PRODUCT: ${VIWORK_PRODUCT:-novel-adaptation}
+      VIFORGE_PRODUCT: ${VIFORGE_PRODUCT:-novel-adaptation}
       WORKSPACES_ROOT: /data/workspaces
       LOGS_ROOT: /data/logs
-      DATABASE_URL: postgresql://${POSTGRES_USER:-viwork}:${POSTGRES_PASSWORD:-viwork}@postgres:5432/${POSTGRES_DB:-viwork}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-viforge}:${POSTGRES_PASSWORD:-viforge}@postgres:5432/${POSTGRES_DB:-viforge}
       QDRANT_URL: http://qdrant:6333
-      VIWORK_AIGC_HUB_BASE_URL: ${VIWORK_AIGC_HUB_BASE_URL:-}
-      VIWORK_AIGC_HUB_API_KEY: ${VIWORK_AIGC_HUB_API_KEY:-}
-      VIWORK_AIGC_HUB_APP_ID: ${VIWORK_AIGC_HUB_APP_ID:-}
-      VIWORK_AIGC_HUB_IMAGE_MODEL: ${VIWORK_AIGC_HUB_IMAGE_MODEL:-}
-      VIWORK_AIGC_HUB_CHAT_MODEL: ${VIWORK_AIGC_HUB_CHAT_MODEL:-}
-      VIWORK_WECHAT_CHAT_MODEL: ${VIWORK_WECHAT_CHAT_MODEL:-minimax/minimax-m2.7}
-      VIWORK_AIGC_HUB_EMBEDDING_MODEL: ${VIWORK_AIGC_HUB_EMBEDDING_MODEL:-}
-      VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS: ${VIWORK_LANGGRAPH_STORE_EMBEDDING_DIMS:-1024}
-      VIWORK_PLAYWRITER_BIN: ${VIWORK_PLAYWRITER_BIN:-/app/apps/api/node_modules/.bin/playwriter}
-      VIWORK_PLAYWRITER_HOST: ${VIWORK_PLAYWRITER_HOST:-http://host.docker.internal:19988}
-      VIWORK_PLAYWRITER_TOKEN: ${VIWORK_PLAYWRITER_TOKEN:-}
-      VIWORK_PLAYWRITER_SESSION_ID: ${VIWORK_PLAYWRITER_SESSION_ID:-}
-      VIWORK_PLAYWRITER_HOST_HEADER: ${VIWORK_PLAYWRITER_HOST_HEADER:-}
+      VIFORGE_AIGC_HUB_BASE_URL: ${VIFORGE_AIGC_HUB_BASE_URL:-}
+      VIFORGE_AIGC_HUB_API_KEY: ${VIFORGE_AIGC_HUB_API_KEY:-}
+      VIFORGE_AIGC_HUB_APP_ID: ${VIFORGE_AIGC_HUB_APP_ID:-}
+      VIFORGE_AIGC_HUB_IMAGE_MODEL: ${VIFORGE_AIGC_HUB_IMAGE_MODEL:-}
+      VIFORGE_AIGC_HUB_CHAT_MODEL: ${VIFORGE_AIGC_HUB_CHAT_MODEL:-}
+      VIFORGE_WECHAT_CHAT_MODEL: ${VIFORGE_WECHAT_CHAT_MODEL:-minimax/minimax-m2.7}
+      VIFORGE_AIGC_HUB_EMBEDDING_MODEL: ${VIFORGE_AIGC_HUB_EMBEDDING_MODEL:-}
+      VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS: ${VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS:-1024}
+      VIFORGE_PLAYWRITER_BIN: ${VIFORGE_PLAYWRITER_BIN:-/app/apps/api/node_modules/.bin/playwriter}
+      VIFORGE_PLAYWRITER_HOST: ${VIFORGE_PLAYWRITER_HOST:-http://host.docker.internal:19988}
+      VIFORGE_PLAYWRITER_TOKEN: ${VIFORGE_PLAYWRITER_TOKEN:-}
+      VIFORGE_PLAYWRITER_SESSION_ID: ${VIFORGE_PLAYWRITER_SESSION_ID:-}
+      VIFORGE_PLAYWRITER_HOST_HEADER: ${VIFORGE_PLAYWRITER_HOST_HEADER:-}
       PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-http://192.168.43.167:6006}
-      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-viwork}
-      PHOENIX_SERVICE_NAME: ${PHOENIX_SERVICE_NAME:-viwork-api}
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-viforge}
+      PHOENIX_SERVICE_NAME: ${PHOENIX_SERVICE_NAME:-viforge-api}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${VIWORK_API_DATA_DIR:-./var/api-data}:/data
+      - ${VIFORGE_API_DATA_DIR:-./var/api-data}:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,12 +73,12 @@ services:
       context: .
       target: web-runtime
       args:
-        VIWORK_PRODUCT: ${VIWORK_PRODUCT:-novel-adaptation}
+        VIFORGE_PRODUCT: ${VIFORGE_PRODUCT:-novel-adaptation}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-    image: viwork-web:latest
+    image: viforge-web:latest
     restart: unless-stopped
     ports:
-      - "${VIWORK_WEB_PORT:-18080}:80"
+      - "${VIFORGE_WEB_PORT:-18080}:80"
     depends_on:
       - api
 

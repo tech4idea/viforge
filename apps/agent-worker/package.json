@@ -1,5 +1,5 @@
 {
-  "name": "@viwork/agent-worker",
+  "name": "@viforge/agent-worker",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -11,7 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@viwork/shared": "workspace:*"
+    "@viforge/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

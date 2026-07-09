@@ -28,8 +28,8 @@ import type {
   RunInputSnapshotFile,
   SkillSnapshot,
   WorkspaceManifest,
-} from '@viwork/shared';
-import { PRODUCT_PROFILES, resolveProductProfile, type ProductProfile } from '@viwork/shared';
+} from '@viforge/shared';
+import { PRODUCT_PROFILES, resolveProductProfile, type ProductProfile } from '@viforge/shared';
 
 import type { GitService } from '../storage/gitService';
 import type { WorkspaceStore } from '../storage/workspaceStore';
@@ -1273,9 +1273,9 @@ function ensureBaselineMemoryPolicy(state: HarnessState, productId: string, now:
     version: 1,
     status: 'active',
     namespaces: {
-      session: ['viwork', productId, 'sessions', '{sessionId}', 'memories'],
-      workspace: ['viwork', productId, 'workspaces', '{projectId}', 'memories'],
-      global: ['viwork', productId, 'users', '{userId}', 'global', 'memories'],
+      session: ['viforge', productId, 'sessions', '{sessionId}', 'memories'],
+      workspace: ['viforge', productId, 'workspaces', '{projectId}', 'memories'],
+      global: ['viforge', productId, 'users', '{userId}', 'global', 'memories'],
     },
     recallOrder: ['session', 'workspace', 'global'],
     writeRules: {

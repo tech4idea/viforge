@@ -1,5 +1,5 @@
 {
-  "name": "@viwork/web",
+  "name": "@viforge/web",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
@@ -23,7 +23,7 @@
     "@milkdown/theme-nord": "^7.20.0",
     "@milkdown/utils": "^7.20.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "@viwork/shared": "workspace:*",
+    "@viforge/shared": "workspace:*",
     "highlight.js": "^11.11.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

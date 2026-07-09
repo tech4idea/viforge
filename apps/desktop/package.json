@@ -1,5 +1,5 @@
 {
-  "name": "@viwork/desktop",
+  "name": "@viforge/desktop",
   "description": "ViForge standalone desktop app",
   "author": "ViForge contributors",
   "license": "MIT",
@@ -13,8 +13,8 @@
     "build:postgres": "node scripts/build-postgres-from-source.mjs",
     "build:pgvector": "node scripts/build-pgvector-from-source.mjs",
     "prepare:postgres": "node scripts/prepare-postgres.mjs",
-    "pack": "pnpm --filter @viwork/web build && pnpm --filter @viwork/api build && pnpm build && pnpm prepare:postgres && electron-builder --dir",
-    "dist": "pnpm --filter @viwork/web build && pnpm --filter @viwork/api build && pnpm build && pnpm prepare:postgres && electron-builder"
+    "pack": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder --dir",
+    "dist": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1"

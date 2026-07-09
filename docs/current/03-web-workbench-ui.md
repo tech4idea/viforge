@@ -10,7 +10,7 @@
 
 布局样式在 [apps/web/src/styles.css](../../apps/web/src/styles.css) 的 `.workspace-grid` 附近。
 
-产品文案来自 [apps/web/src/product-profile.ts](../../apps/web/src/product-profile.ts)。该文件读取 `VIWORK_PRODUCT`，从 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts) 解析 active profile，供页面标题、默认项目名、工作区分组、输入框 placeholder 和 agent timeline label 使用。未配置时默认 `novel-adaptation`。Vite 通过 [apps/web/vite.config.ts](../../apps/web/vite.config.ts) 把同名环境变量注入前端构建。
+产品文案来自 [apps/web/src/product-profile.ts](../../apps/web/src/product-profile.ts)。该文件读取 `VIFORGE_PRODUCT`，从 [packages/shared/src/productProfiles.ts](../../packages/shared/src/productProfiles.ts) 解析 active profile，供页面标题、默认项目名、工作区分组、输入框 placeholder 和 agent timeline label 使用。未配置时默认 `novel-adaptation`。Vite 通过 [apps/web/vite.config.ts](../../apps/web/vite.config.ts) 把同名环境变量注入前端构建。
 
 ## 三栏可调宽
 
@@ -57,7 +57,7 @@ const [collapsedPanels, setCollapsedPanels] = useState({ workspace: false, edito
 前端会把最近一次工作区选择写入浏览器 localStorage：
 
 ```text
-viwork.workspaceSelection.v1
+viforge.workspaceSelection.v1
 ```
 
 记录内容包括当前工作区范围、项目文件路径、全局文件路径、临时工作目录 projectId 和临时文件路径。页面刷新后先恢复路径，再从后端重新读取文件树和文件正文；如果路径已不存在，就回退到第一个可编辑文本文件。这里不缓存完整文件正文，避免展示过期内容。
@@ -102,5 +102,5 @@ const [chatReadingMode, setChatReadingMode] = useState(() => readStoredChatReadi
 标题栏 `Aa` 按钮切换阅读模式。阅读模式只放大对话正文和输入框，工具调用/执行详情仍保持紧凑。选择写入 localStorage key：
 
 ```ts
-viwork.chatReadingMode.v1
+viforge.chatReadingMode.v1
 ```

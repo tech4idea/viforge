@@ -10,6 +10,7 @@ import type {
   AgentSpecReleaseGate,
   AgentSpecReleaseRecord,
   BehaviorRule,
+  BrowserConnectorStatus,
   ChatMessage,
   ChatMessageAttachment,
   ChatSession,
@@ -51,7 +52,7 @@ import type {
   WorkspaceManifest,
   WorkspaceEntry,
   WorkspaceFile,
-} from '@viwork/shared';
+} from '@viforge/shared';
 
 export type {
   AigcHubModelListResponse,
@@ -63,6 +64,7 @@ export type {
   AgentSpecReleaseGate,
   AgentSpecReleaseRecord,
   BehaviorRule,
+  BrowserConnectorStatus,
   ChatMessage,
   ChatMessageAttachment,
   ChatSession,
@@ -102,7 +104,7 @@ export type {
   WechatStatus,
   WorkspaceEntry,
   WorkspaceFile,
-} from '@viwork/shared';
+} from '@viforge/shared';
 
 export type ApiClient = {
   getProductProfile(): Promise<ProductProfile>;
@@ -183,6 +185,7 @@ export type ApiClient = {
   createEvalRun(input: CreateEvalRunInput): Promise<EvalRun>;
   addHumanReview(evalRunId: string, input: CreateHumanReviewInput): Promise<EvalRun>;
   addBatchHumanReview(input: CreateBatchHumanReviewInput): Promise<EvalRun[]>;
+  getBrowserConnectorStatus(): Promise<BrowserConnectorStatus>;
   getWechatStatus(): Promise<WechatStatus>;
   createWechatSetupSession(): Promise<WechatSetupSession>;
   completeWechatSetupSession(sessionId: string, input: { displayName: string; externalUserId: string }): Promise<WechatStatus>;
@@ -723,6 +726,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    getBrowserConnectorStatus: () =>
+      request<BrowserConnectorStatus>(fetcher, baseUrl, '/api/browser/status'),
     getWechatStatus: () => request<WechatStatus>(fetcher, baseUrl, '/api/wechat/status'),
     createWechatSetupSession: () =>
       request<WechatSetupSession>(fetcher, baseUrl, '/api/wechat/setup-sessions', {
