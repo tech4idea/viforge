@@ -13,10 +13,10 @@ on:
       - pnpm-workspace.yaml
   workflow_dispatch:
     inputs:
-      binaries_ref:
-        description: Git ref to checkout from YukeonWayne/pg_pgvector_binary
+      bundle_release_tag:
+        description: GitHub Release tag from YukeonWayne/pg_pgvector_binary
         required: false
-        default: main
+        default: v18.4-pgvector0.8.3-win32-x64
 
 permissions:
   contents: read
@@ -30,49 +30,29 @@ jobs:
     env:
       VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
       VIFORGE_REQUIRE_PGVECTOR: '1'
+      VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
+      VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag || 'v18.4-pgvector0.8.3-win32-x64' }}
+      VIFORGE_POSTGRES_BUNDLE_ASSET_NAME: postgres-18.4-pgvector-0.8.3-win32-x64.zip
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.3.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Checkout PostgreSQL bundle
-        uses: actions/checkout@v4
-        with:
-          repository: YukeonWayne/pg_pgvector_binary
-          ref: ${{ inputs.binaries_ref || 'main' }}
-          path: desktop-binaries
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install PostgreSQL bundle
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $platform = $env:VIFORGE_POSTGRES_PLATFORM_ARCH
-          $source = "desktop-binaries/postgres/$platform"
-          $target = "apps/desktop/resources/postgres/$platform"
-
-          if (-not (Test-Path -LiteralPath $source)) {
-            throw "PostgreSQL bundle not found at $source"
-          }
-
-          Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path "apps/desktop/resources/postgres" | Out-Null
-          Copy-Item -LiteralPath $source -Destination $target -Recurse
-
-      - name: Verify PostgreSQL bundle
+      - name: Verify or download PostgreSQL bundle
         run: pnpm --filter @viforge/desktop prepare:postgres
 
       - name: Typecheck API
