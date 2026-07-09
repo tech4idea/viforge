@@ -1,7 +1,9 @@
 name: Desktop Windows
 
 on:
-  pull_request:
+  push:
+    branches:
+      - main
     paths:
       - .github/workflows/desktop-windows.yml
       - apps/api/**
