@@ -120,6 +120,8 @@ VIFORGE_WEB_PORT=8080 VIFORGE_API_PORT=3001 docker compose up -d --build
 - [11 LangGraph Agent 运行时](./11-langgraph-agent-runtime.md)
 - [12 双产品维护与配置化方案](./12-product-variant-config-plan.md)
 - [13 前端性能优化：重型编辑器按需加载](./13-editor-lazy-loading-plan.md)
+- [14 情景剧故事创作提示词优化讨论](./14-sitcom-prompt-optimization-discussion.md)
+- [15 Mastra 记忆管理优化讨论（历史讨论）](./15-mastra-memory-optimization-discussion.md)
 - [16 Agent Harness 数据模型与实现起点](./16-agent-harness-plan.md)
 - [17 Agent Harness 使用说明与流程校验](./17-agent-harness-usage.md)
 - [18 单机桌面版落地方案](./18-standalone-desktop-plan.md)

@@ -67,6 +67,7 @@ release/
 
 # Local app data and tool state
 apps/api/data/
+docs/fix.md
 .codex/
 .idea/
 .agents/

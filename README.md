@@ -103,7 +103,7 @@ If Playwriter is missing, the relay is unavailable, or no browser tab is authori
 
 ## Open Source And Notices
 
-This repository is licensed under Apache-2.0. See [LICENSE](./LICENSE).
+This repository is licensed under the MIT License. See [LICENSE](./LICENSE).
 
 Third-party and bundled binary notices are tracked in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md). Desktop releases that bundle PostgreSQL, pgvector, Electron, Chromium, or other redistributable binaries must include their required license and notice texts.
 
