@@ -1,0 +1,77 @@
+name: Desktop Windows
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/desktop-windows.yml
+      - apps/api/**
+      - apps/desktop/**
+      - apps/web/**
+      - packages/shared/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+  workflow_dispatch:
+    inputs:
+      bundle_release_tag:
+        description: GitHub Release tag from YukeonWayne/pg_pgvector_binary
+        required: false
+        default: v18.4-pgvector0.8.3-win32-x64
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows desktop installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    env:
+      VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
+      VIFORGE_REQUIRE_PGVECTOR: '1'
+      VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
+      VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag || 'v18.4-pgvector0.8.3-win32-x64' }}
+      VIFORGE_POSTGRES_BUNDLE_ASSET_NAME: postgres-18.4-pgvector-0.8.3-win32-x64.zip
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify or download PostgreSQL bundle
+        run: pnpm --filter @viforge/desktop prepare:postgres
+
+      - name: Typecheck API
+        run: pnpm --filter @viforge/api typecheck
+
+      - name: Typecheck web
+        run: pnpm --filter @viforge/web typecheck
+
+      - name: Build Windows installer
+        run: pnpm desktop:dist
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: viforge-windows-desktop
+          path: |
+            release/desktop/*.exe
+            release/desktop/*.blockmap
+            release/desktop/latest*.yml
+          if-no-files-found: error
