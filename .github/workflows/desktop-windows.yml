@@ -1,6 +1,16 @@
 name: Desktop Windows
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/desktop-windows.yml
+      - apps/api/**
+      - apps/desktop/**
+      - apps/web/**
+      - packages/shared/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
   workflow_dispatch:
     inputs:
       binaries_ref:
@@ -40,7 +50,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: YukeonWayne/pg_pgvector_binary
-          ref: ${{ inputs.binaries_ref }}
+          ref: ${{ inputs.binaries_ref || 'main' }}
           token: ${{ secrets.DESKTOP_BINARIES_TOKEN }}
           path: desktop-binaries
 
