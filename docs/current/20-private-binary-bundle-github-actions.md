@@ -73,11 +73,11 @@ private 仓库场景还需要在 workflow 的下载逻辑里把 token 传给 `VI
 .github/workflows/desktop-windows.yml
 ```
 
-workflow 支持两种触发方式：合入 `main` 后通过 `push` 自动打包；也可以通过 `workflow_dispatch` 手动打包。手动触发时可以提供 `bundle_release_tag` 输入，默认下载 `YukeonWayne/pg_pgvector_binary` 的 `v18.4-pgvector0.8.3-win32-x64` release。
+workflow 只支持 `workflow_dispatch` 手动打包，不在 `pull_request` 或 `push` 时自动执行。手动触发时可以提供 `bundle_release_tag` 输入，默认下载 `YukeonWayne/pg_pgvector_binary` 的 `v18.4-pgvector0.8.3-win32-x64` release。
 
 核心流程：
 
-1. 合入 `main` 并改动相关路径时自动打包，或手动触发打包。
+1. 在 GitHub Actions 页面手动触发打包。
 2. checkout 主仓库代码。
 3. 安装 pnpm 11.3.0 和 Node.js 22。
 4. 运行 `pnpm install --frozen-lockfile`。
@@ -96,18 +96,6 @@ workflow 使用 `actions/checkout@v7`、`actions/setup-node@v6`、`pnpm/action-s
 name: Desktop Windows
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/desktop-windows.yml
-      - apps/api/**
-      - apps/desktop/**
-      - apps/web/**
-      - packages/shared/**
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
   workflow_dispatch:
     inputs:
       bundle_release_tag:

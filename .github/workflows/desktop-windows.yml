@@ -1,18 +1,6 @@
 name: Desktop Windows
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/desktop-windows.yml
-      - apps/api/**
-      - apps/desktop/**
-      - apps/web/**
-      - packages/shared/**
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
   workflow_dispatch:
     inputs:
       bundle_release_tag:
