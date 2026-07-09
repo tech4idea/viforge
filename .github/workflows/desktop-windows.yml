@@ -46,21 +46,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Verify desktop binaries token
-        shell: pwsh
-        env:
-          DESKTOP_BINARIES_TOKEN: ${{ secrets.DESKTOP_BINARIES_TOKEN }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:DESKTOP_BINARIES_TOKEN)) {
-            throw "Missing repository secret DESKTOP_BINARIES_TOKEN. Create a fine-grained GitHub token with read-only Contents access to YukeonWayne/pg_pgvector_binary, then add it to this repository's Actions secrets."
-          }
-
       - name: Checkout PostgreSQL bundle
         uses: actions/checkout@v4
         with:
           repository: YukeonWayne/pg_pgvector_binary
           ref: ${{ inputs.binaries_ref || 'main' }}
-          token: ${{ secrets.DESKTOP_BINARIES_TOKEN }}
           path: desktop-binaries
 
       - name: Install dependencies
