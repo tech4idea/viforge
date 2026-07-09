@@ -7,7 +7,7 @@ import sharp from 'sharp';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(desktopRoot, '..', '..');
-const sourceSvg = path.join(repoRoot, 'apps', 'web', 'public', 'viforge-logo.svg');
+const sourceSvg = path.join(repoRoot, 'apps', 'web', 'public', 'viforge-logo-full.svg');
 const buildRoot = path.join(desktopRoot, 'build');
 
 await mkdir(buildRoot, { recursive: true });
