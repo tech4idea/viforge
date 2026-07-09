@@ -1,0 +1,86 @@
+name: Desktop Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      binaries_ref:
+        description: Git ref to checkout from YukeonWayne/pg_pgvector_binary
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows desktop installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    env:
+      VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
+      VIFORGE_REQUIRE_PGVECTOR: '1'
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Checkout PostgreSQL bundle
+        uses: actions/checkout@v4
+        with:
+          repository: YukeonWayne/pg_pgvector_binary
+          ref: ${{ inputs.binaries_ref }}
+          token: ${{ secrets.DESKTOP_BINARIES_TOKEN }}
+          path: desktop-binaries
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $platform = $env:VIFORGE_POSTGRES_PLATFORM_ARCH
+          $source = "desktop-binaries/postgres/$platform"
+          $target = "apps/desktop/resources/postgres/$platform"
+
+          if (-not (Test-Path -LiteralPath $source)) {
+            throw "PostgreSQL bundle not found at $source"
+          }
+
+          Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "apps/desktop/resources/postgres" | Out-Null
+          Copy-Item -LiteralPath $source -Destination $target -Recurse
+
+      - name: Verify PostgreSQL bundle
+        run: pnpm --filter @viforge/desktop prepare:postgres
+
+      - name: Typecheck API
+        run: pnpm --filter @viforge/api typecheck
+
+      - name: Typecheck web
+        run: pnpm --filter @viforge/web typecheck
+
+      - name: Build Windows installer
+        run: pnpm desktop:dist
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: viforge-windows-desktop
+          path: |
+            release/desktop/*.exe
+            release/desktop/*.blockmap
+            release/desktop/latest*.yml
+          if-no-files-found: error
