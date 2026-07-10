@@ -639,6 +639,30 @@ export function createWorkspaceTools(
         return safeBrowserToolCall(() => options.browserService!.evaluate({ code, sessionId, timeoutMs }));
       },
     }),
+    browser_upload_file: createTool({
+      id: 'browser_upload_file',
+      description: [
+        '将当前项目工作区中的文件上传到 Playwriter 授权的真实浏览器页面。',
+        '适合用户明确要求把工作区文件上传到网页表单、素材库、网盘、后台或微信公众平台时使用。',
+        'selector 必须直接指向网页中的 input[type=file] 元素。',
+        '上传、提交、发布或修改远端数据前，必须先向用户说明将执行的动作并等待确认。',
+      ].join('\n'),
+      inputSchema: z.object({
+        path: z.string().min(1).describe('项目工作区中的文件路径，可通过 list_workspace_entries 查看'),
+        selector: z.string().min(1).describe('网页中 input[type=file] 元素的 Playwright selector'),
+      }),
+      execute: async ({ path: filePath, selector }) => {
+        if (!options.browserService) {
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
+        }
+        const asset = await store.readWorkspaceFileBytes(projectId, filePath);
+        return safeBrowserToolCall(() => options.browserService!.uploadFile({
+          selector,
+          fileName: asset.path.split('/').pop() ?? asset.path,
+          bytes: asset.bytes,
+        }));
+      },
+    }),
     read_project_memory: createTool({
       id: 'read_project_memory',
       description: [

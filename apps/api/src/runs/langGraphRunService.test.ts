@@ -293,6 +293,7 @@ describe('langgraph run service', () => {
 
   it('exposes Playwriter browser tools to the main agent', async () => {
     const project = await store.createProject({ name: 'Browser Study', productId: 'study' });
+    await store.writeWorkspaceFile(project.id, 'uploads/example.txt', 'upload me');
     const browserCalls: string[] = [];
     let browserToolResult: unknown = null;
 
@@ -310,6 +311,10 @@ describe('langgraph run service', () => {
       async evaluate(input: { code: string }) {
         browserCalls.push(`evaluate:${input.code}`);
         return { stdout: { title: 'Example' } };
+      },
+      async uploadFile(input: { selector: string; fileName: string; bytes: Buffer }) {
+        browserCalls.push(`upload:${input.selector}:${input.fileName}:${input.bytes.toString('utf8')}`);
+        return { stdout: { uploaded: true, fileName: input.fileName } };
       },
     };
 
@@ -335,6 +340,7 @@ describe('langgraph run service', () => {
               async stream() {
                 browserToolResult = await runtimeTools.browser_navigate.execute?.({ url: 'example.com' }, {} as never);
                 await runtimeTools.browser_snapshot.execute?.({}, {} as never);
+                await runtimeTools.browser_upload_file.execute?.({ path: 'uploads/example.txt', selector: 'input[type=file]' }, {} as never);
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '已读取网页。' } }]) };
               },
               async generate() {
@@ -352,7 +358,7 @@ describe('langgraph run service', () => {
 
     await collectUntilEnd(bus, run.id);
 
-    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot']);
+    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot', 'upload:input[type=file]:example.txt:upload me']);
     expect(browserToolResult).toEqual({ stdout: { url: 'example.com', title: 'Example' } });
   });
 

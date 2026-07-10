@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 export type PlaywriterStatus = {
@@ -29,12 +31,19 @@ export type PlaywriterEvaluateInput = {
   timeoutMs?: number;
 };
 
+export type PlaywriterUploadFileInput = {
+  selector: string;
+  fileName: string;
+  bytes: Buffer;
+};
+
 export type PlaywriterService = {
   status(): Promise<PlaywriterStatus>;
   installGuide(): Promise<PlaywriterInstallGuide>;
   navigate(input: PlaywriterNavigateInput): Promise<unknown>;
   snapshot(input?: PlaywriterSnapshotInput): Promise<unknown>;
   evaluate(input: PlaywriterEvaluateInput): Promise<unknown>;
+  uploadFile(input: PlaywriterUploadFileInput): Promise<unknown>;
 };
 
 export function createPlaywriterService(options: { binary?: string; host?: string; token?: string; defaultSessionId?: string } = {}): PlaywriterService {
@@ -122,7 +131,50 @@ export function createPlaywriterService(options: { binary?: string; host?: strin
         timeoutMs: input.timeoutMs,
       });
     },
+
+    async uploadFile(input) {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), 'viforge-playwriter-upload-'));
+      const tempPath = path.join(tempDir, sanitizeUploadFileName(input.fileName));
+      await writeFile(tempPath, input.bytes);
+
+      try {
+        return await executeWithResolvedSession({
+          binary,
+          host,
+          token,
+          inputSessionId: undefined,
+          resolveSessionId,
+          retryWithNewSession: async () => {
+            createdSessionId = await createPlaywriterSession({ binary, host, token });
+            return createdSessionId;
+          },
+          code: buildUploadFileCode({ selector: input.selector, filePath: tempPath, fileName: input.fileName }),
+        });
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
   };
+}
+
+function buildUploadFileCode(input: { selector: string; filePath: string; fileName: string }): string {
+  const selector = JSON.stringify(input.selector);
+  const filePath = JSON.stringify(input.filePath);
+  const fileName = JSON.stringify(input.fileName);
+
+  return [
+    `const selector = ${selector};`,
+    `const filePath = ${filePath};`,
+    `const fileName = ${fileName};`,
+    `const target = page.locator(selector).first();`,
+    `await target.setInputFiles(filePath);`,
+    `console.log(JSON.stringify({ uploaded: true, selector, fileName, url: page.url(), title: await page.title() }));`,
+  ].join('\n');
+}
+
+function sanitizeUploadFileName(fileName: string): string {
+  const baseName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return baseName || 'upload-file';
 }
 
 async function executeWithResolvedSession(input: {

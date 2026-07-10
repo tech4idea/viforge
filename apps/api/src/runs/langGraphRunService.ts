@@ -1076,6 +1076,7 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '创建定时任务后，用简短文字告诉用户任务标题、下次执行时间和执行时会实时生成微信内容。',
     'send_wechat_message 只用于当前 run 立即发送微信文本，不用于创建未来或周期性发送任务。',
     '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点或整理在线资料时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
+    '当用户明确要求把项目工作区文件上传到网页时，先确认目标页面和操作，再使用 browser_upload_file 选择文件；上传后的提交、发布或修改远端数据仍需用户确认。',
     '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
     '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',
     '涉及登录、提交、购买、删除、发布、授权、付款或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',

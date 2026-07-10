@@ -80,8 +80,9 @@ Agent 可用工具：
 - `browser_navigate`：在授权标签页打开 URL。
 - `browser_snapshot`：读取 Playwriter 的页面可访问性快照，获取文字、链接、控件和 aria-ref。
 - `browser_evaluate`：执行简短 Playwright JavaScript，作用域包含 `page`、`context`、`state`、`require`。
+- `browser_upload_file`：把项目工作区中的文件写入临时文件后，通过 Playwriter 上传到授权浏览器页面的 `input[type=file]`。
 
-安全边界：登录、提交、购买、删除、发布、授权、付款或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 `playwriter serve`。agent 不能假装已访问网页。
+安全边界：登录、提交、购买、删除、发布、授权、付款、文件上传或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 `playwriter serve`。agent 不能假装已访问网页。
 
 普通 Web/API 本地启用步骤如下；agent 也可以在用户需要网页访问但环境未就绪时调用 `browser_use_install` 返回同类指引：
 
