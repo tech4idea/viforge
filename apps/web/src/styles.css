@@ -2882,6 +2882,7 @@ body.is-resizing-panels .panel-resizer::after {
 
 .runtime-settings-grid label { display: grid; gap: 6px; color: var(--text-soft); font-size: 0.78rem; font-weight: 600; }
 .runtime-settings-grid input, .runtime-settings-grid select { width: 100%; padding: 0.58rem 0.7rem; }
+.runtime-settings-grid input[type='checkbox'] { width: auto; justify-self: start; padding: 0; }
 .runtime-settings-wide { grid-column: 1 / -1; }
 .runtime-settings-status { margin: 0; color: var(--text-soft); font-size: 0.8rem; }
 .runtime-settings-status-error { color: var(--danger); }

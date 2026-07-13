@@ -5727,8 +5727,17 @@ function RuntimeSettingsPanel({
 }): JSX.Element {
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [chatUseGlobal, setChatUseGlobal] = useState(true);
+  const [chatBaseUrl, setChatBaseUrl] = useState('');
+  const [chatApiKey, setChatApiKey] = useState('');
   const [chatModel, setChatModel] = useState('');
+  const [imageUseGlobal, setImageUseGlobal] = useState(true);
+  const [imageBaseUrl, setImageBaseUrl] = useState('');
+  const [imageApiKey, setImageApiKey] = useState('');
   const [imageModel, setImageModel] = useState('');
+  const [embeddingUseGlobal, setEmbeddingUseGlobal] = useState(true);
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('');
+  const [embeddingApiKey, setEmbeddingApiKey] = useState('');
   const [embeddingModel, setEmbeddingModel] = useState('');
   const [embeddingDims, setEmbeddingDims] = useState('1024');
   const [localDataRoot, setLocalDataRoot] = useState('');
@@ -5739,11 +5748,20 @@ function RuntimeSettingsPanel({
   useEffect(() => {
     if (!config) return;
     setBaseUrl(config.modelProvider.baseUrl ?? '');
+    setChatUseGlobal(config.modelProvider.chatUsesGlobalConfig ?? true);
+    setChatBaseUrl(config.modelProvider.chatBaseUrl ?? config.modelProvider.baseUrl ?? '');
     setChatModel(config.modelProvider.chatModel ?? '');
+    setImageUseGlobal(config.modelProvider.imageUsesGlobalConfig ?? true);
+    setImageBaseUrl(config.modelProvider.imageBaseUrl ?? config.modelProvider.baseUrl ?? '');
     setImageModel(config.modelProvider.imageModel ?? '');
+    setEmbeddingUseGlobal(config.modelProvider.embeddingUsesGlobalConfig ?? true);
+    setEmbeddingBaseUrl(config.modelProvider.embeddingBaseUrl ?? config.modelProvider.baseUrl ?? '');
     setEmbeddingModel(config.modelProvider.embeddingModel ?? '');
     setEmbeddingDims(String(config.modelProvider.embeddingDims ?? 1024));
     setApiKey('');
+    setChatApiKey('');
+    setImageApiKey('');
+    setEmbeddingApiKey('');
     setLocalDataRoot(config.desktop.dataRoot ?? '');
     setDataRootRestartRequired(false);
     setModelTestState('idle');
@@ -5755,8 +5773,14 @@ function RuntimeSettingsPanel({
   const modelInput = (): NonNullable<UpdateRuntimeConfigInput['modelProvider']> => ({
     baseUrl,
     ...(apiKey.trim() ? { apiKey } : {}),
+    chatBaseUrl: chatUseGlobal ? '' : chatBaseUrl,
+    ...(chatUseGlobal || chatApiKey.trim() ? { chatApiKey: chatUseGlobal ? '' : chatApiKey } : {}),
     chatModel,
+    imageBaseUrl: imageUseGlobal ? '' : imageBaseUrl,
+    ...(imageUseGlobal || imageApiKey.trim() ? { imageApiKey: imageUseGlobal ? '' : imageApiKey } : {}),
     imageModel,
+    embeddingBaseUrl: embeddingUseGlobal ? '' : embeddingBaseUrl,
+    ...(embeddingUseGlobal || embeddingApiKey.trim() ? { embeddingApiKey: embeddingUseGlobal ? '' : embeddingApiKey } : {}),
     embeddingModel,
     embeddingDims: Number(embeddingDims) || 1024,
   });
@@ -5799,11 +5823,20 @@ function RuntimeSettingsPanel({
         <h3>OpenAI 协议模型</h3>
         <p className="runtime-settings-status">ViForge 不内置模型服务。Base URL、API Key 和模型 ID 只保存在本机运行配置中；API Key 不会回显到前端。</p>
         <div className="runtime-settings-grid">
-          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
-          <label><span>API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
+          <label><span>全局 Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label><span>全局 API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
           <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="MiniMax-M3" /></label>
+          <label><span>文本使用全局配置</span><input type="checkbox" checked={chatUseGlobal} onChange={(event) => setChatUseGlobal(event.target.checked)} /></label>
+          {!chatUseGlobal ? <label><span>文本 Base URL</span><input value={chatBaseUrl} onChange={(event) => setChatBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} /></label> : null}
+          {!chatUseGlobal ? <label><span>文本 API Key</span><input type="password" value={chatApiKey} onChange={(event) => setChatApiKey(event.target.value)} placeholder={config?.modelProvider.chatApiKeyConfigured && !config.modelProvider.chatUsesGlobalConfig ? '已配置，留空则不修改' : 'sk-...'} /></label> : null}
           <label><span>图片模型</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>
+          <label><span>图片使用全局配置</span><input type="checkbox" checked={imageUseGlobal} onChange={(event) => setImageUseGlobal(event.target.checked)} /></label>
+          {!imageUseGlobal ? <label><span>图片 Base URL</span><input value={imageBaseUrl} onChange={(event) => setImageBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} /></label> : null}
+          {!imageUseGlobal ? <label><span>图片 API Key</span><input type="password" value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder={config?.modelProvider.imageApiKeyConfigured && !config.modelProvider.imageUsesGlobalConfig ? '已配置，留空则不修改' : 'sk-...'} /></label> : null}
           <label><span>Embedding 模型</span><input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} placeholder="text-embedding-3-large" /></label>
+          <label><span>Embedding 使用全局配置</span><input type="checkbox" checked={embeddingUseGlobal} onChange={(event) => setEmbeddingUseGlobal(event.target.checked)} /></label>
+          {!embeddingUseGlobal ? <label><span>Embedding Base URL</span><input value={embeddingBaseUrl} onChange={(event) => setEmbeddingBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} /></label> : null}
+          {!embeddingUseGlobal ? <label><span>Embedding API Key</span><input type="password" value={embeddingApiKey} onChange={(event) => setEmbeddingApiKey(event.target.value)} placeholder={config?.modelProvider.embeddingApiKeyConfigured && !config.modelProvider.embeddingUsesGlobalConfig ? '已配置，留空则不修改' : 'sk-...'} /></label> : null}
           <label><span>Embedding 维度</span><input inputMode="numeric" value={embeddingDims} onChange={(event) => setEmbeddingDims(event.target.value)} /></label>
         </div>
         <div className="runtime-settings-actions runtime-settings-actions-inline">

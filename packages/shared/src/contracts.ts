@@ -189,8 +189,17 @@ export type AigcHubModelListResponse = {
 export type RuntimeModelProviderConfig = {
   baseUrl: string;
   apiKeyConfigured: boolean;
+  chatBaseUrl?: string;
+  chatApiKeyConfigured?: boolean;
+  chatUsesGlobalConfig?: boolean;
   chatModel?: string;
+  imageBaseUrl?: string;
+  imageApiKeyConfigured?: boolean;
+  imageUsesGlobalConfig?: boolean;
   imageModel?: string;
+  embeddingBaseUrl?: string;
+  embeddingApiKeyConfigured?: boolean;
+  embeddingUsesGlobalConfig?: boolean;
   embeddingModel?: string;
   embeddingDims?: number;
 };
@@ -227,8 +236,14 @@ export type UpdateRuntimeConfigInput = {
   modelProvider?: {
     baseUrl?: string;
     apiKey?: string;
+    chatBaseUrl?: string;
+    chatApiKey?: string;
     chatModel?: string;
+    imageBaseUrl?: string;
+    imageApiKey?: string;
     imageModel?: string;
+    embeddingBaseUrl?: string;
+    embeddingApiKey?: string;
     embeddingModel?: string;
     embeddingDims?: number;
   };

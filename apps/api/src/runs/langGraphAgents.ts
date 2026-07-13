@@ -69,7 +69,7 @@ async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promis
 
 function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0]['index'] | undefined {
   if (process.env.VIFORGE_PGVECTOR_AVAILABLE === '0') return undefined;
-  if (!process.env.VIFORGE_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
+  if (!process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY && !process.env.VIFORGE_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
 
   return {
     dims: Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
@@ -79,14 +79,14 @@ function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0
 }
 
 function createMemoryEmbeddings(): OpenAIEmbeddings {
-  const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
-  const apiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  const baseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
+  const apiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
     model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
     apiKey,
     configuration: {
       baseURL: trimTrailingSlashes(baseUrl),
-      defaultHeaders: buildAigcHubHeaders(),
+      defaultHeaders: buildAigcHubHeaders({ apiKey }),
     },
   });
 }
@@ -832,8 +832,8 @@ export function createWorkspaceTools(
       execute: async ({ prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
-        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
 
         if (!gatewayBaseUrl || !gatewayApiKey) {
@@ -921,8 +921,8 @@ export function createWorkspaceTools(
       execute: async ({ imagePath, prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
-        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
 
         if (!gatewayBaseUrl || !gatewayApiKey) {
@@ -1799,6 +1799,7 @@ export function buildModelConfig(options: {
     || 'MiniMax-M3';
 
   const baseUrl = options.baseUrl
+    || process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL
     || process.env.VIFORGE_AIGC_HUB_BASE_URL
     || process.env.AIGC_HUB_BASE_URL
     || process.env.VIFORGE_LANGGRAPH_BASE_URL
@@ -1806,6 +1807,7 @@ export function buildModelConfig(options: {
     || 'https://api.openai.com/v1';
 
   const apiKey = options.apiKey
+    || process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY
     || process.env.VIFORGE_AIGC_HUB_API_KEY
     || process.env.AIGC_HUB_API_KEY
     || process.env.VIFORGE_LANGGRAPH_API_KEY

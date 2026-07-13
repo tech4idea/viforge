@@ -17,8 +17,14 @@ type StoredRuntimeConfig = {
   modelProvider?: {
     baseUrl?: string;
     apiKey?: string;
+    chatBaseUrl?: string;
+    chatApiKey?: string;
     chatModel?: string;
+    imageBaseUrl?: string;
+    imageApiKey?: string;
     imageModel?: string;
+    embeddingBaseUrl?: string;
+    embeddingApiKey?: string;
     embeddingModel?: string;
     embeddingDims?: number;
   };
@@ -97,8 +103,14 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
   const model = config.modelProvider;
   if (model?.baseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_BASE_URL = model.baseUrl;
   if (model?.apiKey !== undefined) process.env.VIFORGE_AIGC_HUB_API_KEY = model.apiKey;
+  if (model?.chatBaseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL = model.chatBaseUrl;
+  if (model?.chatApiKey !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY = model.chatApiKey;
   if (model?.chatModel !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_MODEL = model.chatModel;
+  if (model?.imageBaseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL = model.imageBaseUrl;
+  if (model?.imageApiKey !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY = model.imageApiKey;
   if (model?.imageModel !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL = model.imageModel;
+  if (model?.embeddingBaseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL = model.embeddingBaseUrl;
+  if (model?.embeddingApiKey !== undefined) process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY = model.embeddingApiKey;
   if (model?.embeddingModel !== undefined) process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL = model.embeddingModel;
   if (model?.embeddingDims !== undefined) process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS = String(model.embeddingDims);
 
@@ -133,12 +145,30 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
   const connectionStringConfigured = databaseMode === 'embedded-postgres' || Boolean(configuredConnectionString);
   const displayConnectionString = configuredConnectionString || defaultConnectionStringForDisplay(databaseMode);
 
+  const globalBaseUrl = model.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL;
+  const globalApiKeyConfigured = Boolean(model.apiKey ?? process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY);
+  const chatBaseUrl = model.chatBaseUrl || process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL || globalBaseUrl;
+  const imageBaseUrl = model.imageBaseUrl || process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || globalBaseUrl;
+  const embeddingBaseUrl = model.embeddingBaseUrl || process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || globalBaseUrl;
+  const chatApiKeyConfigured = Boolean(model.chatApiKey ?? process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY) || globalApiKeyConfigured;
+  const imageApiKeyConfigured = Boolean(model.imageApiKey ?? process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY) || globalApiKeyConfigured;
+  const embeddingApiKeyConfigured = Boolean(model.embeddingApiKey ?? process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY) || globalApiKeyConfigured;
+
   return {
     modelProvider: {
-      baseUrl: model.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL,
-      apiKeyConfigured: Boolean(model.apiKey ?? process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY),
+      baseUrl: globalBaseUrl,
+      apiKeyConfigured: globalApiKeyConfigured,
+      chatBaseUrl,
+      chatApiKeyConfigured,
+      chatUsesGlobalConfig: !model.chatBaseUrl && !process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL && !model.chatApiKey && !process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY,
       chatModel: model.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || AIGC_HUB_CHAT_MODEL || DEFAULT_CHAT_MODEL,
+      imageBaseUrl,
+      imageApiKeyConfigured,
+      imageUsesGlobalConfig: !model.imageBaseUrl && !process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL && !model.imageApiKey && !process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY,
       imageModel: model.imageModel ?? process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL,
+      embeddingBaseUrl,
+      embeddingApiKeyConfigured,
+      embeddingUsesGlobalConfig: !model.embeddingBaseUrl && !process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL && !model.embeddingApiKey && !process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY,
       embeddingModel: model.embeddingModel ?? process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? EMBEDDING_MODEL,
       embeddingDims: model.embeddingDims ?? Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
     },
@@ -193,8 +223,14 @@ function cleanModelProviderInput(input: UpdateRuntimeConfigInput['modelProvider'
   return {
     ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl.trim() } : {}),
     ...(input.apiKey !== undefined ? { apiKey: input.apiKey.trim() } : {}),
+    ...(input.chatBaseUrl !== undefined ? { chatBaseUrl: input.chatBaseUrl.trim() } : {}),
+    ...(input.chatApiKey !== undefined ? { chatApiKey: input.chatApiKey.trim() } : {}),
     ...(input.chatModel !== undefined ? { chatModel: input.chatModel.trim() } : {}),
+    ...(input.imageBaseUrl !== undefined ? { imageBaseUrl: input.imageBaseUrl.trim() } : {}),
+    ...(input.imageApiKey !== undefined ? { imageApiKey: input.imageApiKey.trim() } : {}),
     ...(input.imageModel !== undefined ? { imageModel: input.imageModel.trim() } : {}),
+    ...(input.embeddingBaseUrl !== undefined ? { embeddingBaseUrl: input.embeddingBaseUrl.trim() } : {}),
+    ...(input.embeddingApiKey !== undefined ? { embeddingApiKey: input.embeddingApiKey.trim() } : {}),
     ...(input.embeddingModel !== undefined ? { embeddingModel: input.embeddingModel.trim() } : {}),
     ...(input.embeddingDims !== undefined ? { embeddingDims: input.embeddingDims } : {}),
   };

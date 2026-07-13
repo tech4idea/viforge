@@ -11,11 +11,23 @@ const tempDirs: string[] = [];
 const originalDesktop = process.env.VIFORGE_DESKTOP;
 const originalDatabaseMode = process.env.VIFORGE_DATABASE_MODE;
 const originalDatabaseUrl = process.env.DATABASE_URL;
+const originalChatBaseUrl = process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL;
+const originalChatApiKey = process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY;
+const originalImageBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL;
+const originalImageApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY;
+const originalEmbeddingBaseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL;
+const originalEmbeddingApiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY;
 
 afterEach(async () => {
   restoreEnv('VIFORGE_DESKTOP', originalDesktop);
   restoreEnv('VIFORGE_DATABASE_MODE', originalDatabaseMode);
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
+  restoreEnv('VIFORGE_AIGC_HUB_CHAT_BASE_URL', originalChatBaseUrl);
+  restoreEnv('VIFORGE_AIGC_HUB_CHAT_API_KEY', originalChatApiKey);
+  restoreEnv('VIFORGE_AIGC_HUB_IMAGE_BASE_URL', originalImageBaseUrl);
+  restoreEnv('VIFORGE_AIGC_HUB_IMAGE_API_KEY', originalImageApiKey);
+  restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL', originalEmbeddingBaseUrl);
+  restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_API_KEY', originalEmbeddingApiKey);
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -81,7 +93,14 @@ describe('runtime config routes', () => {
         modelProvider: {
           baseUrl: 'https://models.example.test/v1',
           apiKey: 'secret-key',
+          chatBaseUrl: 'https://chat.example.test/v1',
+          chatApiKey: 'chat-secret-key',
           chatModel: 'gpt-compatible-chat',
+          imageBaseUrl: 'https://image.example.test/v1',
+          imageApiKey: 'image-secret-key',
+          imageModel: 'image-compatible',
+          embeddingBaseUrl: 'https://embedding.example.test/v1',
+          embeddingApiKey: 'embedding-secret-key',
           embeddingModel: 'embedding-compatible',
           embeddingDims: 1536,
         },
@@ -98,7 +117,17 @@ describe('runtime config routes', () => {
     expect(saved.modelProvider).toMatchObject({
       baseUrl: 'https://models.example.test/v1',
       apiKeyConfigured: true,
+      chatBaseUrl: 'https://chat.example.test/v1',
+      chatApiKeyConfigured: true,
+      chatUsesGlobalConfig: false,
       chatModel: 'gpt-compatible-chat',
+      imageBaseUrl: 'https://image.example.test/v1',
+      imageApiKeyConfigured: true,
+      imageUsesGlobalConfig: false,
+      imageModel: 'image-compatible',
+      embeddingBaseUrl: 'https://embedding.example.test/v1',
+      embeddingApiKeyConfigured: true,
+      embeddingUsesGlobalConfig: false,
       embeddingModel: 'embedding-compatible',
       embeddingDims: 1536,
     });
@@ -112,7 +141,15 @@ describe('runtime config routes', () => {
     const readResponse = await app.request('/runtime-config');
     expect(readResponse.status).toBe(200);
     expect(await readResponse.json()).toMatchObject({
-      modelProvider: { apiKeyConfigured: true },
+      modelProvider: {
+        apiKeyConfigured: true,
+        chatBaseUrl: 'https://chat.example.test/v1',
+        chatApiKeyConfigured: true,
+        imageBaseUrl: 'https://image.example.test/v1',
+        imageApiKeyConfigured: true,
+        embeddingBaseUrl: 'https://embedding.example.test/v1',
+        embeddingApiKeyConfigured: true,
+      },
       database: { mode: 'external-postgres', connectionStringConfigured: true },
     });
   });

@@ -982,14 +982,14 @@ async function detectChoiceRequest(
     return;
   }
 
-  const apiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  const apiKey = process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   if (!apiKey) {
     appendJsonLog('api-runs.jsonl', { scope: 'choice-detect', stage: 'skip.unconfigured', runId });
     return;
   }
 
   try {
-    const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
+    const baseUrl = process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
     const model = 'minimax/minimax-m2.7';
     const headers = buildAigcHubHeaders({ apiKey, contentType: 'application/json' });
 

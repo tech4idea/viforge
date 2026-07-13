@@ -11,38 +11,60 @@ export function createAigcHubRoutes(): Hono {
   const routes = new Hono();
 
   routes.get('/aigc-hub/models', async (context) => {
-    const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-    const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
-    if (!gatewayBaseUrl || !gatewayApiKey) {
-      return context.json({ configured: false, models: [], error: '未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY。' } satisfies AigcHubModelListResponse);
+    const providers = configuredModelProviders();
+    if (providers.length === 0) {
+      return context.json({ configured: false, models: [], error: '未配置模型 Base URL 或 API Key。' } satisfies AigcHubModelListResponse);
     }
 
     try {
-      const adminResult = await requestModelList(aigcHubAdminModelsUrl(gatewayBaseUrl), gatewayApiKey);
-      if (adminResult.models.length > 0) {
-        return context.json({ configured: true, models: adminResult.models } satisfies AigcHubModelListResponse);
-      }
-
-      const publicResult = await requestModelList(aigcHubPublicModelsUrl(gatewayBaseUrl), gatewayApiKey);
-      if (publicResult.models.length > 0) {
-        return context.json({ configured: true, models: publicResult.models } satisfies AigcHubModelListResponse);
+      const models = new Map<string, AigcHubModelMetadata>();
+      const errors: string[] = [];
+      for (const provider of providers) {
+        const adminResult = await requestModelList(aigcHubAdminModelsUrl(provider.baseUrl), provider.apiKey);
+        const publicResult = adminResult.models.length > 0
+          ? { models: [] as AigcHubModelMetadata[], error: undefined as string | undefined }
+          : await requestModelList(aigcHubPublicModelsUrl(provider.baseUrl), provider.apiKey);
+        for (const model of [...adminResult.models, ...publicResult.models]) {
+          models.set(model.id, { ...models.get(model.id), ...model });
+        }
+        const error = publicResult.error ?? adminResult.error;
+        if (error) errors.push(error);
       }
 
       return context.json({
         configured: true,
-        models: [],
-        error: publicResult.error ?? adminResult.error ?? 'AIGC Hub 没有返回可用模型。',
+        models: [...models.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        ...(models.size === 0 ? { error: errors[0] ?? '模型服务没有返回可用模型。' } : {}),
       } satisfies AigcHubModelListResponse);
     } catch (error) {
       return context.json({
         configured: true,
         models: [],
-        error: error instanceof Error ? error.message : 'AIGC Hub 模型列表请求失败',
+        error: error instanceof Error ? error.message : '模型列表请求失败',
       } satisfies AigcHubModelListResponse, 502);
     }
   });
 
   return routes;
+}
+
+function configuredModelProviders(): Array<{ baseUrl: string; apiKey: string }> {
+  const globalBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL;
+  const globalApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || AIGC_HUB_API_KEY;
+  const providers = [
+    { baseUrl: globalBaseUrl, apiKey: globalApiKey },
+    { baseUrl: process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL || globalBaseUrl, apiKey: process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY || globalApiKey },
+    { baseUrl: process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || globalBaseUrl, apiKey: process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY || globalApiKey },
+    { baseUrl: process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || globalBaseUrl, apiKey: process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY || globalApiKey },
+  ].filter((provider) => provider.baseUrl && provider.apiKey);
+
+  const seen = new Set<string>();
+  return providers.filter((provider) => {
+    const key = provider.baseUrl.replace(/\/+$/, '') + '\u0000' + provider.apiKey;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function requestModelList(url: string, apiKey: string): Promise<{ models: AigcHubModelMetadata[]; error?: string }> {
