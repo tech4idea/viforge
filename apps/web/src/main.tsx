@@ -5799,7 +5799,7 @@ function RuntimeSettingsPanel({
         <h3>OpenAI 协议模型</h3>
         <p className="runtime-settings-status">ViForge 不内置模型服务。Base URL、API Key 和模型 ID 只保存在本机运行配置中；API Key 不会回显到前端。</p>
         <div className="runtime-settings-grid">
-          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.yukeon.top/v1" /></label>
+          <label><span>Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label><span>API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
           <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="MiniMax-M3" /></label>
           <label><span>图片模型</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>

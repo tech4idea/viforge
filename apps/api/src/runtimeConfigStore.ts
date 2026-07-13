@@ -31,7 +31,7 @@ type StoredRuntimeConfig = {
 };
 
 const DEFAULT_DATABASE_PORT = 15432;
-const DEFAULT_MODEL_BASE_URL = 'https://api.yukeon.top/v1';
+const DEFAULT_MODEL_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_CHAT_MODEL = 'MiniMax-M3';
 
 export type RuntimeConfigStore = {

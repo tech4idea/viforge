@@ -79,7 +79,7 @@ function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0
 }
 
 function createMemoryEmbeddings(): OpenAIEmbeddings {
-  const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+  const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
   const apiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
     model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
@@ -1803,7 +1803,7 @@ export function buildModelConfig(options: {
     || process.env.AIGC_HUB_BASE_URL
     || process.env.VIFORGE_LANGGRAPH_BASE_URL
     || process.env.OPENAI_BASE_URL
-    || 'https://api.yukeon.top/v1';
+    || 'https://api.openai.com/v1';
 
   const apiKey = options.apiKey
     || process.env.VIFORGE_AIGC_HUB_API_KEY

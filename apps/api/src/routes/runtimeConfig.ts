@@ -53,7 +53,7 @@ export function createRuntimeConfigRoutes(store: RuntimeConfigStore): Hono {
 }
 
 async function testModelProvider(input: NonNullable<UpdateRuntimeConfigInput['modelProvider']>): Promise<RuntimeModelTestResponse> {
-  const baseUrl = trimTrailingSlashes(input.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1');
+  const baseUrl = trimTrailingSlashes(input.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || 'https://api.openai.com/v1');
   const apiKey = input.apiKey !== undefined ? input.apiKey : process.env.VIFORGE_AIGC_HUB_API_KEY || '';
   const model = input.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || 'MiniMax-M3';
   if (!apiKey) return { ok: false, message: '请先填写 API Key 后再测试。' };

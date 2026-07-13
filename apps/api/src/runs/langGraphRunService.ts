@@ -989,7 +989,7 @@ async function detectChoiceRequest(
   }
 
   try {
-    const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
+    const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
     const model = 'minimax/minimax-m2.7';
     const headers = buildAigcHubHeaders({ apiKey, contentType: 'application/json' });
 

@@ -27,7 +27,7 @@ describe('projects routes', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       id: 'novel-adaptation',
-      documentTitle: 'ViForge 小说改编剧本工作台',
+      documentTitle: 'ViForge 创作助手',
       defaultProjectName: '长夜改编计划',
       workspaceSections: {
         project: expect.objectContaining({ title: '创作项目区域' }),

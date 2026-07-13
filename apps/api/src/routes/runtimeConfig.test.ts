@@ -30,7 +30,7 @@ describe('runtime config routes', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       modelProvider: {
-        baseUrl: 'https://api.yukeon.top/v1',
+        baseUrl: 'https://api.openai.com/v1',
         chatModel: 'MiniMax-M3',
       },
     });
@@ -59,7 +59,7 @@ describe('runtime config routes', () => {
     const response = await app.request('/runtime-config/test-model', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.yukeon.top/v1', apiKey: '', chatModel: 'MiniMax-M3' } }),
+      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.openai.com/v1', apiKey: '', chatModel: 'MiniMax-M3' } }),
     });
 
     expect(response.status).toBe(200);
