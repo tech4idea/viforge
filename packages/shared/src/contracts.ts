@@ -226,6 +226,8 @@ export type RuntimeConfig = {
   restartRequired?: boolean;
 };
 
+export type RuntimeModelTestTarget = 'chat' | 'image' | 'embedding';
+
 export type RuntimeModelTestResponse = {
   ok: boolean;
   status?: number;
@@ -234,6 +236,7 @@ export type RuntimeModelTestResponse = {
 
 export type UpdateRuntimeConfigInput = {
   modelProvider?: {
+    testTarget?: RuntimeModelTestTarget;
     baseUrl?: string;
     apiKey?: string;
     chatBaseUrl?: string;

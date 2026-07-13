@@ -5742,8 +5742,8 @@ function RuntimeSettingsPanel({
   const [embeddingDims, setEmbeddingDims] = useState('1024');
   const [localDataRoot, setLocalDataRoot] = useState('');
   const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
-  const [modelTestState, setModelTestState] = useState<LoadState>('idle');
-  const [modelTestMessage, setModelTestMessage] = useState('');
+  const [modelTestState, setModelTestState] = useState<Record<'chat' | 'image' | 'embedding', LoadState>>({ chat: 'idle', image: 'idle', embedding: 'idle' });
+  const [modelTestMessage, setModelTestMessage] = useState<Record<'chat' | 'image' | 'embedding', string>>({ chat: '', image: '', embedding: '' });
 
   useEffect(() => {
     if (!config) return;
@@ -5764,8 +5764,8 @@ function RuntimeSettingsPanel({
     setEmbeddingApiKey('');
     setLocalDataRoot(config.desktop.dataRoot ?? '');
     setDataRootRestartRequired(false);
-    setModelTestState('idle');
-    setModelTestMessage('');
+    setModelTestState({ chat: 'idle', image: 'idle', embedding: 'idle' });
+    setModelTestMessage({ chat: '', image: '', embedding: '' });
   }, [config]);
 
   const busy = state === 'loading';
@@ -5784,6 +5784,19 @@ function RuntimeSettingsPanel({
     embeddingModel,
     embeddingDims: Number(embeddingDims) || 1024,
   });
+
+  async function testRuntimeModel(target: 'chat' | 'image' | 'embedding') {
+    setModelTestState((current) => ({ ...current, [target]: 'loading' }));
+    setModelTestMessage((current) => ({ ...current, [target]: '' }));
+    try {
+      const result = await apiClient.testRuntimeModel({ ...modelInput(), testTarget: target });
+      setModelTestState((current) => ({ ...current, [target]: result.ok ? 'idle' : 'error' }));
+      setModelTestMessage((current) => ({ ...current, [target]: result.message }));
+    } catch (error) {
+      setModelTestState((current) => ({ ...current, [target]: 'error' }));
+      setModelTestMessage((current) => ({ ...current, [target]: error instanceof Error ? error.message : String(error) }));
+    }
+  }
 
   return (
     <div className="runtime-settings-panel">
@@ -5822,42 +5835,64 @@ function RuntimeSettingsPanel({
       <section className="runtime-settings-section">
         <h3>OpenAI 协议模型</h3>
         <p className="runtime-settings-status">ViForge 不内置模型服务。Base URL、API Key 和模型 ID 只保存在本机运行配置中；API Key 不会回显到前端。</p>
-        <div className="runtime-settings-grid">
+        <div className="runtime-settings-grid runtime-settings-grid-global">
           <label><span>全局 Base URL</span><input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label><span>全局 API Key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config?.modelProvider.apiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} /></label>
-          <label><span>文本模型</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="MiniMax-M3" /></label>
-          <label><span>文本使用全局配置</span><input type="checkbox" checked={chatUseGlobal} onChange={(event) => setChatUseGlobal(event.target.checked)} /></label>
-          {!chatUseGlobal ? <label><span>文本 Base URL</span><input value={chatBaseUrl} onChange={(event) => setChatBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} /></label> : null}
-          {!chatUseGlobal ? <label><span>文本 API Key</span><input type="password" value={chatApiKey} onChange={(event) => setChatApiKey(event.target.value)} placeholder={config?.modelProvider.chatApiKeyConfigured && !config.modelProvider.chatUsesGlobalConfig ? '已配置，留空则不修改' : 'sk-...'} /></label> : null}
-          <label><span>图片模型</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>
-          <label><span>图片使用全局配置</span><input type="checkbox" checked={imageUseGlobal} onChange={(event) => setImageUseGlobal(event.target.checked)} /></label>
-          {!imageUseGlobal ? <label><span>图片 Base URL</span><input value={imageBaseUrl} onChange={(event) => setImageBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} /></label> : null}
-          {!imageUseGlobal ? <label><span>图片 API Key</span><input type="password" value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder={config?.modelProvider.imageApiKeyConfigured && !config.modelProvider.imageUsesGlobalConfig ? '已配置，留空则不修改' : 'sk-...'} /></label> : null}
-          <label><span>Embedding 模型</span><input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} placeholder="text-embedding-3-large" /></label>
-          <label><span>Embedding 使用全局配置</span><input type="checkbox" checked={embeddingUseGlobal} onChange={(event) => setEmbeddingUseGlobal(event.target.checked)} /></label>
-          {!embeddingUseGlobal ? <label><span>Embedding Base URL</span><input value={embeddingBaseUrl} onChange={(event) => setEmbeddingBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} /></label> : null}
-          {!embeddingUseGlobal ? <label><span>Embedding API Key</span><input type="password" value={embeddingApiKey} onChange={(event) => setEmbeddingApiKey(event.target.value)} placeholder={config?.modelProvider.embeddingApiKeyConfigured && !config.modelProvider.embeddingUsesGlobalConfig ? '已配置，留空则不修改' : 'sk-...'} /></label> : null}
-          <label><span>Embedding 维度</span><input inputMode="numeric" value={embeddingDims} onChange={(event) => setEmbeddingDims(event.target.value)} /></label>
         </div>
-        <div className="runtime-settings-actions runtime-settings-actions-inline">
-          <button
-            type="button"
-            disabled={busy || modelTestState === 'loading'}
-            onClick={async () => {
-              setModelTestState('loading');
-              setModelTestMessage('');
-              try {
-                const result = await apiClient.testRuntimeModel(modelInput());
-                setModelTestState(result.ok ? 'idle' : 'error');
-                setModelTestMessage(result.message);
-              } catch (error) {
-                setModelTestState('error');
-                setModelTestMessage(error instanceof Error ? error.message : String(error));
-              }
-            }}
-          >{modelTestState === 'loading' ? '测试中...' : '测试模型调用'}</button>
+
+        <div className="runtime-model-configs">
+          <section className="runtime-model-config">
+            <div className="runtime-model-config__header">
+              <h4>文本模型</h4>
+              <select value={chatUseGlobal ? 'global' : 'custom'} onChange={(event) => setChatUseGlobal(event.target.value === 'global')}>
+                <option value="global">使用全局配置</option>
+                <option value="custom">自定义接口</option>
+              </select>
+            </div>
+            <div className="runtime-settings-grid runtime-settings-grid-model">
+              <label><span>Base URL</span><input value={chatBaseUrl} onChange={(event) => setChatBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} disabled={chatUseGlobal} /></label>
+              <label><span>API Key</span><input type="password" value={chatApiKey} onChange={(event) => setChatApiKey(event.target.value)} placeholder={chatUseGlobal ? '使用全局 API Key' : config?.modelProvider.chatApiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} disabled={chatUseGlobal} /></label>
+              <label className="runtime-settings-wide"><span>模型 ID</span><input value={chatModel} onChange={(event) => setChatModel(event.target.value)} placeholder="MiniMax-M3" /></label>
+            </div>
+            <div className="runtime-settings-actions runtime-settings-actions-inline"><button type="button" disabled={busy || modelTestState.chat === 'loading'} onClick={() => void testRuntimeModel('chat')}>{modelTestState.chat === 'loading' ? '测试中...' : '测试文本模型'}</button></div>
+            {modelTestMessage.chat ? <p className={modelTestState.chat === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage.chat}</p> : null}
+          </section>
+
+          <section className="runtime-model-config">
+            <div className="runtime-model-config__header">
+              <h4>图片模型</h4>
+              <select value={imageUseGlobal ? 'global' : 'custom'} onChange={(event) => setImageUseGlobal(event.target.value === 'global')}>
+                <option value="global">使用全局配置</option>
+                <option value="custom">自定义接口</option>
+              </select>
+            </div>
+            <div className="runtime-settings-grid runtime-settings-grid-model">
+              <label><span>Base URL</span><input value={imageBaseUrl} onChange={(event) => setImageBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} disabled={imageUseGlobal} /></label>
+              <label><span>API Key</span><input type="password" value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder={imageUseGlobal ? '使用全局 API Key' : config?.modelProvider.imageApiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} disabled={imageUseGlobal} /></label>
+              <label className="runtime-settings-wide"><span>模型 ID</span><input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="gpt-image-1 或兼容模型 id" /></label>
+            </div>
+            <div className="runtime-settings-actions runtime-settings-actions-inline"><button type="button" disabled={busy || modelTestState.image === 'loading'} onClick={() => void testRuntimeModel('image')}>{modelTestState.image === 'loading' ? '测试中...' : '测试图片模型'}</button></div>
+            {modelTestMessage.image ? <p className={modelTestState.image === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage.image}</p> : null}
+          </section>
+
+          <section className="runtime-model-config">
+            <div className="runtime-model-config__header">
+              <h4>Embedding 模型</h4>
+              <select value={embeddingUseGlobal ? 'global' : 'custom'} onChange={(event) => setEmbeddingUseGlobal(event.target.value === 'global')}>
+                <option value="global">使用全局配置</option>
+                <option value="custom">自定义接口</option>
+              </select>
+            </div>
+            <div className="runtime-settings-grid runtime-settings-grid-model">
+              <label><span>Base URL</span><input value={embeddingBaseUrl} onChange={(event) => setEmbeddingBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} disabled={embeddingUseGlobal} /></label>
+              <label><span>API Key</span><input type="password" value={embeddingApiKey} onChange={(event) => setEmbeddingApiKey(event.target.value)} placeholder={embeddingUseGlobal ? '使用全局 API Key' : config?.modelProvider.embeddingApiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} disabled={embeddingUseGlobal} /></label>
+              <label><span>模型 ID</span><input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} placeholder="text-embedding-3-large" /></label>
+              <label><span>向量维度</span><input inputMode="numeric" value={embeddingDims} onChange={(event) => setEmbeddingDims(event.target.value)} /></label>
+            </div>
+            <div className="runtime-settings-actions runtime-settings-actions-inline"><button type="button" disabled={busy || modelTestState.embedding === 'loading'} onClick={() => void testRuntimeModel('embedding')}>{modelTestState.embedding === 'loading' ? '测试中...' : '测试 Embedding'}</button></div>
+            {modelTestMessage.embedding ? <p className={modelTestState.embedding === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage.embedding}</p> : null}
+          </section>
         </div>
-        {modelTestMessage ? <p className={modelTestState === 'error' ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>{modelTestMessage}</p> : null}
       </section>
 
       <section className="runtime-settings-section">

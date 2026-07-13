@@ -9,6 +9,7 @@ import type { RuntimeConfigStore } from '../runtimeConfigStore';
 
 const updateRuntimeConfigSchema = z.object({
   modelProvider: z.object({
+    testTarget: z.enum(['chat', 'image', 'embedding']).optional(),
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
     chatBaseUrl: z.string().optional(),
@@ -59,35 +60,64 @@ export function createRuntimeConfigRoutes(store: RuntimeConfigStore): Hono {
 }
 
 async function testModelProvider(input: NonNullable<UpdateRuntimeConfigInput['modelProvider']>): Promise<RuntimeModelTestResponse> {
-  const baseUrl = trimTrailingSlashes(input.chatBaseUrl || input.baseUrl || process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || 'https://api.openai.com/v1');
-  const apiKey = input.chatApiKey !== undefined
-    ? input.chatApiKey
-    : input.apiKey !== undefined
-      ? input.apiKey
-      : process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || '';
-  const model = input.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || 'MiniMax-M3';
+  const target = input.testTarget ?? 'chat';
+  const globalBaseUrl = input.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
+  const globalApiKey = input.apiKey !== undefined ? input.apiKey : process.env.VIFORGE_AIGC_HUB_API_KEY || '';
+  const baseUrl = trimTrailingSlashes(
+    target === 'image'
+      ? input.imageBaseUrl || globalBaseUrl
+      : target === 'embedding'
+        ? input.embeddingBaseUrl || globalBaseUrl
+        : input.chatBaseUrl || globalBaseUrl,
+  );
+  const apiKey = target === 'image'
+    ? input.imageApiKey || globalApiKey
+    : target === 'embedding'
+      ? input.embeddingApiKey || globalApiKey
+      : input.chatApiKey || globalApiKey;
+  const model = target === 'image'
+    ? input.imageModel || process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL || 'gpt-image-1'
+    : target === 'embedding'
+      ? input.embeddingModel || process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL || 'text-embedding-3-large'
+      : input.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || 'MiniMax-M3';
   if (!apiKey) return { ok: false, message: '请先填写 API Key 后再测试。' };
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${baseUrl}/${target === 'image' ? 'images/generations' : target === 'embedding' ? 'embeddings' : 'chat/completions'}`, {
       method: 'POST',
       headers: buildAigcHubHeaders({ apiKey, contentType: 'application/json' }),
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 8,
-        temperature: 0,
-      }),
+      body: JSON.stringify(modelTestBody(target, model)),
       signal: AbortSignal.timeout(20_000),
     });
 
     if (!response.ok) {
       return { ok: false, status: response.status, message: await modelTestErrorMessage(response) };
     }
-    return { ok: true, status: response.status, message: '模型调用测试成功。' };
+    return { ok: true, status: response.status, message: modelTestSuccessMessage(target) };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function modelTestBody(target: NonNullable<UpdateRuntimeConfigInput['modelProvider']>['testTarget'], model: string): Record<string, unknown> {
+  if (target === 'image') {
+    return { model, prompt: 'test', size: '1024x1024', n: 1 };
+  }
+  if (target === 'embedding') {
+    return { model, input: 'ping' };
+  }
+  return {
+    model,
+    messages: [{ role: 'user', content: 'ping' }],
+    max_tokens: 8,
+    temperature: 0,
+  };
+}
+
+function modelTestSuccessMessage(target: NonNullable<UpdateRuntimeConfigInput['modelProvider']>['testTarget']): string {
+  if (target === 'image') return '图片模型调用测试成功。';
+  if (target === 'embedding') return 'Embedding 模型调用测试成功。';
+  return '文本模型调用测试成功。';
 }
 
 async function modelTestErrorMessage(response: Response): Promise<string> {
