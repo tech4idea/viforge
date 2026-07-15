@@ -7,7 +7,7 @@ import type { StreamEvent } from '@viforge/shared';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
 import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
-import { runWithMemoryEmbeddingRebuildLock } from './langGraphAgents';
+import { assertMemoryEmbeddingIndexAvailable, runWithMemoryEmbeddingRebuildLock } from './langGraphAgents';
 import { createRunBus, type RunBus } from './runBus';
 
 vi.setConfig({ testTimeout: 15_000 });
@@ -21,6 +21,8 @@ let originalApiKey: string | undefined;
 let originalImageModel: string | undefined;
 let originalDatabaseUrl: string | undefined;
 let originalAllowInMemory: string | undefined;
+let originalEmbeddingApiKey: string | undefined;
+let originalPgvectorAvailable: string | undefined;
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'viforge-LangGraph-run-service-'));
@@ -32,6 +34,8 @@ beforeEach(async () => {
   originalImageModel = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL;
   originalDatabaseUrl = process.env.DATABASE_URL;
   originalAllowInMemory = process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY;
+  originalEmbeddingApiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY;
+  originalPgvectorAvailable = process.env.VIFORGE_PGVECTOR_AVAILABLE;
   delete process.env.DATABASE_URL;
   process.env.VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY = '1';
 });
@@ -43,6 +47,8 @@ afterEach(async () => {
   restoreEnv('VIFORGE_AIGC_HUB_IMAGE_MODEL', originalImageModel);
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
   restoreEnv('VIFORGE_LANGGRAPH_ALLOW_IN_MEMORY', originalAllowInMemory);
+  restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_API_KEY', originalEmbeddingApiKey);
+  restoreEnv('VIFORGE_PGVECTOR_AVAILABLE', originalPgvectorAvailable);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -494,6 +500,20 @@ describe('langgraph run service', () => {
       await lock;
     }
   });
+
+  it('requires an embedding-capable pgvector backend before memory reindex can be acknowledged', () => {
+    process.env.DATABASE_URL = 'postgresql://writer:password@127.0.0.1:5432/viforge';
+    delete process.env.VIFORGE_AIGC_HUB_API_KEY;
+    delete process.env.AIGC_HUB_API_KEY;
+    delete process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY;
+
+    expect(() => assertMemoryEmbeddingIndexAvailable()).toThrow('Embedding 模型或 API Key 未配置');
+
+    process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY = 'embedding-key';
+    process.env.VIFORGE_PGVECTOR_AVAILABLE = '0';
+
+    expect(() => assertMemoryEmbeddingIndexAvailable()).toThrow('pgvector');
+  });
   it('stores working and semantic project memory through LangGraph Store tools', async () => {
     const project = await store.createProject({ name: 'Memory Tools' });
     const events: StreamEvent[] = [];
@@ -726,3 +746,4 @@ function restoreEnv(name: string, value: string | undefined): void {
   }
   process.env[name] = value;
 }
+

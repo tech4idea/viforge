@@ -17,6 +17,9 @@ const originalImageBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL;
 const originalImageApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY;
 const originalEmbeddingBaseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL;
 const originalEmbeddingApiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY;
+const originalGlobalApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY;
+const originalLegacyApiKey = process.env.AIGC_HUB_API_KEY;
+const originalPgvectorAvailable = process.env.VIFORGE_PGVECTOR_AVAILABLE;
 const originalMemoryReindexRequired = process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED;
 
 afterEach(async () => {
@@ -29,6 +32,9 @@ afterEach(async () => {
   restoreEnv('VIFORGE_AIGC_HUB_IMAGE_API_KEY', originalImageApiKey);
   restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL', originalEmbeddingBaseUrl);
   restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_API_KEY', originalEmbeddingApiKey);
+  restoreEnv('VIFORGE_AIGC_HUB_API_KEY', originalGlobalApiKey);
+  restoreEnv('AIGC_HUB_API_KEY', originalLegacyApiKey);
+  restoreEnv('VIFORGE_PGVECTOR_AVAILABLE', originalPgvectorAvailable);
   restoreEnv('VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED', originalMemoryReindexRequired);
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -201,6 +207,47 @@ describe('runtime config routes', () => {
     });
     expect(process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED).toBeUndefined();
   });
+
+  it('does not clear memory reindex state when embedding index backend is unavailable', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
+    tempDirs.push(root);
+    const store = createRuntimeConfigStore(path.join(root, 'runtime-config.json'));
+    const workspaceStore = {
+      async listProjects() {
+        return [{ id: 'project-1', name: 'Project', description: '', createdAt: '', updatedAt: '' }];
+      },
+    };
+    const app = createRuntimeConfigRoutes(store, workspaceStore as never);
+
+    await app.request('/runtime-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        modelProvider: {
+          embeddingBaseUrl: 'https://embedding.example.test/v1',
+          embeddingModel: 'embedding-compatible-v2',
+          embeddingDims: 1536,
+        },
+      }),
+    });
+
+    process.env.DATABASE_URL = 'postgresql://writer:password@127.0.0.1:5432/viforge';
+    delete process.env.VIFORGE_AIGC_HUB_API_KEY;
+    delete process.env.AIGC_HUB_API_KEY;
+    delete process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY;
+    delete process.env.VIFORGE_PGVECTOR_AVAILABLE;
+
+    const rebuildResponse = await app.request('/runtime-config/rebuild-memory-index', { method: 'POST' });
+
+    expect(rebuildResponse.status).toBe(409);
+    expect(await rebuildResponse.json()).toMatchObject({ error: expect.stringContaining('Embedding 模型或 API Key 未配置') });
+
+    const configResponse = await app.request('/runtime-config');
+    const configBody = await configResponse.json() as { memory: { reindexRequired: boolean; indexedEmbeddingProfile?: unknown } };
+    expect(configBody.memory.reindexRequired).toBe(true);
+    expect(configBody.memory.indexedEmbeddingProfile).toBeUndefined();
+    expect(process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED).toBe('1');
+  });
   it('does not carry an external connection string into embedded PostgreSQL mode', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);
@@ -242,3 +289,4 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
   process.env[key] = value;
 }
+

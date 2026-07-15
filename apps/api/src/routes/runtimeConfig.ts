@@ -7,7 +7,7 @@ import { buildAigcHubHeaders } from '../aigcHubHeaders';
 
 import type { RuntimeConfigStore } from '../runtimeConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
-import { MemoryEmbeddingRebuildInProgressError, reindexProjectMemories } from '../runs/langGraphAgents';
+import { MemoryEmbeddingIndexUnavailableError, MemoryEmbeddingRebuildInProgressError, reindexProjectMemories } from '../runs/langGraphAgents';
 
 const updateRuntimeConfigSchema = z.object({
   modelProvider: z.object({
@@ -67,7 +67,7 @@ export function createRuntimeConfigRoutes(store: RuntimeConfigStore, workspaceSt
         config,
       } satisfies RuntimeMemoryRebuildResponse);
     } catch (error) {
-      if (error instanceof MemoryEmbeddingRebuildInProgressError) {
+      if (error instanceof MemoryEmbeddingRebuildInProgressError || error instanceof MemoryEmbeddingIndexUnavailableError) {
         return context.json({ error: error.message }, 409);
       }
       throw error;
@@ -161,3 +161,4 @@ async function modelTestErrorMessage(response: Response): Promise<string> {
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
 }
+

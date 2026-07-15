@@ -1,5 +1,7 @@
 import { exec } from 'node:child_process';
 
+import { Pool } from 'pg';
+
 import { tool, type StructuredToolInterface } from '@langchain/core/tools';
 import { AIMessage, AIMessageChunk, HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -37,6 +39,13 @@ export class MemoryEmbeddingRebuildInProgressError extends Error {
   constructor(message = '长期记忆索引正在重建，请稍后再试。') {
     super(message);
     this.name = 'MemoryEmbeddingRebuildInProgressError';
+  }
+}
+
+export class MemoryEmbeddingIndexUnavailableError extends Error {
+  constructor(message = '长期记忆向量索引不可用，请先配置 Embedding 模型、API Key 和 pgvector。') {
+    super(message);
+    this.name = 'MemoryEmbeddingIndexUnavailableError';
   }
 }
 
@@ -364,14 +373,14 @@ type ProjectMemoryStore = {
 
 export async function reindexProjectMemories(projectIds: string[]): Promise<{ reindexedCount: number; projectCount: number }> {
   return runWithMemoryEmbeddingRebuildLock(async () => {
+    assertMemoryEmbeddingIndexAvailable();
     resetLangGraphMemoryBackend();
     try {
       const { store } = await getLangGraphMemoryBackend();
       let reindexedCount = 0;
       for (const projectId of projectIds) {
         const namespace = semanticMemoryNamespace(projectId);
-        const items = await store.search(namespace, { limit: 1000 });
-        for (const item of items) {
+        for await (const item of listStoredSemanticMemories(namespace)) {
           await store.put(namespace, item.key, item.value, ['content']);
           reindexedCount += 1;
         }
@@ -381,6 +390,47 @@ export async function reindexProjectMemories(projectIds: string[]): Promise<{ re
       resetLangGraphMemoryBackend();
     }
   });
+}
+
+export function assertMemoryEmbeddingIndexAvailable(): void {
+  if (!process.env.DATABASE_URL) {
+    throw new MemoryEmbeddingIndexUnavailableError('长期记忆重建需要 PostgreSQL DATABASE_URL；当前运行时未连接持久化 LangGraph Store。');
+  }
+  if (process.env.VIFORGE_PGVECTOR_AVAILABLE === '0') {
+    throw new MemoryEmbeddingIndexUnavailableError('当前 PostgreSQL 未启用 pgvector，不能重建长期记忆向量索引。');
+  }
+  if (!createStoreIndexConfig()) {
+    throw new MemoryEmbeddingIndexUnavailableError('Embedding 模型或 API Key 未配置，不能重建长期记忆向量索引。');
+  }
+}
+
+type StoredSemanticMemoryItem = {
+  key: string;
+  value: Record<string, unknown>;
+};
+
+async function* listStoredSemanticMemories(namespace: string[], pageSize = 500): AsyncGenerator<StoredSemanticMemoryItem> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new MemoryEmbeddingIndexUnavailableError('长期记忆重建需要 PostgreSQL DATABASE_URL。');
+
+  const pool = new Pool({ connectionString: databaseUrl });
+  const namespacePath = namespace.join(':');
+  let lastKey = '';
+  try {
+    while (true) {
+      const result = await pool.query<{ key: string; value: Record<string, unknown> }>(
+        'SELECT key, value FROM "langgraph_store".store WHERE namespace_path = $1 AND key > $2 ORDER BY key ASC LIMIT $3',
+        [namespacePath, lastKey, pageSize],
+      );
+      if (result.rows.length === 0) return;
+      for (const row of result.rows) {
+        lastKey = row.key;
+        yield { key: row.key, value: row.value };
+      }
+    }
+  } finally {
+    await pool.end();
+  }
 }
 function workingMemoryNamespace(resourceId: string): string[] {
   return ['viforge', 'projects', resourceId, 'working-memory'];
@@ -2098,3 +2148,4 @@ async function safeBrowserToolCall(execute: () => Promise<unknown>): Promise<unk
     };
   }
 }
+

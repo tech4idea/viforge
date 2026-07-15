@@ -20,7 +20,7 @@ interface EditorViewerProps {
   fileError: string | null;
   rawPreviewUrl: string;
   workspaceEntries?: WorkspaceEntry[];
-  markdownMode?: 'source' | 'split' | 'preview';
+  markdownMode?: 'source' | 'wysiwyg';
   onChange: (content: string) => void;
   onNavigateToPath?: (path: string) => void;
 }
@@ -148,18 +148,6 @@ export function renderEditorViewer(props: EditorViewerProps): JSX.Element {
       return <EditorFallback label="Markdown 文档" />;
     }
 
-    if (props.markdownMode === 'preview') {
-      return (
-        <MarkdownReadPreview
-          content={props.fileContent}
-          currentPath={props.entry.path}
-          rawPreviewUrl={props.rawPreviewUrl}
-          workspaceEntries={props.workspaceEntries ?? []}
-          onNavigateToPath={props.onNavigateToPath}
-        />
-      );
-    }
-
     return (
       <Suspense fallback={<EditorFallback label="Markdown 编辑器" />}>
         <LazyMarkdownEditor
@@ -167,7 +155,7 @@ export function renderEditorViewer(props: EditorViewerProps): JSX.Element {
           filePath={props.entry.path}
           value={props.fileContent}
           rawPreviewUrl={props.rawPreviewUrl}
-          mode={props.markdownMode === 'source' ? 'source' : 'split'}
+          mode={props.markdownMode === 'source' ? 'source' : 'wysiwyg'}
           onChange={props.onChange}
         />
       </Suspense>
@@ -274,3 +262,4 @@ export const MarkdownReadPreview = memo(function MarkdownReadPreview({
     </div>
   );
 });
+

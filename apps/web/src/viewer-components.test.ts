@@ -89,18 +89,22 @@ describe('markdown workspace references', () => {
     expect(html).toContain('src="/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png"');
     expect(html).toContain('href="/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png"');
   });
-  it('renders editable markdown source with workspace asset preview', () => {
-    const html = renderToStaticMarkup(createElement(MarkdownEditor, {
-      filePath: '01 学习目标/世界观设定.md',
-      value: '![图](../生成图片/世界观/2026-07-13T16-10-57-924Z.png)',
-      rawPreviewUrl: '/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/01%20%E5%AD%A6%E4%B9%A0%E7%9B%AE%E6%A0%87/%E4%B8%96%E7%95%8C%E8%A7%82%E8%AE%BE%E5%AE%9A.md',
+  it('uses the lazy rich Markdown editor for interactive GFM editing by default', () => {
+    const viewer = renderEditorViewer({
+      entry: { name: '世界观设定.md', path: '01 学习目标/世界观设定.md', type: 'file', size: 42 },
+      selectedProjectId: 'project-1',
+      fileContent: '| A | B |\n| - | - |\n| 1 | 2 |',
+      savedContent: '| A | B |\n| - | - |\n| 1 | 2 |',
+      fileState: 'idle',
+      fileError: null,
+      rawPreviewUrl: '/api/projects/project-1/raw/01%20%E5%AD%A6%E4%B9%A0%E7%9B%AE%E6%A0%87/%E4%B8%96%E7%95%8C%E8%A7%82%E8%AE%BE%E5%AE%9A.md',
       onChange: () => undefined,
-    }));
+    });
 
-    expect(html).toContain('../生成图片/世界观/2026-07-13T16-10-57-924Z.png');
-    expect(html).toContain('src="/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png"');
+    expect(viewer.type).toBe(Suspense);
+    expect(viewer.props.fallback.props.label).toBe('Markdown 编辑器');
   });
-  it('renders pure source markdown mode without live preview', () => {
+  it('renders source markdown mode for direct path editing', () => {
     const html = renderToStaticMarkup(createElement(MarkdownEditor, {
       filePath: '01 学习目标/世界观设定.md',
       value: '![图](../生成图片/世界观/2026-07-13T16-10-57-924Z.png)',
@@ -111,6 +115,7 @@ describe('markdown workspace references', () => {
 
     expect(html).toContain('markdown-editor-viewer--source');
     expect(html).toContain('../生成图片/世界观/2026-07-13T16-10-57-924Z.png');
-    expect(html).not.toContain('markdown-live-preview');
+    expect(html).not.toContain('markdown-image-node-view');
   });
 });
+

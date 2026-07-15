@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 export type PreviewWorkspaceScope = 'global' | 'project' | 'temporary';
-export type MarkdownMode = 'source' | 'split' | 'preview';
+export type MarkdownMode = 'source' | 'wysiwyg';
 export type PreviewTabCloseMode = 'left' | 'right' | 'others' | 'all';
 
 export type PreviewTab = {
@@ -48,7 +48,7 @@ export function usePreviewTabs({
   const [contextMenu, setContextMenu] = useState<PreviewTabContextMenu | null>(null);
 
   const selectedTabId = selectedPath ? previewTabId(activeWorkspaceScope, activeProjectWorkspaceId, selectedPath) : null;
-  const selectedMarkdownMode = selectedTabId ? markdownModesByTabId[selectedTabId] ?? 'split' : 'split';
+  const selectedMarkdownMode = selectedTabId ? markdownModesByTabId[selectedTabId] ?? 'wysiwyg' : 'wysiwyg';
 
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => tab.workspaceScope === activeWorkspaceScope && tab.projectId === activeProjectWorkspaceId),
@@ -166,3 +166,4 @@ export function usePreviewTabs({
     visibleTabs,
   ]);
 }
+
