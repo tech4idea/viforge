@@ -38,6 +38,7 @@ import type {
   ReferencedFile,
   RetrievalPolicy,
   RuntimeConfig,
+  RuntimeMemoryRebuildResponse,
   RuntimeModelTestResponse,
   UpdateRuntimeConfigInput,
   EvalFixture,
@@ -92,6 +93,7 @@ export type {
   ReferencedFile,
   RetrievalPolicy,
   RuntimeConfig,
+  RuntimeMemoryRebuildResponse,
   RuntimeModelTestResponse,
   UpdateRuntimeConfigInput,
   EvalFixture,
@@ -110,6 +112,7 @@ export type ApiClient = {
   getProductProfile(): Promise<ProductProfile>;
   getRuntimeConfig(): Promise<RuntimeConfig>;
   updateRuntimeConfig(input: UpdateRuntimeConfigInput): Promise<RuntimeConfig>;
+  rebuildMemoryIndex(): Promise<RuntimeMemoryRebuildResponse>;
   testRuntimeModel(input: UpdateRuntimeConfigInput['modelProvider']): Promise<RuntimeModelTestResponse>;
   listGlobalWorkspaceEntries(): Promise<WorkspaceEntry[]>;
   readGlobalWorkspaceFile(path: string): Promise<WorkspaceFile>;
@@ -375,6 +378,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<RuntimeConfig>(fetcher, baseUrl, '/api/runtime-config', {
         method: 'PUT',
         body: JSON.stringify(input),
+      }),
+    rebuildMemoryIndex: () =>
+      request<RuntimeMemoryRebuildResponse>(fetcher, baseUrl, '/api/runtime-config/rebuild-memory-index', {
+        method: 'POST',
       }),
     testRuntimeModel: (input) =>
       request<RuntimeModelTestResponse>(fetcher, baseUrl, '/api/runtime-config/test-model', {

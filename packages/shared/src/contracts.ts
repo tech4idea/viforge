@@ -186,11 +186,33 @@ export type AigcHubModelListResponse = {
   error?: string;
 };
 
+export type RuntimeMemoryEmbeddingProfile = {
+  baseUrl: string;
+  model: string;
+  dims: number;
+};
+
+export type RuntimeMemoryConfig = {
+  embeddingProfile: RuntimeMemoryEmbeddingProfile;
+  indexedEmbeddingProfile?: RuntimeMemoryEmbeddingProfile;
+  reindexRequired: boolean;
+  statusMessage: string;
+  lastReindexedAt?: string;
+};
 export type RuntimeModelProviderConfig = {
   baseUrl: string;
   apiKeyConfigured: boolean;
+  chatBaseUrl?: string;
+  chatApiKeyConfigured?: boolean;
+  chatUsesGlobalConfig?: boolean;
   chatModel?: string;
+  imageBaseUrl?: string;
+  imageApiKeyConfigured?: boolean;
+  imageUsesGlobalConfig?: boolean;
   imageModel?: string;
+  embeddingBaseUrl?: string;
+  embeddingApiKeyConfigured?: boolean;
+  embeddingUsesGlobalConfig?: boolean;
   embeddingModel?: string;
   embeddingDims?: number;
 };
@@ -214,8 +236,11 @@ export type RuntimeConfig = {
     enabled: boolean;
     dataRoot?: string;
   };
+  memory: RuntimeMemoryConfig;
   restartRequired?: boolean;
 };
+
+export type RuntimeModelTestTarget = 'chat' | 'image' | 'embedding';
 
 export type RuntimeModelTestResponse = {
   ok: boolean;
@@ -223,12 +248,27 @@ export type RuntimeModelTestResponse = {
   message: string;
 };
 
+export type RuntimeMemoryRebuildResponse = {
+  ok: boolean;
+  reindexedCount: number;
+  projectCount: number;
+  message: string;
+  config: RuntimeConfig;
+};
+
 export type UpdateRuntimeConfigInput = {
   modelProvider?: {
+    testTarget?: RuntimeModelTestTarget;
     baseUrl?: string;
     apiKey?: string;
+    chatBaseUrl?: string;
+    chatApiKey?: string;
     chatModel?: string;
+    imageBaseUrl?: string;
+    imageApiKey?: string;
     imageModel?: string;
+    embeddingBaseUrl?: string;
+    embeddingApiKey?: string;
     embeddingModel?: string;
     embeddingDims?: number;
   };

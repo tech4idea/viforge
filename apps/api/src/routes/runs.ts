@@ -8,6 +8,7 @@ import type { RunEvent, StreamEvent } from '@viforge/shared';
 import { appendJsonLog } from '../logger';
 import { traceIdFromRequest } from '../aigcHubHeaders';
 import type { RunService } from '../runs/runService';
+import { MemoryEmbeddingRebuildInProgressError } from '../runs/langGraphAgents';
 import type { RunBus } from '../runs/runBus';
 import type { HarnessStore } from '../harness/harnessStore';
 
@@ -215,7 +216,11 @@ function legacyToolCallId(runId: string, toolName: string): string {
   return `${runId}-tool-${toolName}`;
 }
 
-function handleKnownError(context: { json: (data: { error: string }, status: 400 | 404) => Response }, error: unknown): Response {
+function handleKnownError(context: { json: (data: { error: string }, status: 400 | 404 | 409) => Response }, error: unknown): Response {
+  if (error instanceof MemoryEmbeddingRebuildInProgressError) {
+    return context.json({ error: error.message }, 409);
+  }
+
   if (isInvalidWorkspaceError(error)) {
     return context.json({ error: 'Invalid project' }, 400);
   }

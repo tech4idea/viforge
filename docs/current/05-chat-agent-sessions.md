@@ -35,7 +35,7 @@ apps/api/data/chat-sessions.json
 - `createSession(projectId)`
 - `archiveSession(sessionId)`
 - `restoreSession(sessionId)`
-- `updateSession(sessionId, { codexThreadId, title })`
+- `updateSession(sessionId, { title })`，合同中仍保留 `codexThreadId` 作为历史字段，当前 LangGraph 链路不再写入新的 Codex thread。
 - `appendMessage(sessionId, message)`
 - `updateMessage(sessionId, messageId, message)`
 
@@ -88,7 +88,7 @@ viforge.activeChatSession.v1
 
 ## 发送消息
 
-普通创作助手会话的 `kind` 为 `assistant`。常规文本请求由后端通过 Codex runtime 执行；如果输入被识别为图片创建请求，前端会在同一个助手会话里调用图片生成 API，并把用户消息、生成状态和图片附件写回当前会话。
+普通创作助手会话的 `kind` 为 `assistant`。常规文本请求由后端通过 LangGraph runtime 执行；如果输入被识别为图片创建请求，前端会在同一个助手会话里调用图片生成 API，并把用户消息、生成状态和图片附件写回当前会话。
 
 发送入口：
 
@@ -100,7 +100,7 @@ viforge.activeChatSession.v1
 2. 用 `createChatMessage('user', ...)` 创建用户消息。
 3. `appendMessageToSession()` 立即更新本地 UI，并排队调用 `apiClient.appendChatMessage`。
 4. 如果 `isImageGenerationPrompt()` 命中图片创建意图，调用 `apiClient.createImageGeneration`，生成图片会保存到当前会话的工作目录，聊天气泡直接展示图片附件。
-5. 否则调用 `apiClient.createRun` 创建 Codex run。
+5. 否则调用 `apiClient.createRun` 创建 LangGraph run。
 6. 创建 assistant 空消息。
 7. 用 `apiClient.streamRunEvents(run.id, handlers)` 订阅 SSE。
 8. `handleRunStreamEvent()` 将 `text.delta` 追加到 assistant 消息，并持久化更新。
@@ -118,7 +118,7 @@ const chatMessagePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
 
 ## 图片生成会话
 
-创作助手区域还有独立的 `图片` 模式。图片会话的 `kind` 为 `image`，只按临时会话处理，不绑定正式项目，也不通过 Codex CLI。普通 `assistant` 会话也可以直接发“生成一张图片/画一张场景图”等请求，命中后复用同一个图片生成后端，并把图片保存到当前项目或临时会话工作目录。
+创作助手区域还有独立的 `图片` 模式。图片会话的 `kind` 为 `image`，只按临时会话处理，不绑定正式项目，也不通过 LangGraph agent runtime。普通 `assistant` 会话也可以直接发“生成一张图片/画一张场景图”等请求，命中后复用同一个图片生成后端，并把图片保存到当前项目或临时会话工作目录。
 
 入口：
 
@@ -144,7 +144,7 @@ VIFORGE_AIGC_HUB_API_KEY=hub_...
 VIFORGE_AIGC_HUB_IMAGE_MODEL=gpt-image-1
 ```
 
-请求会发送到 `POST ${VIFORGE_AIGC_HUB_BASE_URL}/images/generations`，并使用 `Authorization: Bearer <VIFORGE_AIGC_HUB_API_KEY>`。如果没有配置 base URL 或 API key，接口返回明确错误。不要把图片生成接到 Codex runtime 上。
+请求会发送到 `POST ${VIFORGE_AIGC_HUB_BASE_URL}/images/generations`，并使用 `Authorization: Bearer <VIFORGE_AIGC_HUB_API_KEY>`。如果没有配置 base URL 或 API key，接口返回明确错误。不要把图片生成接到 LangGraph agent runtime 上。
 
 图片文件落在图片临时会话工作目录：
 
@@ -165,7 +165,7 @@ VIFORGE_AIGC_HUB_IMAGE_MODEL=gpt-image-1
 - `buildReferenceSuggestions(entries, query, existing)`：基于当前项目文件给出候选。
 - `insertReference(text, caret, reference)`：把选中的引用插入 prompt。
 
-提交 run 时，`referencedFiles` 会传给后端和 Codex prompt。
+提交 run 时，`referencedFiles` 会传给后端，并由 LangGraph run service 拼入本次 agent 输入。
 
 ## 聊天片段引用
 
@@ -179,7 +179,7 @@ VIFORGE_AIGC_HUB_IMAGE_MODEL=gpt-image-1
 - `text`：用户实际选中的片段。
 - `createdAt`：来源消息时间。
 
-提交 run 时，前端把 `referencedSnippets` 和 `referencedFiles` 一起传给后端。后端在 Codex prompt 中追加 `# 已引用聊天片段`，带上来源角色、时间、messageId 和片段文本，确保 CLI 能拿到引用上下文。
+提交 run 时，前端把 `referencedSnippets` 和 `referencedFiles` 一起传给后端。后端在 LangGraph agent 输入中追加 `# 已引用聊天片段`，带上来源角色、时间、messageId 和片段文本，确保 agent 能拿到引用上下文。
 
 ## 选中文本引用
 

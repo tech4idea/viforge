@@ -32,6 +32,7 @@
     "@viforge/shared": "workspace:*",
     "hono": "^4.6.15",
     "pg": "^8.16.3",
+    "pg-cloudflare": "^1.4.0",
     "playwriter": "^0.4.0",
     "qrcode": "^1.5.4",
     "simple-git": "^3.36.0",

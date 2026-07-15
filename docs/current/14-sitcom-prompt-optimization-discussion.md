@@ -513,7 +513,7 @@ format-editor-agent 暂时不进入故事创作第一阶段。分镜、视频提
 - `apps/api/src/runs/mastraAgents.ts`：`AGENT_DEFS`、`AgentRegistry` 类型和 registry 创建结果。
 - `apps/api/src/runs/mastraRunService.ts`：`delegate_to_specialist_agent` 的枚举、label 和 `getSpecialistAgent()`。
 - `packages/shared/src/contracts.test.ts`、`apps/web/src/workspace-tree.test.ts`、`apps/api/src/runs/mastraRunService.test.ts`：更新默认树和可委派 agent 的测试。
-- `docs/current/11-mastra-agent-runtime.md`：同步说明新的 specialist registry。
+- `docs/current/11-langgraph-agent-runtime.md`：同步说明新的 specialist registry。
 
 ## 建议讨论决策
 

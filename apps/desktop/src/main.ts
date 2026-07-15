@@ -90,13 +90,14 @@ async function createMainWindow(apiUrl: string): Promise<void> {
 
   Menu.setApplicationMenu(null);
   ensureTray();
+  const windowIcon = resolveWindowIcon(process.resourcesPath);
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1100,
     minHeight: 720,
     title: PRODUCT_NAME,
-    icon: resolveWindowIcon(process.resourcesPath),
+    ...(windowIcon ? { icon: windowIcon } : {}),
     autoHideMenuBar: true,
     webPreferences: {
       preload: resolvePreloadEntry(),
@@ -125,6 +126,7 @@ function ensureStartupWindow(): void {
     return;
   }
 
+  const windowIcon = resolveWindowIcon(process.resourcesPath);
   startupWindow = new BrowserWindow({
     width: 360,
     height: 180,
@@ -132,7 +134,7 @@ function ensureStartupWindow(): void {
     maximizable: false,
     minimizable: false,
     title: `${PRODUCT_NAME} 正在打开`,
-    icon: resolveWindowIcon(process.resourcesPath),
+    ...(windowIcon ? { icon: windowIcon } : {}),
     autoHideMenuBar: true,
     show: true,
     webPreferences: {
@@ -181,7 +183,9 @@ function startupHtmlUrl(): string {
 
 function ensureTray(): void {
   if (tray || process.platform === 'darwin') return;
-  tray = new Tray(resolveWindowIcon(process.resourcesPath));
+  const trayIcon = resolveWindowIcon(process.resourcesPath);
+  if (!trayIcon) return;
+  tray = new Tray(trayIcon);
   tray.setToolTip(PRODUCT_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `打开 ${PRODUCT_NAME}`, click: () => showMainWindow() },
@@ -578,15 +582,15 @@ function resolveResourceRoots(resourcesPath: string): { postgres: string; web: s
   };
 }
 
-function resolveWindowIcon(resourcesPath: string): string {
-  if (app.isPackaged) {
-    return process.platform === 'win32'
+function resolveWindowIcon(resourcesPath: string): string | undefined {
+  const iconPath = app.isPackaged
+    ? process.platform === 'win32'
       ? path.join(resourcesPath, 'app.asar', 'build', 'icon.ico')
-      : path.join(resourcesPath, 'app.asar', 'build', 'icon.png');
-  }
-  return process.platform === 'win32'
-    ? path.resolve(projectRoot(), 'apps', 'desktop', 'build', 'icon.ico')
-    : path.resolve(projectRoot(), 'apps', 'desktop', 'build', 'icon.png');
+      : path.join(resourcesPath, 'app.asar', 'build', 'icon.png')
+    : process.platform === 'win32'
+      ? path.resolve(projectRoot(), 'apps', 'desktop', 'build', 'icon.ico')
+      : path.resolve(projectRoot(), 'apps', 'desktop', 'build', 'icon.png');
+  return fs.existsSync(iconPath) ? iconPath : undefined;
 }
 
 function projectRoot(): string {
@@ -685,3 +689,4 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   quitApp();
 });
+

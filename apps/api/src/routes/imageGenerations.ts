@@ -64,8 +64,8 @@ export function createImageGenerationRoutes(chatStore: ChatSessionStore, workspa
       return context.json({ error: 'Invalid image generation request' }, 400);
     }
 
-    const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-    const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+    const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL;
+    const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || AIGC_HUB_API_KEY;
     const defaultModel = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? AIGC_HUB_IMAGE_MODEL;
     if (!gatewayBaseUrl || !gatewayApiKey) {
       return context.json({ error: '未配置 VIFORGE_AIGC_HUB_BASE_URL 或 VIFORGE_AIGC_HUB_API_KEY，无法通过 AIGC Hub 生成图片。' }, 400);

@@ -9,7 +9,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-api-bundle.mjs && node scripts/prepare-icons.mjs",
-    "dev": "pnpm build && electron .",
+    "build:dev": "tsc -p tsconfig.json && node scripts/build-api-bundle.mjs",
+    "dev": "pnpm build:dev && electron .",
     "build:postgres": "node scripts/build-postgres-from-source.mjs",
     "build:pgvector": "node scripts/build-pgvector-from-source.mjs",
     "prepare:postgres": "node scripts/prepare-postgres.mjs",

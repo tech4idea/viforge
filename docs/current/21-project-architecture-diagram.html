@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ViForge Project Architecture Diagram</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { min-height: 100vh; padding: 2rem; background: #020617; color: white; font-family: "JetBrains Mono", monospace; }
+    .container { max-width: 1380px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; border-radius: 50%; background: #22d3ee; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    h1 { font-size: 1.5rem; font-weight: 700; }
+    .subtitle { margin-left: 1.75rem; color: #94a3b8; font-size: 0.875rem; }
+    .diagram-container { overflow-x: auto; padding: 1.5rem; border: 1px solid #1e293b; border-radius: 1rem; background: rgba(15, 23, 42, 0.5); }
+    svg { display: block; width: 100%; min-width: 1180px; }
+    .panel-bg { fill: rgba(15, 23, 42, 0.76); stroke: #1e293b; stroke-width: 1.2; }
+    .box-bg { fill: #0f172a; }
+    .frontend { fill: rgba(8, 51, 68, 0.4); stroke: #22d3ee; }
+    .backend { fill: rgba(6, 78, 59, 0.4); stroke: #34d399; }
+    .database { fill: rgba(76, 29, 149, 0.4); stroke: #a78bfa; }
+    .cloud { fill: rgba(120, 53, 15, 0.3); stroke: #fbbf24; }
+    .security { fill: rgba(136, 19, 55, 0.35); stroke: #fb7185; }
+    .external { fill: rgba(30, 41, 59, 0.5); stroke: #94a3b8; }
+    .bus { fill: rgba(251, 146, 60, 0.3); stroke: #fb923c; }
+    .title { fill: white; font-size: 15px; font-weight: 700; }
+    .section-title { fill: white; font-size: 12px; font-weight: 700; }
+    .label { fill: white; font-size: 12px; font-weight: 600; text-anchor: middle; }
+    .sub { fill: #94a3b8; font-size: 9px; text-anchor: middle; }
+    .tiny { fill: #94a3b8; font-size: 8px; text-anchor: middle; }
+    .note { fill: #64748b; font-size: 8px; text-anchor: middle; }
+    .arrow { fill: none; stroke: #64748b; stroke-width: 1.4; marker-end: url(#arrowhead); }
+    .arrow-cyan { fill: none; stroke: #22d3ee; stroke-width: 1.4; marker-end: url(#arrowhead-cyan); }
+    .arrow-green { fill: none; stroke: #34d399; stroke-width: 1.4; marker-end: url(#arrowhead-green); }
+    .arrow-purple { fill: none; stroke: #a78bfa; stroke-width: 1.4; marker-end: url(#arrowhead-purple); }
+    .arrow-orange { fill: none; stroke: #fb923c; stroke-width: 1.4; marker-end: url(#arrowhead-orange); }
+    .dashed { stroke-dasharray: 5,5; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card { padding: 1.25rem; border: 1px solid #1e293b; border-radius: 0.75rem; background: rgba(15, 23, 42, 0.5); }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; } .card-dot.emerald { background: #34d399; } .card-dot.violet { background: #a78bfa; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; line-height: 1.55; }
+    .footer { margin-top: 1.5rem; color: #475569; font-size: 0.75rem; text-align: center; }
+    .toolbar { display: flex; flex-shrink: 0; align-items: center; gap: 0.5rem; margin-left: auto; }
+    .toolbar-toggle { padding: 0.25rem 0.5rem; border: none; border-radius: 0.375rem; background: transparent; color: #475569; cursor: pointer; font-size: 1.25rem; line-height: 1; }
+    .toolbar-toggle:hover { background: rgba(30, 41, 59, 0.5); color: #94a3b8; }
+    .toolbar-actions { display: none; gap: 0.5rem; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button { padding: 0.375rem 0.75rem; border: 1px solid #334155; border-radius: 0.375rem; background: rgba(30, 41, 59, 0.8); color: #94a3b8; cursor: pointer; font-family: inherit; font-size: 0.75rem; white-space: nowrap; }
+    .toolbar-actions button:hover { border-color: #475569; background: rgba(51, 65, 85, 0.8); color: white; }
+    @media print { body { background: #020617; padding: 1rem; } .toolbar { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>ViForge 项目架构</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">经典分层架构 + 拆分模块调用关系，面向后续开发交接</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 1650" aria-labelledby="diagram-title" role="img">
+        <title id="diagram-title">ViForge layered architecture and module relationships</title>
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b" /></marker>
+          <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" /></marker>
+          <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#34d399" /></marker>
+          <marker id="arrowhead-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" /></marker>
+          <marker id="arrowhead-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#fb923c" /></marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Global layered architecture -->
+        <rect x="30" y="30" width="1220" height="560" rx="12" class="panel-bg"/>
+        <text x="55" y="60" class="title">1. 全局分层架构图</text>
+
+        <rect x="60" y="110" width="235" height="430" rx="10" fill="#0f172a"/>
+        <rect x="60" y="110" width="235" height="430" rx="10" class="security" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <text x="178" y="140" fill="white" font-size="13" font-weight="700" text-anchor="middle">Harness 层</text>
+        <text x="178" y="162" fill="#fb7185" font-size="9" text-anchor="middle">侧边统筹 / 观测评估</text>
+        <rect x="88" y="190" width="180" height="48" rx="6" class="box-bg"/><rect x="88" y="190" width="180" height="48" rx="6" class="security" stroke-width="1.2"/><text x="178" y="211" class="label">AgentSpec</text><text x="178" y="226" class="tiny">候选 agent 规格</text>
+        <rect x="88" y="255" width="180" height="48" rx="6" class="box-bg"/><rect x="88" y="255" width="180" height="48" rx="6" class="security" stroke-width="1.2"/><text x="178" y="276" class="label">Fixture</text><text x="178" y="291" class="tiny">输入 / 文件 / 记忆快照</text>
+        <rect x="88" y="320" width="180" height="48" rx="6" class="box-bg"/><rect x="88" y="320" width="180" height="48" rx="6" class="security" stroke-width="1.2"/><text x="178" y="341" class="label">EvalRun</text><text x="178" y="356" class="tiny">候选与 active 对比</text>
+        <rect x="88" y="385" width="180" height="48" rx="6" class="box-bg"/><rect x="88" y="385" width="180" height="48" rx="6" class="security" stroke-width="1.2"/><text x="178" y="406" class="label">Trace</text><text x="178" y="421" class="tiny">工具 / 记忆 / 失败链路</text>
+        <rect x="88" y="450" width="180" height="48" rx="6" class="box-bg"/><rect x="88" y="450" width="180" height="48" rx="6" class="security" stroke-width="1.2"/><text x="178" y="471" class="label">Phoenix</text><text x="178" y="486" class="tiny">OTLP trace viewer</text>
+
+        <rect x="340" y="110" width="860" height="70" rx="8" class="box-bg"/><rect x="340" y="110" width="860" height="70" rx="8" class="frontend" stroke-width="1.5"/>
+        <text x="450" y="140" fill="white" font-size="13" font-weight="700">外壳 / 产品形态层</text>
+        <text x="730" y="140" class="label">浏览器访问</text><text x="730" y="158" class="tiny">apps/web</text>
+        <text x="890" y="140" class="label">Desktop 端</text><text x="890" y="158" class="tiny">apps/desktop</text>
+        <text x="1040" y="140" class="label">微信入口</text><text x="1040" y="158" class="tiny">remote session</text>
+
+        <rect x="340" y="200" width="860" height="70" rx="8" class="box-bg"/><rect x="340" y="200" width="860" height="70" rx="8" class="backend" stroke-width="1.5"/>
+        <text x="450" y="230" fill="white" font-size="13" font-weight="700">核心 Agent 层</text>
+        <text x="710" y="230" class="label">System Agent</text><text x="710" y="248" class="tiny">任务理解 / 综合输出</text>
+        <text x="900" y="230" class="label">子 Agent 委派</text><text x="900" y="248" class="tiny">按需调度 specialist</text>
+        <text x="1080" y="230" class="label">Specialists</text><text x="1080" y="248" class="tiny">故事 / 角色 / 审阅</text>
+
+        <rect x="340" y="290" width="860" height="70" rx="8" class="box-bg"/><rect x="340" y="290" width="860" height="70" rx="8" class="cloud" stroke-width="1.5"/>
+        <text x="450" y="320" fill="white" font-size="13" font-weight="700">工具层</text>
+        <text x="660" y="320" class="label">文件 / 记忆</text><text x="660" y="338" class="tiny">read-write / memory</text>
+        <text x="840" y="320" class="label">连接 / Skill</text><text x="840" y="338" class="tiny">browser / wechat / config</text>
+        <text x="1040" y="320" class="label">定时 / 版本</text><text x="1040" y="338" class="tiny">schedule / Git</text>
+
+        <rect x="340" y="380" width="860" height="70" rx="8" class="box-bg"/><rect x="340" y="380" width="860" height="70" rx="8" class="external" stroke-width="1.5"/>
+        <text x="450" y="410" fill="white" font-size="13" font-weight="700">连接层</text>
+        <text x="730" y="410" class="label">Browser Use</text><text x="730" y="428" class="tiny">Playwriter relay + extension</text>
+        <text x="970" y="410" class="label">Remote Control</text><text x="970" y="428" class="tiny">WeChat relay / remote session</text>
+
+        <rect x="340" y="470" width="860" height="70" rx="8" class="box-bg"/><rect x="340" y="470" width="860" height="70" rx="8" class="database" stroke-width="1.5"/>
+        <text x="450" y="500" fill="white" font-size="13" font-weight="700">存储层</text>
+        <text x="670" y="500" class="label">文件系统</text><text x="670" y="518" class="tiny">workspace / logs / run records</text>
+        <text x="870" y="500" class="label">数据库</text><text x="870" y="518" class="tiny">PostgreSQL</text>
+        <text x="1050" y="500" class="label">向量数据库</text><text x="1050" y="518" class="tiny">pgvector</text>
+
+
+        <!-- Module 2.1 -->
+        <rect x="30" y="630" width="1220" height="265" rx="12" class="panel-bg"/>
+        <text x="55" y="660" class="title">2.1 外壳、API 与共享配置</text>
+        <rect x="55" y="690" width="165" height="195" rx="8" fill="transparent" stroke="#22d3ee" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="830" y="675" width="190" height="210" rx="8" fill="transparent" stroke="#34d399" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="1025" y="675" width="185" height="210" rx="8" fill="transparent" stroke="#a78bfa" stroke-width="1" stroke-dasharray="6,4"/>
+        <path class="arrow-cyan" d="M 220 770 H 315"/>
+        <path class="arrow-green" d="M 455 770 H 555"/>
+        <path class="arrow-green" d="M 755 770 H 830"/>
+        <path class="arrow-purple dashed" d="M 655 715 V 665 H 1118 V 675"/>
+
+        <rect x="70" y="700" width="135" height="55" rx="6" class="box-bg"/><rect x="70" y="700" width="135" height="55" rx="6" class="frontend" stroke-width="1.5"/><text x="138" y="723" class="label">浏览器访问</text><text x="138" y="740" class="tiny">apps/web workbench</text>
+        <rect x="70" y="775" width="135" height="55" rx="6" class="box-bg"/><rect x="70" y="775" width="135" height="55" rx="6" class="cloud" stroke-width="1.5"/><text x="138" y="798" class="label">Desktop 端</text><text x="138" y="815" class="tiny">Electron shell</text>
+        <rect x="70" y="850" width="135" height="30" rx="6" class="box-bg"/><rect x="70" y="850" width="135" height="30" rx="6" class="external" stroke-width="1.2"/><text x="138" y="869" class="tiny">微信入口</text>
+
+        <rect x="315" y="725" width="140" height="90" rx="6" class="box-bg"/><rect x="315" y="725" width="140" height="90" rx="6" class="frontend" stroke-width="1.5"/><text x="385" y="755" class="label">统一 API Client</text><text x="385" y="773" class="tiny">apps/web/src/api.ts</text>
+        <rect x="555" y="715" width="200" height="110" rx="6" class="box-bg"/><rect x="555" y="715" width="200" height="110" rx="6" class="backend" stroke-width="1.5"/><text x="655" y="748" class="label">Hono App</text><text x="655" y="766" class="tiny">apps/api/src/app.ts</text><text x="655" y="786" class="tiny">route composition</text>
+
+        <rect x="845" y="685" width="160" height="40" rx="6" class="box-bg"/><rect x="845" y="685" width="160" height="40" rx="6" class="backend" stroke-width="1.2"/><text x="925" y="709" class="tiny">项目与工作区 API</text>
+        <rect x="845" y="735" width="160" height="40" rx="6" class="box-bg"/><rect x="845" y="735" width="160" height="40" rx="6" class="backend" stroke-width="1.2"/><text x="925" y="759" class="tiny">会话 API</text>
+        <rect x="845" y="785" width="160" height="40" rx="6" class="box-bg"/><rect x="845" y="785" width="160" height="40" rx="6" class="backend" stroke-width="1.2"/><text x="925" y="809" class="tiny">Agent Run + SSE API</text>
+        <rect x="845" y="835" width="160" height="40" rx="6" class="box-bg"/><rect x="845" y="835" width="160" height="40" rx="6" class="backend" stroke-width="1.2"/><text x="925" y="859" class="tiny">Skill / 设置 / 规则 API</text>
+
+        <rect x="1040" y="690" width="155" height="55" rx="6" class="box-bg"/><rect x="1040" y="690" width="155" height="55" rx="6" class="database" stroke-width="1.2"/><text x="1118" y="713" class="label">共享合同</text><text x="1118" y="730" class="tiny">contracts.ts</text>
+        <rect x="1040" y="765" width="155" height="55" rx="6" class="box-bg"/><rect x="1040" y="765" width="155" height="55" rx="6" class="database" stroke-width="1.2"/><text x="1118" y="788" class="label">产品配置</text><text x="1118" y="805" class="tiny">profiles / templates</text>
+        <rect x="1040" y="840" width="155" height="35" rx="6" class="box-bg"/><rect x="1040" y="840" width="155" height="35" rx="6" class="database" stroke-width="1.2"/><text x="1118" y="862" class="tiny">prompts / default skills</text>
+
+        <!-- Module 2.2 -->
+        <rect x="30" y="935" width="1220" height="365" rx="12" class="panel-bg"/>
+        <text x="55" y="965" class="title">2.2 核心 Agent、工具、连接与存储</text>
+        <rect x="60" y="985" width="180" height="260" rx="8" fill="transparent" stroke="#34d399" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="315" y="980" width="200" height="270" rx="8" fill="transparent" stroke="#fbbf24" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="600" y="980" width="220" height="270" rx="8" fill="transparent" stroke="#94a3b8" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="885" y="980" width="170" height="250" rx="8" fill="transparent" stroke="#a78bfa" stroke-width="1" stroke-dasharray="6,4"/>
+        <path class="arrow-green" d="M 240 1118 H 315"/>
+        <path class="arrow-orange" d="M 515 1118 H 600"/>
+        <path class="arrow-purple" d="M 820 1118 H 885"/>
+
+        <rect x="75" y="1000" width="145" height="55" rx="6" class="box-bg"/><rect x="75" y="1000" width="145" height="55" rx="6" class="backend" stroke-width="1.5"/><text x="148" y="1023" class="label">RunService</text><text x="148" y="1040" class="tiny">agent run 编排</text>
+        <rect x="75" y="1060" width="145" height="55" rx="6" class="box-bg"/><rect x="75" y="1060" width="145" height="55" rx="6" class="backend" stroke-width="1.5"/><text x="148" y="1083" class="label">System Agent</text><text x="148" y="1100" class="tiny">常驻主 agent</text>
+        <rect x="75" y="1120" width="145" height="55" rx="6" class="box-bg"/><rect x="75" y="1120" width="145" height="55" rx="6" class="backend" stroke-width="1.5"/><text x="148" y="1143" class="label">Agent Registry</text><text x="148" y="1160" class="tiny">specialist instructions</text>
+        <rect x="75" y="1180" width="145" height="55" rx="6" class="box-bg"/><rect x="75" y="1180" width="145" height="55" rx="6" class="backend" stroke-width="1.5"/><text x="148" y="1203" class="label">Specialists</text><text x="148" y="1220" class="tiny">按需委派</text>
+
+        <rect x="330" y="992" width="170" height="42" rx="6" class="box-bg"/><rect x="330" y="992" width="170" height="42" rx="6" class="cloud" stroke-width="1.3"/><text x="415" y="1018" class="tiny">文件读写工具</text>
+        <rect x="330" y="1042" width="170" height="42" rx="6" class="box-bg"/><rect x="330" y="1042" width="170" height="42" rx="6" class="cloud" stroke-width="1.3"/><text x="415" y="1068" class="tiny">记忆读写工具</text>
+        <rect x="330" y="1092" width="170" height="42" rx="6" class="box-bg"/><rect x="330" y="1092" width="170" height="42" rx="6" class="cloud" stroke-width="1.3"/><text x="415" y="1118" class="tiny">连接工具</text>
+        <rect x="330" y="1142" width="170" height="42" rx="6" class="box-bg"/><rect x="330" y="1142" width="170" height="42" rx="6" class="cloud" stroke-width="1.3"/><text x="415" y="1168" class="tiny">Skill 与配置工具</text>
+        <rect x="330" y="1192" width="170" height="42" rx="6" class="box-bg"/><rect x="330" y="1192" width="170" height="42" rx="6" class="cloud" stroke-width="1.3"/><text x="415" y="1218" class="tiny">运维与项目工具</text>
+
+        <rect x="610" y="992" width="190" height="42" rx="6" class="box-bg"/><rect x="610" y="992" width="190" height="42" rx="6" class="database" stroke-width="1.3"/><text x="705" y="1018" class="tiny">文件系统</text>
+        <rect x="610" y="1042" width="190" height="42" rx="6" class="box-bg"/><rect x="610" y="1042" width="190" height="42" rx="6" class="database" stroke-width="1.3"/><text x="705" y="1068" class="tiny">数据库 / PostgreSQL</text>
+        <rect x="610" y="1092" width="190" height="42" rx="6" class="box-bg"/><rect x="610" y="1092" width="190" height="42" rx="6" class="external" stroke-width="1.3"/><text x="705" y="1118" class="tiny">Browser Use / Playwriter</text>
+        <rect x="610" y="1142" width="190" height="42" rx="6" class="box-bg"/><rect x="610" y="1142" width="190" height="42" rx="6" class="external" stroke-width="1.3"/><text x="705" y="1168" class="tiny">Remote Control / WeChat</text>
+        <rect x="610" y="1192" width="190" height="42" rx="6" class="box-bg"/><rect x="610" y="1192" width="190" height="42" rx="6" class="database" stroke-width="1.3"/><text x="705" y="1218" class="tiny">文件系统 / logs / run events</text>
+
+        <rect x="900" y="999" width="140" height="52" rx="6" class="box-bg"/><rect x="900" y="999" width="140" height="52" rx="6" class="database" stroke-width="1.3"/><text x="970" y="1023" class="label">向量数据库</text><text x="970" y="1040" class="tiny">pgvector</text>
+        <rect x="900" y="1079" width="140" height="52" rx="6" class="box-bg"/><rect x="900" y="1079" width="140" height="52" rx="6" class="database" stroke-width="1.3"/><text x="970" y="1103" class="label">长期记忆</text><text x="970" y="1120" class="tiny">LangGraph Store</text>
+        <rect x="900" y="1159" width="140" height="52" rx="6" class="box-bg"/><rect x="900" y="1159" width="140" height="52" rx="6" class="database" stroke-width="1.3"/><text x="970" y="1183" class="label">Checkpoint</text><text x="970" y="1200" class="tiny">PostgreSQL</text>
+
+
+        <!-- Module 2.3 -->
+        <rect x="30" y="1340" width="1220" height="225" rx="12" class="panel-bg"/>
+        <text x="55" y="1370" class="title">2.3 Harness 与观测评估</text>
+        <rect x="60" y="1420" width="190" height="132" rx="8" fill="transparent" stroke="#fb7185" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="325" y="1420" width="235" height="132" rx="8" fill="transparent" stroke="#34d399" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="650" y="1420" width="195" height="132" rx="8" fill="transparent" stroke="#a78bfa" stroke-width="1" stroke-dasharray="6,4"/>
+        <rect x="920" y="1420" width="190" height="132" rx="8" fill="transparent" stroke="#fb7185" stroke-width="1" stroke-dasharray="6,4"/>
+        <path class="arrow-orange" d="M 250 1486 H 325"/>
+        <path class="arrow-green dashed" d="M 560 1486 H 650"/>
+        <path class="arrow-purple" d="M 845 1486 H 920"/>
+
+        <rect x="70" y="1430" width="160" height="55" rx="6" class="box-bg"/><rect x="70" y="1430" width="160" height="55" rx="6" class="security" stroke-width="1.5"/><text x="150" y="1453" class="label">HarnessStore</text><text x="150" y="1470" class="tiny">spec / fixture / eval run</text>
+        <rect x="70" y="1502" width="160" height="40" rx="6" class="box-bg"/><rect x="70" y="1502" width="160" height="40" rx="6" class="security" stroke-width="1.3"/><text x="150" y="1527" class="tiny">AgentSpec / Fixture / EvalRun</text>
+
+        <rect x="340" y="1430" width="205" height="55" rx="6" class="box-bg"/><rect x="340" y="1430" width="205" height="55" rx="6" class="backend" stroke-width="1.3"/><text x="443" y="1453" class="label">运行时被观测对象</text><text x="443" y="1470" class="tiny">RunService / RunBus</text>
+        <rect x="340" y="1502" width="205" height="40" rx="6" class="box-bg"/><rect x="340" y="1502" width="205" height="40" rx="6" class="cloud" stroke-width="1.3"/><text x="443" y="1527" class="tiny">文件读写工具 / 记忆工具</text>
+
+        <rect x="660" y="1430" width="170" height="55" rx="6" class="box-bg"/><rect x="660" y="1430" width="170" height="55" rx="6" class="database" stroke-width="1.3"/><text x="745" y="1453" class="label">Fixture 来源</text><text x="745" y="1470" class="tiny">文件 / 数据库 / pgvector</text>
+        <rect x="660" y="1502" width="170" height="40" rx="6" class="box-bg"/><rect x="660" y="1502" width="170" height="40" rx="6" class="database" stroke-width="1.3"/><text x="745" y="1527" class="tiny">logs / run events</text>
+
+        <rect x="935" y="1430" width="160" height="55" rx="6" class="box-bg"/><rect x="935" y="1430" width="160" height="55" rx="6" class="security" stroke-width="1.3"/><text x="1015" y="1453" class="label">Trace</text><text x="1015" y="1470" class="tiny">失败链路 / 工具调用</text>
+        <rect x="935" y="1502" width="160" height="40" rx="6" class="box-bg"/><rect x="935" y="1502" width="160" height="40" rx="6" class="security" stroke-width="1.3"/><text x="1015" y="1527" class="tiny">回归评估记录</text>
+
+        <!-- Legend outside all panels -->
+        <text x="60" y="1615" fill="white" font-size="10" font-weight="600">Legend</text>
+        <rect x="125" y="1606" width="16" height="10" rx="2" class="frontend" stroke-width="1"/><text x="150" y="1614" fill="#94a3b8" font-size="8">外壳 / 前端</text>
+        <rect x="245" y="1606" width="16" height="10" rx="2" class="backend" stroke-width="1"/><text x="270" y="1614" fill="#94a3b8" font-size="8">核心 / 服务</text>
+        <rect x="365" y="1606" width="16" height="10" rx="2" class="cloud" stroke-width="1"/><text x="390" y="1614" fill="#94a3b8" font-size="8">工具</text>
+        <rect x="450" y="1606" width="16" height="10" rx="2" class="external" stroke-width="1"/><text x="475" y="1614" fill="#94a3b8" font-size="8">连接</text>
+        <rect x="540" y="1606" width="16" height="10" rx="2" class="database" stroke-width="1"/><text x="565" y="1614" fill="#94a3b8" font-size="8">存储</text>
+        <rect x="630" y="1606" width="16" height="10" rx="2" class="security" stroke-width="1"/><text x="655" y="1614" fill="#94a3b8" font-size="8">Harness</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="card-header"><div class="card-dot cyan"></div><h3>全局分层</h3></div><ul><li>右侧五层堆叠表达产品入口、agent 核心、工具、连接和存储。</li><li>左侧 Harness 侧栏表达评估、回放、trace 和 Phoenix 观测。</li><li>主图聚焦层级、职责边界和抽象组件。</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot emerald"></div><h3>模块关系</h3></div><ul><li>入口/API、核心/工具/存储、Harness/观测评估拆成三块。</li><li>API 边界只在模块调用图中体现。</li><li>工具层把 agent 意图收敛成受控业务能力。</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>存储抽象</h3></div><ul><li>文件系统承载 workspace、skills、json state、logs 和 run events。</li><li>数据库抽象为 PostgreSQL。</li><li>向量数据库抽象为 pgvector。</li></ul></div>
+    </div>
+    <p class="footer">ViForge current architecture - docs/current source of truth - generated for project handoff</p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = 'Copied';
+      } catch (e) { btn.textContent = 'Failed'; }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'viforge-project-architecture.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = 'Done';
+      } catch (e) { btn.textContent = 'Failed'; }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('viforge-project-architecture.pdf');
+        btn.textContent = 'Done';
+      } catch (e) { btn.textContent = 'Failed'; }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>
