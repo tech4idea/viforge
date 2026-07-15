@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import type { RuntimeConfig, RuntimeModelTestResponse, UpdateRuntimeConfigInput } from '@viforge/shared';
+import type { RuntimeConfig, RuntimeMemoryRebuildResponse, RuntimeModelTestResponse, UpdateRuntimeConfigInput } from '@viforge/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 
 import type { RuntimeConfigStore } from '../runtimeConfigStore';
+import type { WorkspaceStore } from '../storage/workspaceStore';
+import { MemoryEmbeddingRebuildInProgressError, reindexProjectMemories } from '../runs/langGraphAgents';
 
 const updateRuntimeConfigSchema = z.object({
   modelProvider: z.object({
@@ -31,7 +33,7 @@ const updateRuntimeConfigSchema = z.object({
   }).optional(),
 });
 
-export function createRuntimeConfigRoutes(store: RuntimeConfigStore): Hono {
+export function createRuntimeConfigRoutes(store: RuntimeConfigStore, workspaceStore?: WorkspaceStore): Hono {
   const routes = new Hono();
 
   routes.get('/runtime-config', async (context) => {
@@ -47,6 +49,30 @@ export function createRuntimeConfigRoutes(store: RuntimeConfigStore): Hono {
     return context.json(await store.updateConfig(parsed.data satisfies UpdateRuntimeConfigInput) satisfies RuntimeConfig);
   });
 
+
+  routes.post('/runtime-config/rebuild-memory-index', async (context) => {
+    if (!workspaceStore) {
+      return context.json({ error: 'Workspace store is not available for memory rebuild.' }, 500);
+    }
+    try {
+      const projects = await workspaceStore.listProjects();
+      const result = await reindexProjectMemories(projects.map((project) => project.id));
+      const config = await store.markMemoryEmbeddingReindexed();
+      return context.json({
+        ok: true,
+        ...result,
+        message: result.reindexedCount > 0
+          ? `已重建 ${result.reindexedCount} 条长期记忆索引。`
+          : '没有发现需要重建的长期记忆，已更新索引配置状态。',
+        config,
+      } satisfies RuntimeMemoryRebuildResponse);
+    } catch (error) {
+      if (error instanceof MemoryEmbeddingRebuildInProgressError) {
+        return context.json({ error: error.message }, 409);
+      }
+      throw error;
+    }
+  });
   routes.post('/runtime-config/test-model', async (context) => {
     const parsed = updateRuntimeConfigSchema.pick({ modelProvider: true }).safeParse(await context.req.json());
     if (!parsed.success) {
@@ -76,10 +102,10 @@ async function testModelProvider(input: NonNullable<UpdateRuntimeConfigInput['mo
       ? input.embeddingApiKey || globalApiKey
       : input.chatApiKey || globalApiKey;
   const model = target === 'image'
-    ? input.imageModel || process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL || 'gpt-image-1'
+    ? input.imageModel || process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL || 'gpt-image-2'
     : target === 'embedding'
       ? input.embeddingModel || process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL || 'text-embedding-3-large'
-      : input.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || 'MiniMax-M3';
+      : input.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || 'gpt-5.5';
   if (!apiKey) return { ok: false, message: '请先填写 API Key 后再测试。' };
 
   try {

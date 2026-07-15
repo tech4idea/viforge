@@ -73,10 +73,17 @@ export function EditorHeader({
           <div className="markdown-mode-switch" role="tablist" aria-label="Markdown 视图">
             <button
               type="button"
-              className={selectedMarkdownMode === 'edit' ? 'active' : ''}
-              onClick={() => onSetMarkdownMode('edit')}
+              className={selectedMarkdownMode === 'source' ? 'active' : ''}
+              onClick={() => onSetMarkdownMode('source')}
             >
-              编辑
+              源码
+            </button>
+            <button
+              type="button"
+              className={selectedMarkdownMode === 'split' ? 'active' : ''}
+              onClick={() => onSetMarkdownMode('split')}
+            >
+              分屏
             </button>
             <button
               type="button"

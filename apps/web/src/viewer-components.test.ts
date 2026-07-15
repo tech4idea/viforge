@@ -1,8 +1,10 @@
-import { Suspense } from 'react';
+import { createElement, Suspense } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { buildMarkdownInstanceKey, renderEditorViewer, resolveMarkdownWorkspacePath } from './viewer-components';
-import { detectLanguage } from './editors';
+import { MarkdownReadPreview, buildMarkdownInstanceKey, renderEditorViewer } from './viewer-components';
+import { buildMarkdownRawUrl, resolveMarkdownWorkspacePath } from './markdown-workspace';
+import { MarkdownEditor, detectLanguage } from './editors';
 
 describe('buildMarkdownInstanceKey', () => {
   it('changes when switching files', () => {
@@ -51,5 +53,64 @@ describe('markdown workspace references', () => {
 
   it('ignores external links', () => {
     expect(resolveMarkdownWorkspacePath('docs/outline.md', 'https://example.com/ref.md')).toBeNull();
+  });
+
+  it('builds raw image urls for local markdown assets with encoded paths', () => {
+    expect(buildMarkdownRawUrl(
+      '/api/projects/project-1/raw/docs/episode-1/outline.md',
+      'docs/episode-1/outline.md',
+      'docs/episode-1/assets/场景 图.png',
+    )).toBe('/api/projects/project-1/raw/docs/episode-1/assets/%E5%9C%BA%E6%99%AF%20%E5%9B%BE.png');
+  });
+
+  it('preserves desktop token query params when switching markdown asset paths', () => {
+    expect(buildMarkdownRawUrl(
+      '/api/global/raw/%E6%A8%A1%E6%9D%BF/outline.md?desktopToken=token-1',
+      '模板/outline.md',
+      '模板/assets/参考.png',
+    )).toBe('/api/global/raw/%E6%A8%A1%E6%9D%BF/assets/%E5%8F%82%E8%80%83.png?desktopToken=token-1');
+  });
+
+  it('builds from the raw route prefix when the current document suffix does not match', () => {
+    expect(buildMarkdownRawUrl(
+      '/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/current.md?desktopToken=token-1',
+      '01 学习目标/世界观设定.md',
+      '生成图片/世界观/2026-07-13T16-10-57-924Z.png',
+    )).toBe('/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png?desktopToken=token-1');
+  });
+
+  it('renders workspace image and file references through raw urls', () => {
+    const html = renderToStaticMarkup(createElement(MarkdownReadPreview, {
+      content: '![图](../生成图片/世界观/2026-07-13T16-10-57-924Z.png)\n\n[设定](../生成图片/世界观/2026-07-13T16-10-57-924Z.png)',
+      currentPath: '01 学习目标/世界观设定.md',
+      rawPreviewUrl: '/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/01%20%E5%AD%A6%E4%B9%A0%E7%9B%AE%E6%A0%87/%E4%B8%96%E7%95%8C%E8%A7%82%E8%AE%BE%E5%AE%9A.md',
+    }));
+
+    expect(html).toContain('src="/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png"');
+    expect(html).toContain('href="/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png"');
+  });
+  it('renders editable markdown source with workspace asset preview', () => {
+    const html = renderToStaticMarkup(createElement(MarkdownEditor, {
+      filePath: '01 学习目标/世界观设定.md',
+      value: '![图](../生成图片/世界观/2026-07-13T16-10-57-924Z.png)',
+      rawPreviewUrl: '/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/01%20%E5%AD%A6%E4%B9%A0%E7%9B%AE%E6%A0%87/%E4%B8%96%E7%95%8C%E8%A7%82%E8%AE%BE%E5%AE%9A.md',
+      onChange: () => undefined,
+    }));
+
+    expect(html).toContain('../生成图片/世界观/2026-07-13T16-10-57-924Z.png');
+    expect(html).toContain('src="/api/projects/822abc50-0d54-4162-95e9-56603c77d94d/raw/%E7%94%9F%E6%88%90%E5%9B%BE%E7%89%87/%E4%B8%96%E7%95%8C%E8%A7%82/2026-07-13T16-10-57-924Z.png"');
+  });
+  it('renders pure source markdown mode without live preview', () => {
+    const html = renderToStaticMarkup(createElement(MarkdownEditor, {
+      filePath: '01 学习目标/世界观设定.md',
+      value: '![图](../生成图片/世界观/2026-07-13T16-10-57-924Z.png)',
+      rawPreviewUrl: '/api/projects/project-1/raw/01%20%E5%AD%A6%E4%B9%A0%E7%9B%AE%E6%A0%87/%E4%B8%96%E7%95%8C%E8%A7%82%E8%AE%BE%E5%AE%9A.md',
+      mode: 'source',
+      onChange: () => undefined,
+    }));
+
+    expect(html).toContain('markdown-editor-viewer--source');
+    expect(html).toContain('../生成图片/世界观/2026-07-13T16-10-57-924Z.png');
+    expect(html).not.toContain('markdown-live-preview');
   });
 });

@@ -20,11 +20,11 @@ export function createAigcHubRoutes(): Hono {
       const models = new Map<string, AigcHubModelMetadata>();
       const errors: string[] = [];
       for (const provider of providers) {
-        const adminResult = await requestModelList(aigcHubAdminModelsUrl(provider.baseUrl), provider.apiKey);
-        const publicResult = adminResult.models.length > 0
+        const publicResult = await requestModelList(aigcHubPublicModelsUrl(provider.baseUrl), provider.apiKey);
+        const adminResult = publicResult.models.length > 0
           ? { models: [] as AigcHubModelMetadata[], error: undefined as string | undefined }
-          : await requestModelList(aigcHubPublicModelsUrl(provider.baseUrl), provider.apiKey);
-        for (const model of [...adminResult.models, ...publicResult.models]) {
+          : await requestModelList(aigcHubAdminModelsUrl(provider.baseUrl), provider.apiKey);
+        for (const model of [...publicResult.models, ...adminResult.models]) {
           models.set(model.id, { ...models.get(model.id), ...model });
         }
         const error = publicResult.error ?? adminResult.error;

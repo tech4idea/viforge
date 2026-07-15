@@ -1,73 +1,62 @@
-import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
-import { commonmark } from '@milkdown/preset-commonmark';
-import { gfm } from '@milkdown/preset-gfm';
-import { nord } from '@milkdown/theme-nord';
-import { listener, listenerCtx } from '@milkdown/plugin-listener';
-import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { Workbook } from '@fortune-sheet/react';
 import type { Sheet } from '@fortune-sheet/core';
 import hljs from 'highlight.js/lib/common';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/github.css';
-import '@milkdown/theme-nord/style.css';
 import '@fortune-sheet/react/dist/index.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+
+import { buildMarkdownRawUrl, resolveMarkdownWorkspacePath } from './markdown-workspace';
 
 export function MarkdownEditor({
   filePath,
   value,
+  rawPreviewUrl,
+  mode = 'split',
   onChange,
 }: {
   filePath: string;
   value: string;
+  rawPreviewUrl?: string;
+  mode?: 'source' | 'split';
   onChange: (content: string) => void;
 }): JSX.Element {
   return (
-    <div className="markdown-editor-viewer" data-color-mode="light">
-      <MilkdownProvider>
-        <MilkdownEditorInner filePath={filePath} value={value} onChange={onChange} />
-      </MilkdownProvider>
+    <div className={`markdown-editor-viewer markdown-editor-viewer--${mode}`}>
+      <textarea
+        className="markdown-source-editor"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+      />
+      {mode === 'split' ? (
+        <div className="markdown-live-preview markdown-read-preview">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a({ href, children, ...anchorProps }) {
+                const targetPath = href ? resolveMarkdownWorkspacePath(filePath, href) : null;
+                const resolvedHref = targetPath && rawPreviewUrl
+                  ? buildMarkdownRawUrl(rawPreviewUrl, filePath, targetPath)
+                  : href;
+                return <a {...anchorProps} href={resolvedHref}>{children}</a>;
+              },
+              img({ src, alt, ...imageProps }) {
+                const targetPath = src ? resolveMarkdownWorkspacePath(filePath, src) : null;
+                const resolvedSrc = targetPath && rawPreviewUrl
+                  ? buildMarkdownRawUrl(rawPreviewUrl, filePath, targetPath)
+                  : src;
+                return <img {...imageProps} src={resolvedSrc} alt={alt ?? ''} />;
+              },
+            }}
+          >
+            {value}
+          </ReactMarkdown>
+        </div>
+      ) : null}
     </div>
   );
-}
-
-function MilkdownEditorInner({
-  filePath,
-  value,
-  onChange,
-}: {
-  filePath: string;
-  value: string;
-  onChange: (content: string) => void;
-}): JSX.Element {
-  const initialMarkdown = useRef(value);
-  const currentPath = useRef(filePath);
-  const latestOnChange = useRef(onChange);
-  latestOnChange.current = onChange;
-
-  if (currentPath.current !== filePath) {
-    currentPath.current = filePath;
-    initialMarkdown.current = value;
-  }
-
-  useEditor((root) =>
-    Editor.make()
-      .config(nord)
-      .config((ctx) => {
-        ctx.set(rootCtx, root);
-        ctx.set(defaultValueCtx, initialMarkdown.current);
-        ctx.update(editorViewOptionsCtx, (prev) => ({
-          ...prev,
-          attributes: { class: 'milkdown-editor', spellcheck: 'false' },
-        }));
-        ctx.get(listenerCtx).markdownUpdated((_, md) => {
-          latestOnChange.current(md);
-        });
-      })
-      .use(commonmark)
-      .use(gfm)
-      .use(listener), [filePath]);
-
-  return <Milkdown />;
 }
 
 export function SheetEditor({

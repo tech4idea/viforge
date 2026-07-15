@@ -30,6 +30,51 @@ type LangGraphMemoryBackend = {
 
 const inMemoryBackends = new Map<string, LangGraphMemoryBackend>();
 let postgresMemoryBackend: Promise<LangGraphMemoryBackend> | null = null;
+let memoryEmbeddingRebuildInProgress = false;
+let activeMemorySensitiveLangGraphRuns = 0;
+
+export class MemoryEmbeddingRebuildInProgressError extends Error {
+  constructor(message = '长期记忆索引正在重建，请稍后再试。') {
+    super(message);
+    this.name = 'MemoryEmbeddingRebuildInProgressError';
+  }
+}
+
+export function isMemoryEmbeddingRebuildInProgress(): boolean {
+  return memoryEmbeddingRebuildInProgress;
+}
+
+export function beginMemorySensitiveLangGraphRun(): () => void {
+  if (memoryEmbeddingRebuildInProgress) throw new MemoryEmbeddingRebuildInProgressError();
+  activeMemorySensitiveLangGraphRuns += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeMemorySensitiveLangGraphRuns = Math.max(0, activeMemorySensitiveLangGraphRuns - 1);
+  };
+}
+
+export function activeMemorySensitiveLangGraphRunCount(): number {
+  return activeMemorySensitiveLangGraphRuns;
+}
+
+export async function runWithMemoryEmbeddingRebuildLock<T>(task: () => Promise<T>): Promise<T> {
+  if (memoryEmbeddingRebuildInProgress) throw new MemoryEmbeddingRebuildInProgressError();
+  if (activeMemorySensitiveLangGraphRuns > 0) {
+    throw new MemoryEmbeddingRebuildInProgressError('已有 LangGraph 任务正在执行，请等待结束后再重建长期记忆索引。');
+  }
+  memoryEmbeddingRebuildInProgress = true;
+  try {
+    return await task();
+  } finally {
+    memoryEmbeddingRebuildInProgress = false;
+  }
+}
+
+export function resetLangGraphMemoryBackend(): void {
+  postgresMemoryBackend = null;
+}
 
 async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
   const databaseUrl = process.env.DATABASE_URL ?? '';
@@ -72,7 +117,7 @@ function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0
   if (!process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY && !process.env.VIFORGE_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
 
   return {
-    dims: Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
+    dims: Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '3072'),
     embed: createMemoryEmbeddings(),
     fields: ['content', 'memory'],
   };
@@ -82,7 +127,7 @@ function createMemoryEmbeddings(): OpenAIEmbeddings {
   const baseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
   const apiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
-    model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
+    model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'text-embedding-3-large',
     apiKey,
     configuration: {
       baseURL: trimTrailingSlashes(baseUrl),
@@ -317,9 +362,39 @@ type ProjectMemoryStore = {
   recall(input: { resourceId: string; query: string; topK: number; traceId?: string }): Promise<{ messages: ProjectMemoryMessage[]; usage?: unknown }>;
 };
 
+export async function reindexProjectMemories(projectIds: string[]): Promise<{ reindexedCount: number; projectCount: number }> {
+  return runWithMemoryEmbeddingRebuildLock(async () => {
+    resetLangGraphMemoryBackend();
+    try {
+      const { store } = await getLangGraphMemoryBackend();
+      let reindexedCount = 0;
+      for (const projectId of projectIds) {
+        const namespace = semanticMemoryNamespace(projectId);
+        const items = await store.search(namespace, { limit: 1000 });
+        for (const item of items) {
+          await store.put(namespace, item.key, item.value, ['content']);
+          reindexedCount += 1;
+        }
+      }
+      return { reindexedCount, projectCount: projectIds.length };
+    } finally {
+      resetLangGraphMemoryBackend();
+    }
+  });
+}
+function workingMemoryNamespace(resourceId: string): string[] {
+  return ['viforge', 'projects', resourceId, 'working-memory'];
+}
+
+function semanticMemoryNamespace(resourceId: string): string[] {
+  return ['viforge', 'projects', resourceId, 'memories'];
+}
+
+function memoryEmbeddingUnavailable(): boolean {
+  return process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED === '1' || isMemoryEmbeddingRebuildInProgress();
+}
+
 function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
-  const workingMemoryNamespace = (resourceId: string) => ['viforge', 'projects', resourceId, 'working-memory'];
-  const semanticMemoryNamespace = (resourceId: string) => ['viforge', 'projects', resourceId, 'memories'];
 
   return {
     async getWorkingMemory({ resourceId }) {
@@ -334,6 +409,9 @@ function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
       }, ['content']);
     },
     async saveMemory({ resourceId, content }) {
+      if (memoryEmbeddingUnavailable()) {
+        return { messageId: '', usage: { store: 'langgraph', indexed: false, reindexRequired: true } };
+      }
       const messageId = `memory-${randomId()}-${Date.now()}`;
       const createdAt = new Date().toISOString();
       await store.put(semanticMemoryNamespace(resourceId), messageId, {
@@ -346,6 +424,9 @@ function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
       return { messageId, usage: { store: 'langgraph', indexed: true } };
     },
     async recall({ resourceId, query, topK }) {
+      if (memoryEmbeddingUnavailable()) {
+        return { messages: [], usage: { store: 'langgraph', query, reindexRequired: true } };
+      }
       const items = await store.search(semanticMemoryNamespace(resourceId), { query, limit: topK });
       const fallbackItems = items.length > 0
         ? items
@@ -771,6 +852,9 @@ export function createWorkspaceTools(
           memoryText,
         ].join('\n');
         const result = await (await projectMemory).saveMemory({ resourceId: resource, content, traceId: options.traceId });
+        if (result.usage && typeof result.usage === 'object' && 'reindexRequired' in result.usage) {
+          return { remembered: false, category, messageId: '', usage: result.usage, reason: 'Embedding 配置已变化，长期记忆索引需要重建后才能继续写入。' };
+        }
         publish({
           type: 'memory.write',
           runId,
@@ -1796,7 +1880,7 @@ export function buildModelConfig(options: {
     || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
     || process.env.VIFORGE_LANGGRAPH_MODEL
-    || 'MiniMax-M3';
+    || 'gpt-5.5';
 
   const baseUrl = options.baseUrl
     || process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL

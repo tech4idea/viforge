@@ -186,6 +186,19 @@ export type AigcHubModelListResponse = {
   error?: string;
 };
 
+export type RuntimeMemoryEmbeddingProfile = {
+  baseUrl: string;
+  model: string;
+  dims: number;
+};
+
+export type RuntimeMemoryConfig = {
+  embeddingProfile: RuntimeMemoryEmbeddingProfile;
+  indexedEmbeddingProfile?: RuntimeMemoryEmbeddingProfile;
+  reindexRequired: boolean;
+  statusMessage: string;
+  lastReindexedAt?: string;
+};
 export type RuntimeModelProviderConfig = {
   baseUrl: string;
   apiKeyConfigured: boolean;
@@ -223,6 +236,7 @@ export type RuntimeConfig = {
     enabled: boolean;
     dataRoot?: string;
   };
+  memory: RuntimeMemoryConfig;
   restartRequired?: boolean;
 };
 
@@ -232,6 +246,14 @@ export type RuntimeModelTestResponse = {
   ok: boolean;
   status?: number;
   message: string;
+};
+
+export type RuntimeMemoryRebuildResponse = {
+  ok: boolean;
+  reindexedCount: number;
+  projectCount: number;
+  message: string;
+  config: RuntimeConfig;
 };
 
 export type UpdateRuntimeConfigInput = {

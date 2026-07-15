@@ -7,6 +7,7 @@ import type { StreamEvent } from '@viforge/shared';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
 import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
+import { runWithMemoryEmbeddingRebuildLock } from './langGraphAgents';
 import { createRunBus, type RunBus } from './runBus';
 
 vi.setConfig({ testTimeout: 15_000 });
@@ -439,6 +440,60 @@ describe('langgraph run service', () => {
     ]));
   });
 
+
+
+  it('rejects memory index rebuild lock while a LangGraph run is active', async () => {
+    const project = await store.createProject({ name: 'Active Run Blocks Rebuild' });
+    let releaseStream: (() => void) | undefined;
+    const service = createLangGraphRunService(store, bus, {
+      createAgent: () => ({
+        async stream() {
+          await new Promise<void>((resolve) => {
+            releaseStream = resolve;
+          });
+          return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: 'done' } }]) };
+        },
+        async generate() {
+          return { text: 'done' };
+        },
+      }),
+    });
+
+    const { run } = await service.createRun({ projectId: project.id, prompt: 'hold run open' });
+    const end = collectUntilEnd(bus, run.id);
+    await waitUntil(() => Boolean(releaseStream));
+
+    await expect(runWithMemoryEmbeddingRebuildLock(async () => undefined)).rejects.toThrow('已有 LangGraph 任务正在执行，请等待结束后再重建长期记忆索引。');
+
+    releaseStream?.();
+    await expect(end).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ type: 'run.end', status: 'success' })]));
+  });
+  it('rejects starting LangGraph runs while memory index rebuild is in progress', async () => {
+    const project = await store.createProject({ name: 'Blocked During Rebuild' });
+    let releaseLock: (() => void) | undefined;
+    const lock = runWithMemoryEmbeddingRebuildLock(() => new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    }));
+
+    try {
+      await expect(createLangGraphRunService(store, bus, {
+        createAgent: () => ({
+          async stream() {
+            throw new Error('agent should not start');
+          },
+          async generate() {
+            throw new Error('agent should not start');
+          },
+        }),
+      }).createRun({
+        projectId: project.id,
+        prompt: 'hello',
+      })).rejects.toThrow('长期记忆索引正在重建，请稍后再试。');
+    } finally {
+      releaseLock?.();
+      await lock;
+    }
+  });
   it('stores working and semantic project memory through LangGraph Store tools', async () => {
     const project = await store.createProject({ name: 'Memory Tools' });
     const events: StreamEvent[] = [];
@@ -479,6 +534,40 @@ describe('langgraph run service', () => {
     ]));
   });
 
+
+  it('blocks semantic memory tools while memory index rebuild is in progress', async () => {
+    const project = await store.createProject({ name: 'Memory Tools Rebuild Lock' });
+    const tools = __langGraphRunServiceTest.createWorkspaceTools(
+      store,
+      project.id,
+      () => undefined,
+      'run_memory_rebuild_lock',
+      () => '2026-06-04T00:00:00.000Z',
+    );
+    let releaseLock: (() => void) | undefined;
+    const lock = runWithMemoryEmbeddingRebuildLock(() => new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    }));
+
+    try {
+      const remembered = await tools.remember_project_memory.execute?.({
+        memory: '用户偏好：保持冷幽默。',
+        category: 'user_preference',
+        reason: '测试重建锁',
+      }, {} as never) as { remembered: boolean; usage: { reindexRequired?: boolean }; reason: string };
+      const recalled = await tools.recall_project_memory.execute?.({
+        query: '冷幽默',
+        topK: 3,
+      }, {} as never) as { matches: unknown[]; usage: { reindexRequired?: boolean } };
+
+      expect(remembered).toMatchObject({ remembered: false, usage: { reindexRequired: true } });
+      expect(remembered.reason).toContain('长期记忆索引需要重建');
+      expect(recalled).toMatchObject({ matches: [], usage: { reindexRequired: true } });
+    } finally {
+      releaseLock?.();
+      await lock;
+    }
+  });
   it('retrieves knowledge cards from the global knowledge index and publishes retrieval events', async () => {
     const project = await store.createProject({ name: 'Knowledge Tools' });
     await store.writeGlobalWorkspaceFile('知识库/index.yaml', [
@@ -600,6 +689,14 @@ async function* asyncGenerator<T>(items: T[]): AsyncGenerator<T> {
   }
 }
 
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error('Timed out waiting for condition');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 function collectUntilEnd(bus: RunBus, runId: string): Promise<StreamEvent[]> {
   return new Promise((resolve) => {
     const events: StreamEvent[] = [];

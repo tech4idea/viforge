@@ -8,6 +8,23 @@ This repository is the current `viforge` implementation for sitcom creation work
 - Use the feature documents in `docs/current/` for architecture, workspace filesystem behavior, editor preview behavior, chat sessions, Codex runtime integration, skills/config, WeChat integration, and test commands.
 - Shared request and response contracts live in `packages/shared/src/contracts.ts`; update them before changing either side of an API boundary.
 
+## Current Documentation Map
+
+- `docs/current/01-architecture-and-contracts.md`: architecture and shared contracts.
+- `docs/current/02-workspace-filesystem.md`: workspace filesystem behavior.
+- `docs/current/03-web-workbench-ui.md`: web workbench UI behavior.
+- `docs/current/04-editor-preview.md`: editor preview behavior.
+- `docs/current/05-chat-agent-sessions.md`: assistant chat, sessions, and references.
+- `docs/current/06-codex-agent-runtime.md`: historical Codex runtime notes.
+- `docs/current/07-skills-and-agent-config.md`: Agent Skills and agent configuration.
+- `docs/current/08-wechat-integration.md`: remote WeChat integration.
+- `docs/current/09-tests-and-dev-commands.md`: tests and development commands.
+- `docs/current/11-langgraph-agent-runtime.md`: LangGraph Agent runtime.
+- `docs/current/18-standalone-desktop-plan.md`: standalone desktop implementation plan.
+- `docs/current/19-desktop-release-guide.md`: desktop build and release guide.
+- `docs/current/20-private-binary-bundle-github-actions.md`: private binary bundle and GitHub Actions packaging plan.
+- `docs/current/21-project-architecture-diagram.html`: project architecture diagram.
+
 ## Project Shape
 
 - `apps/web/` contains the React/Vite workbench UI.

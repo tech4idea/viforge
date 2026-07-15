@@ -1,7 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { RuntimeConfig, UpdateRuntimeConfigInput } from '@viforge/shared';
+import type { RuntimeConfig, RuntimeMemoryEmbeddingProfile, UpdateRuntimeConfigInput } from '@viforge/shared';
+
+import { resetLangGraphMemoryBackend } from './runs/langGraphAgents';
 
 import {
   AIGC_HUB_API_KEY,
@@ -34,15 +36,21 @@ type StoredRuntimeConfig = {
     customAdapter?: string;
     vectorStore?: RuntimeConfig['database']['vectorStore'];
   };
+  memory?: {
+    embeddingProfile?: RuntimeMemoryEmbeddingProfile;
+    reindexRequired?: boolean;
+    lastReindexedAt?: string;
+  };
 };
 
 const DEFAULT_DATABASE_PORT = 15432;
 const DEFAULT_MODEL_BASE_URL = 'https://api.openai.com/v1';
-const DEFAULT_CHAT_MODEL = 'MiniMax-M3';
+const DEFAULT_CHAT_MODEL = 'gpt-5.5';
 
 export type RuntimeConfigStore = {
   getConfig(): Promise<RuntimeConfig>;
   updateConfig(input: UpdateRuntimeConfigInput): Promise<RuntimeConfig>;
+  markMemoryEmbeddingReindexed(input?: { reindexedAt?: string }): Promise<RuntimeConfig>;
 };
 
 const CONFIG_PATH = path.resolve(WORKSPACES_ROOT, '..', 'runtime-config.json');
@@ -68,6 +76,7 @@ export function createRuntimeConfigStore(configPath = CONFIG_PATH): RuntimeConfi
     },
     async updateConfig(input) {
       const current = await readStored();
+      const previousEmbeddingProfile = effectiveEmbeddingProfile(current);
       const next: StoredRuntimeConfig = {
         modelProvider: {
           ...current.modelProvider,
@@ -77,7 +86,16 @@ export function createRuntimeConfigStore(configPath = CONFIG_PATH): RuntimeConfi
           ...current.database,
           ...cleanDatabaseInput(input.database),
         },
+        memory: current.memory,
       };
+      const nextEmbeddingProfile = effectiveEmbeddingProfile(next);
+      const embeddingChanged = !sameEmbeddingProfile(previousEmbeddingProfile, nextEmbeddingProfile);
+      if (embeddingChanged) {
+        next.memory = {
+          ...current.memory,
+          reindexRequired: true,
+        };
+      }
 
       if (process.env.VIFORGE_DESKTOP === '1') {
         next.database = { mode: 'embedded-postgres', vectorStore: 'pgvector' };
@@ -87,7 +105,24 @@ export function createRuntimeConfigStore(configPath = CONFIG_PATH): RuntimeConfi
 
       await writeStored(next);
       applyRuntimeConfigToEnv(next);
+      if (embeddingChanged) resetLangGraphMemoryBackend();
       return toRuntimeConfig(next, true);
+    },
+    async markMemoryEmbeddingReindexed(input = {}) {
+      const current = await readStored();
+      const next: StoredRuntimeConfig = {
+        ...current,
+        memory: {
+          ...current.memory,
+          embeddingProfile: effectiveEmbeddingProfile(current),
+          reindexRequired: false,
+          lastReindexedAt: input.reindexedAt ?? new Date().toISOString(),
+        },
+      };
+      await writeStored(next);
+      applyRuntimeConfigToEnv(next);
+      resetLangGraphMemoryBackend();
+      return toRuntimeConfig(next);
     },
   };
 }
@@ -113,6 +148,8 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
   if (model?.embeddingApiKey !== undefined) process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY = model.embeddingApiKey;
   if (model?.embeddingModel !== undefined) process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL = model.embeddingModel;
   if (model?.embeddingDims !== undefined) process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS = String(model.embeddingDims);
+  if (config.memory?.reindexRequired) process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED = '1';
+  else delete process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED;
 
   const database = effectiveDatabaseConfig(config.database);
   if (database?.mode !== undefined) process.env.VIFORGE_DATABASE_MODE = database.mode;
@@ -153,6 +190,9 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
   const chatApiKeyConfigured = Boolean(model.chatApiKey ?? process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY) || globalApiKeyConfigured;
   const imageApiKeyConfigured = Boolean(model.imageApiKey ?? process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY) || globalApiKeyConfigured;
   const embeddingApiKeyConfigured = Boolean(model.embeddingApiKey ?? process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY) || globalApiKeyConfigured;
+  const embeddingProfile = effectiveEmbeddingProfile(config);
+  const indexedEmbeddingProfile = config.memory?.embeddingProfile;
+  const reindexRequired = Boolean(config.memory?.reindexRequired || (indexedEmbeddingProfile && !sameEmbeddingProfile(indexedEmbeddingProfile, embeddingProfile)));
 
   return {
     modelProvider: {
@@ -170,7 +210,7 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
       embeddingApiKeyConfigured,
       embeddingUsesGlobalConfig: !model.embeddingBaseUrl && !process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL && !model.embeddingApiKey && !process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY,
       embeddingModel: model.embeddingModel ?? process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? EMBEDDING_MODEL,
-      embeddingDims: model.embeddingDims ?? Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
+      embeddingDims: model.embeddingDims ?? Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '3072'),
     },
     database: {
       mode: databaseMode,
@@ -185,10 +225,32 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
       enabled: process.env.VIFORGE_DESKTOP === '1',
       dataRoot: process.env.VIFORGE_DESKTOP_DATA_ROOT,
     },
+    memory: {
+      embeddingProfile,
+      indexedEmbeddingProfile,
+      reindexRequired,
+      statusMessage: reindexRequired
+        ? 'Embedding 配置已变化，长期记忆向量索引需要重建后才能继续检索和写入。'
+        : '长期记忆向量索引与当前 Embedding 配置一致。',
+      lastReindexedAt: config.memory?.lastReindexedAt,
+    },
     restartRequired,
   };
 }
 
+function effectiveEmbeddingProfile(config: StoredRuntimeConfig): RuntimeMemoryEmbeddingProfile {
+  const model = config.modelProvider ?? {};
+  const globalBaseUrl = model.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL;
+  return {
+    baseUrl: model.embeddingBaseUrl || process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || globalBaseUrl,
+    model: model.embeddingModel || process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL || EMBEDDING_MODEL || 'text-embedding-3-large',
+    dims: model.embeddingDims ?? Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '3072'),
+  };
+}
+
+function sameEmbeddingProfile(a: RuntimeMemoryEmbeddingProfile | undefined, b: RuntimeMemoryEmbeddingProfile | undefined): boolean {
+  return Boolean(a && b && a.baseUrl === b.baseUrl && a.model === b.model && a.dims === b.dims);
+}
 function effectiveDatabaseConfig(database: StoredRuntimeConfig['database']): NonNullable<StoredRuntimeConfig['database']> {
   if (process.env.VIFORGE_DESKTOP === '1') {
     return { mode: 'embedded-postgres', vectorStore: 'pgvector' };

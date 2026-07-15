@@ -17,6 +17,7 @@ const originalImageBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL;
 const originalImageApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY;
 const originalEmbeddingBaseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL;
 const originalEmbeddingApiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY;
+const originalMemoryReindexRequired = process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED;
 
 afterEach(async () => {
   restoreEnv('VIFORGE_DESKTOP', originalDesktop);
@@ -28,6 +29,7 @@ afterEach(async () => {
   restoreEnv('VIFORGE_AIGC_HUB_IMAGE_API_KEY', originalImageApiKey);
   restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL', originalEmbeddingBaseUrl);
   restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_API_KEY', originalEmbeddingApiKey);
+  restoreEnv('VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED', originalMemoryReindexRequired);
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -43,7 +45,7 @@ describe('runtime config routes', () => {
     expect(await response.json()).toMatchObject({
       modelProvider: {
         baseUrl: 'https://api.openai.com/v1',
-        chatModel: 'MiniMax-M3',
+        chatModel: 'gpt-5.5',
       },
     });
   });
@@ -71,7 +73,7 @@ describe('runtime config routes', () => {
     const response = await app.request('/runtime-config/test-model', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.openai.com/v1', apiKey: '', chatModel: 'MiniMax-M3' } }),
+      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.openai.com/v1', apiKey: '', chatModel: 'gpt-5.5' } }),
     });
 
     expect(response.status).toBe(200);
@@ -154,6 +156,51 @@ describe('runtime config routes', () => {
     });
   });
 
+
+  it('marks long-term memory reindex required when embedding config changes and clears it after rebuild', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
+    tempDirs.push(root);
+    const store = createRuntimeConfigStore(path.join(root, 'runtime-config.json'));
+    const app = createRuntimeConfigRoutes(store);
+
+    const response = await app.request('/runtime-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        modelProvider: {
+          embeddingBaseUrl: 'https://embedding.example.test/v1',
+          embeddingModel: 'embedding-compatible-v2',
+          embeddingDims: 1536,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      memory: {
+        reindexRequired: true,
+        embeddingProfile: {
+          baseUrl: 'https://embedding.example.test/v1',
+          model: 'embedding-compatible-v2',
+          dims: 1536,
+        },
+      },
+    });
+    expect(process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED).toBe('1');
+
+    const rebuilt = await store.markMemoryEmbeddingReindexed({ reindexedAt: '2026-07-13T00:00:00.000Z' });
+
+    expect(rebuilt.memory).toMatchObject({
+      reindexRequired: false,
+      indexedEmbeddingProfile: {
+        baseUrl: 'https://embedding.example.test/v1',
+        model: 'embedding-compatible-v2',
+        dims: 1536,
+      },
+      lastReindexedAt: '2026-07-13T00:00:00.000Z',
+    });
+    expect(process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED).toBeUndefined();
+  });
   it('does not carry an external connection string into embedded PostgreSQL mode', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);

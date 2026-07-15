@@ -21,7 +21,7 @@ import type { ScheduleService } from '../schedules/scheduleService';
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
-import { createAgentRegistry, createTool, createWorkspaceTools, type AgentRegistry, type LangGraphAgentClient, type LangGraphAgentInput, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
+import { beginMemorySensitiveLangGraphRun, createAgentRegistry, createTool, createWorkspaceTools, isMemoryEmbeddingRebuildInProgress, MemoryEmbeddingRebuildInProgressError, type AgentRegistry, type LangGraphAgentClient, type LangGraphAgentInput, type LangGraphStreamChunk, type LangGraphStreamOutput, type LangGraphToolset } from './langGraphAgents';
 import { getPromptText } from './langfusePromptStore';
 
 type LangGraphRunOptions = {
@@ -91,6 +91,7 @@ export function createLangGraphRunService(
 
   return {
     async createRun(input) {
+      if (isMemoryEmbeddingRebuildInProgress()) throw new MemoryEmbeddingRebuildInProgressError();
       const project = await store.getProject(input.projectId);
       if (!project) {
         throw new Error('Project not found');
@@ -144,6 +145,7 @@ export function createLangGraphEvalRunExecutor(
       input.onEvent?.(event);
     };
     const emittedAt = () => new Date().toISOString();
+  let releaseMemoryRun: (() => void) | undefined;
     const prompt = buildEvalRunPrompt(input);
     const evalModel = resolveEvalModel(input, options.model);
     const evalLayerConfig = buildEvalLayerConfigWithPromptBlocks(input);
@@ -232,6 +234,7 @@ async function executeLangGraphRun({
   store: WorkspaceStore;
 }): Promise<void> {
   const emittedAt = () => new Date().toISOString();
+  let releaseMemoryRun: (() => void) | undefined;
   const publish = (event: StreamEvent) => {
     appendJsonLog('api-runs.jsonl', {
       scope: 'langgraph-run',
@@ -262,6 +265,7 @@ async function executeLangGraphRun({
   const signal = bus.getAbortSignal(runId);
 
   try {
+    releaseMemoryRun = beginMemorySensitiveLangGraphRun();
     const productProfile = options.productProfile ?? await store.getProjectProductProfile(input.projectId) ?? PRODUCT_PROFILE;
 
     // Build tools
@@ -365,6 +369,8 @@ async function executeLangGraphRun({
       status: 'error',
       errorMessage,
     });
+  } finally {
+    releaseMemoryRun?.();
   }
 }
 
