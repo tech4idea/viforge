@@ -5,18 +5,26 @@
 当前版本采用 pnpm workspace：
 
 - `apps/web` 只通过 `apps/web/src/api.ts` 访问后端，不直接读写本地文件。
-- `apps/api` 封装文件系统、Codex SDK、SSE、技能和微信状态。
+- `apps/api` 封装文件系统、LangGraph/LangChain agent runtime、SSE、技能、运行设置、浏览器工具、Git、计划任务、Agent Harness 和微信状态。
 - `packages/shared` 提供前后端共享类型、产品 profile 与默认工作区模板。
 
 API 服务由 [apps/api/src/app.ts](../../apps/api/src/app.ts) 装配：
 
 ```ts
 app.route('/api', createProjectsRoutes(workspaceStore));
-app.route('/api', createChatSessionRoutes(createChatSessionStore(...)));
-app.route('/api', createRunsRoutes(createLangGraphRunService(workspaceStore, runBus), runBus));
+app.route('/api', createAigcHubRoutes());
+app.route('/api', createRuntimeConfigRoutes(createRuntimeConfigStore()));
+app.route('/api', createBrowserRoutes());
+app.route('/api', createChatSessionRoutes(chatSessionStore, workspaceStore, wechatStore));
+app.route('/api', createImageGenerationRoutes(chatSessionStore, workspaceStore));
+app.route('/api', createRunsRoutes(queuedRunService, runBus, harnessStore));
 app.route('/api', createRunEventsRoutes(runBus));
+app.route('/api', createHarnessRoutes(harnessStore));
 app.route('/api', createSkillsRoutes(createSkillStore(...)));
-app.route('/api', createWechatRoutes(createWechatStore(...)));
+app.route('/api', createBehaviorRulesRoutes(createBehaviorRulesStore(workspaceStore)));
+app.route('/api', createGitRoutes(gitService, gitConfigStore, workspaceStore));
+app.route('/api', createWechatRoutes(...));
+app.route('/api', createScheduleRoutes(scheduleStore, scheduleService));
 ```
 
 ## 共享类型

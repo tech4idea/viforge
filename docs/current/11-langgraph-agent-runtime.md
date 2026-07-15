@@ -193,8 +193,8 @@ LangGraph agent 当前按官方推荐拆成两类记忆：
 
 语义检索配置：
 
-- 有 AIGC Hub API key 时，`PostgresStore` 启用 vector index，embedding 模型使用 `VIFORGE_AIGC_HUB_EMBEDDING_MODEL`，维度默认 `1024`，可用 `VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS` 覆盖。
-- 未配置 embedding key 时，`PostgresStore` 仍持久化长期记忆，`search()` 退化为 PostgreSQL 文本搜索。
+- 有 AIGC Hub API key 时，`PostgresStore` 启用 vector index，embedding 模型使用 `VIFORGE_AIGC_HUB_EMBEDDING_MODEL`，维度默认 `3072`，可用 `VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS` 覆盖。
+- 未配置 embedding key 时，`PostgresStore` 仍持久化长期记忆，`search()` 退化为 PostgreSQL 文本搜索。`embeddingBaseUrl`、`embeddingModel` 或维度变化后，运行配置会标记长期记忆索引需要重建；重建前 `recall_project_memory` 不返回旧向量结果，`remember_project_memory` 不写入新的语义记忆，避免混用不同 embedding 空间。运行设置界面的“重建”会按项目遍历长期记忆并重新写入 LangGraph Store，触发当前 embedding 配置下的向量重算。重建过程与 LangGraph run 互斥：已有 run 正在执行时不能开始重建，重建进行中也不能启动新的 run。
 
 前端聊天会话 JSON 只负责 UI 历史展示，不再手动拼接进 prompt；多轮上下文由 LangGraph checkpointer 依据 `thread_id` 自动恢复。
 

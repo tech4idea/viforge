@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import type { WorkspaceEntry } from './api';
+import { buildMarkdownRawUrl, resolveMarkdownWorkspacePath } from './markdown-workspace';
 import { detectViewerKind, type ViewerKind } from './viewers';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from './components/icons';
 
@@ -19,52 +20,9 @@ interface EditorViewerProps {
   fileError: string | null;
   rawPreviewUrl: string;
   workspaceEntries?: WorkspaceEntry[];
-  markdownMode?: 'edit' | 'preview';
+  markdownMode?: 'source' | 'wysiwyg';
   onChange: (content: string) => void;
   onNavigateToPath?: (path: string) => void;
-}
-
-function dirname(path: string): string {
-  const index = path.lastIndexOf('/');
-  return index === -1 ? '' : path.slice(0, index);
-}
-
-function normalizeWorkspacePath(path: string): string {
-  const parts: string[] = [];
-  for (const rawPart of path.replace(/\\/g, '/').split('/')) {
-    const part = rawPart.trim();
-    if (!part || part === '.') continue;
-    if (part === '..') {
-      parts.pop();
-      continue;
-    }
-    parts.push(part);
-  }
-  return parts.join('/');
-}
-
-function isExternalUrl(url: string): boolean {
-  return /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url) || /^(?:mailto|tel):/i.test(url) || url.startsWith('#') || url.startsWith('data:');
-}
-
-export function resolveMarkdownWorkspacePath(currentPath: string, rawTarget: string): string | null {
-  const cleanTarget = rawTarget.split('#')[0]?.split('?')[0] ?? '';
-  if (!cleanTarget.trim() || isExternalUrl(cleanTarget)) return null;
-
-  let decoded = cleanTarget;
-  try {
-    decoded = decodeURIComponent(cleanTarget);
-  } catch {
-    // Keep the raw target when the Markdown contains a partial escape sequence.
-  }
-
-  return normalizeWorkspacePath(decoded.startsWith('/') ? decoded : `${dirname(currentPath)}/${decoded}`);
-}
-
-function buildMarkdownRawUrl(rawPreviewUrl: string, currentPath: string, targetPath: string): string {
-  const suffix = encodeURIComponent(currentPath).replace(/%2F/g, '/');
-  const encodedTarget = encodeURIComponent(targetPath).replace(/%2F/g, '/');
-  return rawPreviewUrl.endsWith(suffix) ? `${rawPreviewUrl.slice(0, -suffix.length)}${encodedTarget}` : rawPreviewUrl;
 }
 
 function EditorFallback({ label }: { label: string }): JSX.Element {
@@ -190,24 +148,14 @@ export function renderEditorViewer(props: EditorViewerProps): JSX.Element {
       return <EditorFallback label="Markdown 文档" />;
     }
 
-    if (props.markdownMode === 'preview') {
-      return (
-        <MarkdownReadPreview
-          content={props.fileContent}
-          currentPath={props.entry.path}
-          rawPreviewUrl={props.rawPreviewUrl}
-          workspaceEntries={props.workspaceEntries ?? []}
-          onNavigateToPath={props.onNavigateToPath}
-        />
-      );
-    }
-
     return (
       <Suspense fallback={<EditorFallback label="Markdown 编辑器" />}>
         <LazyMarkdownEditor
           key={buildMarkdownInstanceKey(props.entry.path, props.savedContent)}
           filePath={props.entry.path}
           value={props.fileContent}
+          rawPreviewUrl={props.rawPreviewUrl}
+          mode={props.markdownMode === 'source' ? 'source' : 'wysiwyg'}
           onChange={props.onChange}
         />
       </Suspense>
@@ -283,11 +231,14 @@ export const MarkdownReadPreview = memo(function MarkdownReadPreview({
         components={{
           a({ href, children, ...anchorProps }) {
             const targetPath = currentPath && href ? resolveMarkdownWorkspacePath(currentPath, href) : null;
+            const resolvedHref = targetPath && rawPreviewUrl && currentPath
+              ? buildMarkdownRawUrl(rawPreviewUrl, currentPath, targetPath)
+              : href;
             const canNavigate = Boolean(targetPath && filePaths.has(targetPath) && onNavigateToPath);
             return (
               <a
                 {...anchorProps}
-                href={href}
+                href={resolvedHref}
                 onClick={canNavigate ? (event) => {
                   event.preventDefault();
                   onNavigateToPath?.(targetPath!);
@@ -299,7 +250,7 @@ export const MarkdownReadPreview = memo(function MarkdownReadPreview({
           },
           img({ src, alt, ...imageProps }) {
             const targetPath = currentPath && src ? resolveMarkdownWorkspacePath(currentPath, src) : null;
-            const resolvedSrc = targetPath && rawPreviewUrl && currentPath && filePaths.has(targetPath)
+            const resolvedSrc = targetPath && rawPreviewUrl && currentPath
               ? buildMarkdownRawUrl(rawPreviewUrl, currentPath, targetPath)
               : src;
             return <img {...imageProps} src={resolvedSrc} alt={alt ?? ''} />;
@@ -311,3 +262,4 @@ export const MarkdownReadPreview = memo(function MarkdownReadPreview({
     </div>
   );
 });
+

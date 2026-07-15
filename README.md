@@ -1,137 +1,92 @@
 # ViForge
 
-ViForge is a local-first AI collaboration workbench for creative and knowledge work. It helps people turn ideas, judgment, and personal methodology into reusable agents, skills, knowledge bases, and evaluable workflows.
+中文 | [English](./README.en.md)
 
-ViForge is not a single-purpose scriptwriting tool, and it is not another generic coding desktop shell. The product direction is human-in-the-loop creative collaboration: people provide taste, intent, direction, constraints, and review; agents help read, organize, generate, revise, inspect, and preserve reusable working methods.
+ViForge 是一个本地优先的 AI 协作工作台，面向创意生产、知识工作和可持续迭代的 Agent 工作流。它把项目文件、创作助手、可复用技能、知识库、模型配置、运行日志和评测流程放在同一个可控工作区中，让用户把自己的判断、方法论和审美沉淀为可复用的 AI 协作能力。
 
-## Positioning
+当前实现重点服务小说改编、情景剧创作和学习研究等工作流，同时保留产品 profile 机制，便于后续扩展到更多垂直场景。
 
-ViForge focuses on:
+## 核心特性
 
-- Creative and knowledge workflows rather than only coding or office automation.
-- Local-first workspaces where project files, agent configuration, memory, logs, and evaluation artifacts stay on the user's machine by default.
-- Customizable product profiles for domains such as novel adaptation, sitcom creation, and study workflows.
-- Reusable agents, skills, prompts, knowledge bases, and memory policies that can evolve with a user's personal methodology.
-- Agent Harness evaluation so agent changes can be reproduced, compared, reviewed, released, and rolled back.
+- 本地优先工作区：项目文件、Agent 配置、记忆、日志和评测产物默认保存在用户本机。
+- 三栏创作工作台：文件树、编辑/预览标签页和创作助手协同工作。
+- 多产品 profile：内置小说改编、情景剧创作和学习研究模板，可按项目选择不同系统提示词、目录结构和专业技能。
+- LangGraph Agent 运行时：支持流式会话、工具调用、长期记忆和 PostgreSQL/pgvector 持久化。
+- 可复用 Agent Skills：通过工作区内的 `SKILL.md` 管理可迭代的专业能力。
+- Agent Harness：支持对 Agent 变更进行复现、比较、评审、发布和回滚。
+- 桌面单机版：当前支持 Windows 安装包，下载安装后即可使用。
+- 微信接入与浏览器协作：支持微信入口和经过用户授权的浏览器自动化边界。
 
-## What Is Included
+## 产品架构
 
-- `apps/web`: React + Vite workbench UI with workspace tree, editor/preview tabs, assistant chat, model settings, WeChat entry, Git sync, schedules, and Agent Harness.
-- `apps/api`: Hono API service for workspace files, chat sessions, LangGraph runs, skills/config, runtime settings, desktop static hosting, and WeChat routes.
-- `apps/desktop`: Electron desktop shell that starts the local API, serves the built web UI, starts bundled Playwriter relay, and uses embedded PostgreSQL in desktop mode.
-- `packages/shared`: shared contracts, product profiles, default templates, prompts, and workspace structures.
-- `docs/current`: implementation documentation for architecture, workspace behavior, editor preview, chat sessions, LangGraph runtime, skills/config, desktop packaging, and tests.
+<p align="center">
+  <img src="./docs/architecture/level_architecture.png" alt="ViForge 产品架构图" width="900">
+</p>
 
-## Quick Start For Development
+## 产品截图
 
-Install dependencies:
+<p align="center">
+  <img src="./docs/screenshots/main_page.png" alt="工作台主页" width="900">
+  <br>
+  <strong>工作台主页</strong>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/harness_main_page.png" alt="Harness 主页" width="900">
+  <br>
+  <strong>Harness 主页</strong>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/connectors.png" alt="连接器" width="900">
+  <br>
+  <strong>连接器</strong>
+</p>
+
+## 安装与使用
+
+### 桌面版
+
+桌面版面向普通用户，当前支持 Windows 安装。下载安装包并完成安装后，打开 ViForge 即可进入工作台使用。
+
+### Docker Compose 部署
+
+仓库提供 Docker Compose 部署方式，适合需要服务化运行的场景。
+
+```bash
+docker compose up -d --build
+```
+
+更完整的部署说明见 [当前实现总览](./docs/current/README.md)。
+
+### 本地开发运行
+
+安装依赖：
 
 ```bash
 pnpm install
 ```
 
-Run the API and web app:
+启动本地开发服务：
 
 ```bash
 pnpm dev
 ```
 
-Default ports:
+更多开发、测试和构建命令见 [测试与开发命令](./docs/current/09-tests-and-dev-commands.md)。
 
-- Web: `http://localhost:5173`
-- API: `http://localhost:3001`
+## 模型配置
 
-Run desktop development mode after building web/API assets as needed:
+ViForge 不内置托管模型服务。请在应用内的系统配置入口中设置兼容 OpenAI 协议的模型服务，包括 Base URL、API Key、文本模型、图片模型和 embedding 模型等。
 
-```bash
-pnpm dev:desktop
-```
+系统配置会把 API Key 存在本地。API 只返回密钥是否已配置，不会把明文密钥回传给前端。
 
-Build a desktop directory package:
+## 文档入口
 
-```bash
-pnpm desktop:pack
-```
+- [当前实现总览](./docs/current/README.md)
+- [测试与开发命令](./docs/current/09-tests-and-dev-commands.md)
 
-Build an installer:
+## 许可与声明
 
-```bash
-pnpm desktop:dist
-```
+本仓库采用 MIT License，见 [LICENSE](./LICENSE)。
 
-Desktop packaging requires PostgreSQL resources under `apps/desktop/resources/postgres/<platform>-<arch>` or an external bundle supplied through `VIFORGE_POSTGRES_BUNDLE_SOURCE`. See [docs/current/19-desktop-release-guide.md](./docs/current/19-desktop-release-guide.md).
-
-## Model Configuration
-
-ViForge does not include a hosted model service. Configure an OpenAI-compatible provider in the app's runtime settings or through environment variables.
-
-Common variables:
-
-| Variable | Purpose |
-| --- | --- |
-| `VIFORGE_AIGC_HUB_BASE_URL` | OpenAI-compatible base URL |
-| `VIFORGE_AIGC_HUB_API_KEY` | API key for the configured provider |
-| `VIFORGE_AIGC_HUB_CHAT_MODEL` | Text/chat model id |
-| `VIFORGE_AIGC_HUB_IMAGE_MODEL` | Image generation/edit model id |
-| `VIFORGE_AIGC_HUB_EMBEDDING_MODEL` | Embedding model id |
-| `VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS` | Embedding dimension for LangGraph Store |
-| `VIFORGE_PRODUCT` | Default product profile: `novel-adaptation`, `sitcom`, or `study` |
-
-Runtime settings store API keys locally. The API only returns whether a key is configured; it does not echo the stored secret back to the web UI.
-
-## Local Data
-
-Desktop mode asks the user to choose a data directory on first launch. That directory stores:
-
-- Workspaces and project files: `<dataRoot>/workspaces`
-- Runtime settings: `<dataRoot>/runtime-config.json`
-- Logs: `<dataRoot>/logs`
-- Embedded PostgreSQL data: `<dataRoot>/postgres-data`
-- Chat sessions, agent memory, Harness artifacts, and related local runtime data under the configured data root or workspaces root
-
-Service/development mode defaults to `~/.viforge/data/<productId>/workspaces` unless `WORKSPACES_ROOT` is set.
-
-Do not commit runtime data or secrets. In particular, avoid staging `apps/api/data/`, `var/`, `release/`, `apps/web/dist/`, `apps/desktop/dist/`, `node_modules/`, `.env`, and local tool folders.
-
-## Browser Automation Boundary
-
-ViForge uses Playwriter browser tools to connect to user-authorized real browser tabs. The agent cannot access pages that have not been authorized through the browser extension or relay.
-
-For high-risk browser actions, agents must ask for user confirmation before proceeding. High-risk actions include login, authorization, publishing, sending, deleting remote data, payments, purchases, account binding, and changing online configuration.
-
-If Playwriter is missing, the relay is unavailable, or no browser tab is authorized, the agent must say that explicitly and provide setup steps rather than pretending it has accessed the web page.
-
-## Open Source And Notices
-
-This repository is licensed under Apache-2.0. See [LICENSE](./LICENSE).
-
-Third-party and bundled binary notices are tracked in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md). Desktop releases that bundle PostgreSQL, pgvector, Electron, Chromium, or other redistributable binaries must include their required license and notice texts.
-
-The ViForge name is a product name and may be subject to separate trademark or branding review before public release.
-
-## Common Commands
-
-```bash
-pnpm --filter @viforge/api typecheck
-pnpm --filter @viforge/web typecheck
-pnpm --filter @viforge/web build
-pnpm --filter @viforge/api test
-pnpm --filter @viforge/web test
-pnpm desktop:pack
-```
-
-When changing shared contracts, run both API and web checks. When changing desktop runtime behavior, include desktop packaging checks where the required PostgreSQL bundle is available.
-
-## Documentation
-
-Start with [docs/current/README.md](./docs/current/README.md) for current implementation details.
-
-Planning and release documents:
-
-- [Product roadmap](./docs/product-roadmap.md)
-- [ViForge open source release checklist](./docs/viforge-open-source-release-checklist.md)
-- [Desktop release guide](./docs/current/19-desktop-release-guide.md)
-
-## Repository Guide
-
-Future agents and contributors should read [AGENTS.md](./AGENTS.md) before making changes. Shared request and response contracts live in [packages/shared/src/contracts.ts](./packages/shared/src/contracts.ts); update them before changing either side of an API boundary.

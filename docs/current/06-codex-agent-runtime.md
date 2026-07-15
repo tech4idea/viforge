@@ -1,8 +1,10 @@
 # Codex Agent 运行时
 
+> 归档说明：本文记录历史 Codex runtime 设计。当前默认创作链路已经切换到 LangGraph runtime，入口见 [11 LangGraph Agent 运行时](./11-langgraph-agent-runtime.md)。文中提到的 `apps/api/src/runs/codexRunService.ts` 当前代码库已移除。
+
 ## 入口
 
-Codex agent 后端实现位于 [apps/api/src/runs/codexRunService.ts](../../apps/api/src/runs/codexRunService.ts)。
+历史 Codex agent 后端实现曾位于 `apps/api/src/runs/codexRunService.ts`；当前代码库已移除该文件，默认运行时见 [11 LangGraph Agent 运行时](./11-langgraph-agent-runtime.md)。
 
 API 路由：
 

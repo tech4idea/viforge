@@ -90,6 +90,9 @@ importers:
       pg:
         specifier: ^8.16.3
         version: 8.21.0
+      pg-cloudflare:
+        specifier: ^1.4.0
+        version: 1.4.0
       playwriter:
         specifier: ^0.4.0
         version: 0.4.0(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.1)(@types/react@18.3.28)(immer@9.0.21)(pg@8.21.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(vitest@2.1.9(@types/node@22.19.17))(vue@3.5.34(typescript@5.9.3))
@@ -9050,8 +9053,7 @@ snapshots:
 
   pend@1.2.0: {}
 
-  pg-cloudflare@1.4.0:
-    optional: true
+  pg-cloudflare@1.4.0: {}
 
   pg-connection-string@2.13.0: {}
 
@@ -10204,3 +10206,4 @@ snapshots:
       react: 18.3.1
 
   zwitch@2.0.4: {}
+

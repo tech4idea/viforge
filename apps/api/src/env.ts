@@ -32,13 +32,13 @@ export const AIGC_HUB_APP_ID = process.env.VIFORGE_AIGC_HUB_APP_ID || `viforge-$
 
 export const AIGC_HUB_CHAT_MODEL = process.env.VIFORGE_AIGC_HUB_CHAT_MODEL ?? '';
 
-export const AIGC_HUB_IMAGE_MODEL = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? 'minimax/image-01';
+export const AIGC_HUB_IMAGE_MODEL = process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL ?? 'gpt-image-2';
 
 export const DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 export const QDRANT_URL = process.env.QDRANT_URL ?? '';
 
-export const EMBEDDING_MODEL = process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision';
+export const EMBEDDING_MODEL = process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'text-embedding-3-large';
 
 export const PHOENIX_COLLECTOR_ENDPOINT = process.env.PHOENIX_COLLECTOR_ENDPOINT ?? '';
 export const PHOENIX_PROJECT_NAME = process.env.PHOENIX_PROJECT_NAME ?? 'viforge';

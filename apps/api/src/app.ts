@@ -58,7 +58,7 @@ export function createApp(): Hono {
 
   app.route('/api', createProjectsRoutes(workspaceStore));
   app.route('/api', createAigcHubRoutes());
-  app.route('/api', createRuntimeConfigRoutes(createRuntimeConfigStore()));
+  app.route('/api', createRuntimeConfigRoutes(createRuntimeConfigStore(), workspaceStore));
   app.route('/api', createBrowserRoutes());
 
   // WeChat + ilink (zero-config: uses official WeChat https://ilinkai.weixin.qq.com)

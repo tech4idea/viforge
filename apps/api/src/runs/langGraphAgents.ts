@@ -1,5 +1,7 @@
 import { exec } from 'node:child_process';
 
+import { Pool } from 'pg';
+
 import { tool, type StructuredToolInterface } from '@langchain/core/tools';
 import { AIMessage, AIMessageChunk, HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -30,6 +32,58 @@ type LangGraphMemoryBackend = {
 
 const inMemoryBackends = new Map<string, LangGraphMemoryBackend>();
 let postgresMemoryBackend: Promise<LangGraphMemoryBackend> | null = null;
+let memoryEmbeddingRebuildInProgress = false;
+let activeMemorySensitiveLangGraphRuns = 0;
+
+export class MemoryEmbeddingRebuildInProgressError extends Error {
+  constructor(message = '长期记忆索引正在重建，请稍后再试。') {
+    super(message);
+    this.name = 'MemoryEmbeddingRebuildInProgressError';
+  }
+}
+
+export class MemoryEmbeddingIndexUnavailableError extends Error {
+  constructor(message = '长期记忆向量索引不可用，请先配置 Embedding 模型、API Key 和 pgvector。') {
+    super(message);
+    this.name = 'MemoryEmbeddingIndexUnavailableError';
+  }
+}
+
+export function isMemoryEmbeddingRebuildInProgress(): boolean {
+  return memoryEmbeddingRebuildInProgress;
+}
+
+export function beginMemorySensitiveLangGraphRun(): () => void {
+  if (memoryEmbeddingRebuildInProgress) throw new MemoryEmbeddingRebuildInProgressError();
+  activeMemorySensitiveLangGraphRuns += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeMemorySensitiveLangGraphRuns = Math.max(0, activeMemorySensitiveLangGraphRuns - 1);
+  };
+}
+
+export function activeMemorySensitiveLangGraphRunCount(): number {
+  return activeMemorySensitiveLangGraphRuns;
+}
+
+export async function runWithMemoryEmbeddingRebuildLock<T>(task: () => Promise<T>): Promise<T> {
+  if (memoryEmbeddingRebuildInProgress) throw new MemoryEmbeddingRebuildInProgressError();
+  if (activeMemorySensitiveLangGraphRuns > 0) {
+    throw new MemoryEmbeddingRebuildInProgressError('已有 LangGraph 任务正在执行，请等待结束后再重建长期记忆索引。');
+  }
+  memoryEmbeddingRebuildInProgress = true;
+  try {
+    return await task();
+  } finally {
+    memoryEmbeddingRebuildInProgress = false;
+  }
+}
+
+export function resetLangGraphMemoryBackend(): void {
+  postgresMemoryBackend = null;
+}
 
 async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
   const databaseUrl = process.env.DATABASE_URL ?? '';
@@ -69,24 +123,24 @@ async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promis
 
 function createStoreIndexConfig(): ConstructorParameters<typeof PostgresStore>[0]['index'] | undefined {
   if (process.env.VIFORGE_PGVECTOR_AVAILABLE === '0') return undefined;
-  if (!process.env.VIFORGE_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
+  if (!process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY && !process.env.VIFORGE_AIGC_HUB_API_KEY && !process.env.AIGC_HUB_API_KEY) return undefined;
 
   return {
-    dims: Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '1024'),
+    dims: Number(process.env.VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS ?? '3072'),
     embed: createMemoryEmbeddings(),
     fields: ['content', 'memory'],
   };
 }
 
 function createMemoryEmbeddings(): OpenAIEmbeddings {
-  const baseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.yukeon.top/v1';
-  const apiKey = process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
+  const baseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || process.env.AIGC_HUB_BASE_URL || 'https://api.openai.com/v1';
+  const apiKey = process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || process.env.AIGC_HUB_API_KEY || '';
   return new OpenAIEmbeddings({
-    model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'doubao-embedding-vision',
+    model: process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL ?? 'text-embedding-3-large',
     apiKey,
     configuration: {
       baseURL: trimTrailingSlashes(baseUrl),
-      defaultHeaders: buildAigcHubHeaders(),
+      defaultHeaders: buildAigcHubHeaders({ apiKey }),
     },
   });
 }
@@ -317,9 +371,80 @@ type ProjectMemoryStore = {
   recall(input: { resourceId: string; query: string; topK: number; traceId?: string }): Promise<{ messages: ProjectMemoryMessage[]; usage?: unknown }>;
 };
 
+export async function reindexProjectMemories(projectIds: string[]): Promise<{ reindexedCount: number; projectCount: number }> {
+  return runWithMemoryEmbeddingRebuildLock(async () => {
+    assertMemoryEmbeddingIndexAvailable();
+    resetLangGraphMemoryBackend();
+    try {
+      const { store } = await getLangGraphMemoryBackend();
+      let reindexedCount = 0;
+      for (const projectId of projectIds) {
+        const namespace = semanticMemoryNamespace(projectId);
+        for await (const item of listStoredSemanticMemories(namespace)) {
+          await store.put(namespace, item.key, item.value, ['content']);
+          reindexedCount += 1;
+        }
+      }
+      return { reindexedCount, projectCount: projectIds.length };
+    } finally {
+      resetLangGraphMemoryBackend();
+    }
+  });
+}
+
+export function assertMemoryEmbeddingIndexAvailable(): void {
+  if (!process.env.DATABASE_URL) {
+    throw new MemoryEmbeddingIndexUnavailableError('长期记忆重建需要 PostgreSQL DATABASE_URL；当前运行时未连接持久化 LangGraph Store。');
+  }
+  if (process.env.VIFORGE_PGVECTOR_AVAILABLE === '0') {
+    throw new MemoryEmbeddingIndexUnavailableError('当前 PostgreSQL 未启用 pgvector，不能重建长期记忆向量索引。');
+  }
+  if (!createStoreIndexConfig()) {
+    throw new MemoryEmbeddingIndexUnavailableError('Embedding 模型或 API Key 未配置，不能重建长期记忆向量索引。');
+  }
+}
+
+type StoredSemanticMemoryItem = {
+  key: string;
+  value: Record<string, unknown>;
+};
+
+async function* listStoredSemanticMemories(namespace: string[], pageSize = 500): AsyncGenerator<StoredSemanticMemoryItem> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new MemoryEmbeddingIndexUnavailableError('长期记忆重建需要 PostgreSQL DATABASE_URL。');
+
+  const pool = new Pool({ connectionString: databaseUrl });
+  const namespacePath = namespace.join(':');
+  let lastKey = '';
+  try {
+    while (true) {
+      const result = await pool.query<{ key: string; value: Record<string, unknown> }>(
+        'SELECT key, value FROM "langgraph_store".store WHERE namespace_path = $1 AND key > $2 ORDER BY key ASC LIMIT $3',
+        [namespacePath, lastKey, pageSize],
+      );
+      if (result.rows.length === 0) return;
+      for (const row of result.rows) {
+        lastKey = row.key;
+        yield { key: row.key, value: row.value };
+      }
+    }
+  } finally {
+    await pool.end();
+  }
+}
+function workingMemoryNamespace(resourceId: string): string[] {
+  return ['viforge', 'projects', resourceId, 'working-memory'];
+}
+
+function semanticMemoryNamespace(resourceId: string): string[] {
+  return ['viforge', 'projects', resourceId, 'memories'];
+}
+
+function memoryEmbeddingUnavailable(): boolean {
+  return process.env.VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED === '1' || isMemoryEmbeddingRebuildInProgress();
+}
+
 function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
-  const workingMemoryNamespace = (resourceId: string) => ['viforge', 'projects', resourceId, 'working-memory'];
-  const semanticMemoryNamespace = (resourceId: string) => ['viforge', 'projects', resourceId, 'memories'];
 
   return {
     async getWorkingMemory({ resourceId }) {
@@ -334,6 +459,9 @@ function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
       }, ['content']);
     },
     async saveMemory({ resourceId, content }) {
+      if (memoryEmbeddingUnavailable()) {
+        return { messageId: '', usage: { store: 'langgraph', indexed: false, reindexRequired: true } };
+      }
       const messageId = `memory-${randomId()}-${Date.now()}`;
       const createdAt = new Date().toISOString();
       await store.put(semanticMemoryNamespace(resourceId), messageId, {
@@ -346,6 +474,9 @@ function createProjectMemoryStore(store: BaseStore): ProjectMemoryStore {
       return { messageId, usage: { store: 'langgraph', indexed: true } };
     },
     async recall({ resourceId, query, topK }) {
+      if (memoryEmbeddingUnavailable()) {
+        return { messages: [], usage: { store: 'langgraph', query, reindexRequired: true } };
+      }
       const items = await store.search(semanticMemoryNamespace(resourceId), { query, limit: topK });
       const fallbackItems = items.length > 0
         ? items
@@ -771,6 +902,9 @@ export function createWorkspaceTools(
           memoryText,
         ].join('\n');
         const result = await (await projectMemory).saveMemory({ resourceId: resource, content, traceId: options.traceId });
+        if (result.usage && typeof result.usage === 'object' && 'reindexRequired' in result.usage) {
+          return { remembered: false, category, messageId: '', usage: result.usage, reason: 'Embedding 配置已变化，长期记忆索引需要重建后才能继续写入。' };
+        }
         publish({
           type: 'memory.write',
           runId,
@@ -832,8 +966,8 @@ export function createWorkspaceTools(
       execute: async ({ prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
-        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
 
         if (!gatewayBaseUrl || !gatewayApiKey) {
@@ -921,8 +1055,8 @@ export function createWorkspaceTools(
       execute: async ({ imagePath, prompt, aspectRatio, count, outputDir, fileName }) => {
         const resolvedAspectRatio = aspectRatio ?? '1:1';
         const resolvedCount = count ?? 1;
-        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_BASE_URL ?? AIGC_HUB_BASE_URL;
-        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_API_KEY ?? AIGC_HUB_API_KEY;
+        const gatewayBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL;
+        const gatewayApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY || process.env.VIFORGE_AIGC_HUB_API_KEY || AIGC_HUB_API_KEY;
         const selectedModel = await resolveImageModel(gatewayBaseUrl, gatewayApiKey, options.imageGeneration?.model);
 
         if (!gatewayBaseUrl || !gatewayApiKey) {
@@ -1796,16 +1930,18 @@ export function buildModelConfig(options: {
     || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
     || process.env.VIFORGE_LANGGRAPH_MODEL
-    || 'MiniMax-M3';
+    || 'gpt-5.5';
 
   const baseUrl = options.baseUrl
+    || process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL
     || process.env.VIFORGE_AIGC_HUB_BASE_URL
     || process.env.AIGC_HUB_BASE_URL
     || process.env.VIFORGE_LANGGRAPH_BASE_URL
     || process.env.OPENAI_BASE_URL
-    || 'https://api.yukeon.top/v1';
+    || 'https://api.openai.com/v1';
 
   const apiKey = options.apiKey
+    || process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY
     || process.env.VIFORGE_AIGC_HUB_API_KEY
     || process.env.AIGC_HUB_API_KEY
     || process.env.VIFORGE_LANGGRAPH_API_KEY
@@ -2012,3 +2148,4 @@ async function safeBrowserToolCall(execute: () => Promise<unknown>): Promise<unk
     };
   }
 }
+

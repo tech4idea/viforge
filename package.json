@@ -7,7 +7,7 @@
     "dev": "pnpm --parallel --filter @viforge/api --filter @viforge/web dev",
     "dev:api": "pnpm --filter @viforge/api dev",
     "dev:web": "pnpm --filter @viforge/web dev",
-    "dev:desktop": "pnpm --filter @viforge/desktop dev",
+    "dev:desktop": "pnpm --filter @viforge/web build && pnpm --filter @viforge/desktop dev",
     "dev:agent-worker": "pnpm --filter @viforge/agent-worker dev",
     "dev:integration-gateway": "pnpm --filter @viforge/integration-gateway dev",
     "desktop:pack": "pnpm --filter @viforge/desktop run pack",
@@ -21,3 +21,4 @@
     "typescript": "^5.5.3"
   }
 }
+

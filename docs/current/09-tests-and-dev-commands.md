@@ -23,10 +23,18 @@ pnpm --filter @viforge/web dev
 启动桌面壳开发模式：
 
 ```bash
-pnpm --filter @viforge/desktop dev
+pnpm dev:desktop
 ```
 
-桌面开发模式会先构建 Web 静态资源和桌面专用 API bundle，再由 Electron 主进程启动本地 API。默认仍需要准备本机可运行的 PostgreSQL binary；可用 `VIFORGE_POSTGRES_BIN_DIR=/path/to/postgres/bin` 指向外部 PostgreSQL bin 目录调试。
+桌面开发模式会构建桌面主进程和桌面专用 API bundle，再由 Electron 主进程启动本地 API。截图或验证完整界面前需要先构建 Web 静态资源。
+
+默认仍需要准备本机可运行的 PostgreSQL binary；可用 `VIFORGE_POSTGRES_BIN_DIR=/path/to/postgres/bin` 指向外部 PostgreSQL `bin` 目录调试。该目录必须包含 `initdb`、`pg_ctl`、`postgres`、`createdb` 和 `psql`，并且其上级目录下需要有 PostgreSQL 的 `share` 目录。Windows PowerShell 示例：
+
+```powershell
+$env:VIFORGE_POSTGRES_BIN_DIR = 'C:\Program Files\PostgreSQL\16\bin'
+pnpm dev:desktop
+```
+
 
 默认端口：
 
@@ -115,3 +123,4 @@ pnpm --filter @viforge/web test -- chat-references.test.ts
 - 文件系统路径必须走后端安全路径校验，不要在前端拼绝对路径。
 - LangGraph run 是异步流式，不要假设 `POST /api/runs` 返回最终结果。
 - 会话消息流式更新要保持顺序，当前前端通过 `chatMessagePersistQueueRef` 串行化写入。
+
