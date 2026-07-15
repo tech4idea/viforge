@@ -4,7 +4,7 @@ import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { nord } from '@milkdown/theme-nord';
-import { $prose } from '@milkdown/utils';
+import { $prose, getMarkdown, replaceAll } from '@milkdown/utils';
 import { Plugin } from '@milkdown/kit/prose/state';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
@@ -64,27 +64,27 @@ function MilkdownEditorInner({
   rawPreviewUrl?: string;
   onChange: (content: string) => void;
 }): JSX.Element {
-  const initialMarkdown = useRef(value);
-  const currentPath = useRef(filePath);
   const latestOnChange = useRef(onChange);
+  const lastSyncedValue = useRef(value);
+  const skipNextMarkdownUpdate = useRef(false);
   latestOnChange.current = onChange;
 
-  if (currentPath.current !== filePath) {
-    currentPath.current = filePath;
-    initialMarkdown.current = value;
-  }
-
-  useEditor((root) =>
+  const editor = useEditor((root) =>
     Editor.make()
       .config(nord)
       .config((ctx) => {
         ctx.set(rootCtx, root);
-        ctx.set(defaultValueCtx, initialMarkdown.current);
+        ctx.set(defaultValueCtx, value);
         ctx.update(editorViewOptionsCtx, (prev) => ({
           ...prev,
           attributes: { class: 'milkdown-editor', spellcheck: 'false' },
         }));
         ctx.get(listenerCtx).markdownUpdated((_, md) => {
+          lastSyncedValue.current = md;
+          if (skipNextMarkdownUpdate.current) {
+            skipNextMarkdownUpdate.current = false;
+            return;
+          }
           latestOnChange.current(md);
         });
       })
@@ -92,6 +92,25 @@ function MilkdownEditorInner({
       .use(gfm)
       .use(markdownWorkspaceImageView(filePath, rawPreviewUrl))
       .use(listener), [filePath, rawPreviewUrl]);
+
+  useEffect(() => {
+    const instance = editor.get();
+    if (!instance) {
+      lastSyncedValue.current = value;
+      return;
+    }
+    if (value === lastSyncedValue.current) return;
+
+    const currentMarkdown = instance.action(getMarkdown());
+    if (currentMarkdown === value) {
+      lastSyncedValue.current = value;
+      return;
+    }
+
+    skipNextMarkdownUpdate.current = true;
+    lastSyncedValue.current = value;
+    instance.action(replaceAll(value, true));
+  }, [editor, value]);
 
   return (
     <div className="markdown-rich-scroll">
@@ -318,5 +337,6 @@ function parseSheetContent(filePath: string, content: string): Sheet[] {
 function serializeSheet(sheets: Sheet[]): string {
   return JSON.stringify(sheets);
 }
+
 
 
