@@ -125,6 +125,7 @@ declare global {
         dataRoot?: string;
         restartRequired?: boolean;
       }>;
+      getAppVersion(): Promise<string>;
     };
   }
 }
@@ -5776,7 +5777,7 @@ function DesktopVersionLine(): JSX.Element | null {
 
   useEffect(() => {
     let cancelled = false;
-    void window.viforgeDesktop?.getAppVersion().then((value) => {
+    void window.viforgeDesktop?.getAppVersion().then((value: string) => {
       if (!cancelled) setAppVersion(value);
     }).catch(() => {});
     return () => {
