@@ -28,6 +28,7 @@ import {
   type Project,
   type ReferencedChatSnippet,
   type ReferencedFile,
+  type ReleaseInfo,
   type RuntimeConfig,
   type UpdateRuntimeConfigInput,
   type RunEvent,
@@ -457,6 +458,7 @@ function App() {
   const [collapsedDirectoriesByTemporaryProject, setCollapsedDirectoriesByTemporaryProject] = useState<Record<string, string[]>>({});
   const [activeToolPanel, setActiveToolPanel] = useState<'connectors' | 'git' | 'harness' | 'settings' | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
   const [runtimeConfigState, setRuntimeConfigState] = useState<LoadState>('idle');
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
@@ -931,6 +933,7 @@ function App() {
       void loadBrowserStatus();
     }
     if (activeToolPanel === 'settings') {
+      void loadReleaseInfo();
       void loadRuntimeConfig();
     }
   }, [activeToolPanel]);
@@ -1158,6 +1161,14 @@ function App() {
     } catch (error) {
       setRuntimeConfigState('error');
       showToast(`读取运行设置失败：${errorToMessage(error)}`, 'error');
+    }
+  }
+
+  async function loadReleaseInfo() {
+    try {
+      setReleaseInfo(await apiClient.getReleaseInfo());
+    } catch (error) {
+      showToast(`读取版本信息失败：${errorToMessage(error)}`, 'error');
     }
   }
 
@@ -4145,6 +4156,7 @@ function App() {
             {activeToolPanel === 'settings' ? (
               <RuntimeSettingsPanel
                 config={runtimeConfig}
+                releaseInfo={releaseInfo}
                 state={runtimeConfigState}
                 chatModelOptions={chatModelOptions}
                 imageModelOptions={imageModelOptions}
@@ -5759,8 +5771,26 @@ function toolPanelTitle(panel: 'connectors' | 'git' | 'harness' | 'settings' | n
   return '';
 }
 
+function DesktopVersionLine(): JSX.Element | null {
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.viforgeDesktop?.getAppVersion().then((value) => {
+      if (!cancelled) setAppVersion(value);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!appVersion) return null;
+  return <p className="runtime-settings-status">桌面安装包版本 {appVersion}</p>;
+}
+
 function RuntimeSettingsPanel({
   config,
+  releaseInfo,
   state,
   chatModelOptions,
   imageModelOptions,
@@ -5770,6 +5800,7 @@ function RuntimeSettingsPanel({
   onConfirmEmbeddingChange,
 }: {
   config: RuntimeConfig | null;
+  releaseInfo: ReleaseInfo | null;
   state: LoadState;
   chatModelOptions: AigcHubModelMetadata[];
   imageModelOptions: AigcHubModelMetadata[];
@@ -5913,6 +5944,19 @@ function RuntimeSettingsPanel({
         </div>
         <button type="button" onClick={onReload} disabled={busy}>刷新</button>
       </div>
+
+      {releaseInfo ? (
+        <section className="runtime-settings-section">
+          <h3>版本信息</h3>
+          <p className="runtime-settings-status">{releaseInfo.productName} {releaseInfo.version} · {releaseInfo.channel} · {releaseInfo.tag}</p>
+          <p className="runtime-settings-status">{releaseInfo.updateHeadline}</p>
+          <p className="runtime-settings-status">发布日期 {releaseInfo.releaseDate}{releaseInfo.currentArtifact ? ` · 当前制品 ${releaseInfo.currentArtifact.fileName}` : ''}</p>
+          <div className="runtime-release-notes">
+            {releaseInfo.updateNotes.map((note) => <p key={note} className="runtime-settings-status">- {note}</p>)}
+          </div>
+          {config?.desktop.enabled && window.viforgeDesktop?.getAppVersion ? <DesktopVersionLine /> : null}
+        </section>
+      ) : null}
 
       {config?.desktop.enabled ? (
         <section className="runtime-settings-section">

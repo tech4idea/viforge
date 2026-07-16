@@ -256,6 +256,29 @@ export type RuntimeMemoryRebuildResponse = {
   config: RuntimeConfig;
 };
 
+export type ReleaseChannel = 'dev' | 'beta' | 'stable';
+
+export type ReleaseArtifact = {
+  platform: 'windows-x64' | 'macos-arm64' | 'macos-x64' | 'linux-x64';
+  fileName: string;
+  target: 'nsis' | 'dmg' | 'appimage' | 'zip';
+  sha256?: string;
+  sizeBytes?: number;
+};
+
+export type ReleaseInfo = {
+  productName: string;
+  version: string;
+  channel: ReleaseChannel;
+  tag: string;
+  releaseDate: string;
+  commit?: string;
+  updateHeadline: string;
+  updateNotes: string[];
+  artifacts: ReleaseArtifact[];
+  currentArtifact?: ReleaseArtifact;
+};
+
 export type UpdateRuntimeConfigInput = {
   modelProvider?: {
     testTarget?: RuntimeModelTestTarget;
