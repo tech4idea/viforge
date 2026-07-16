@@ -25,6 +25,7 @@ export const releaseManifest: ReleaseInfo = {
         version: RELEASE_VERSION,
         channel: RELEASE_CHANNEL,
         platform: 'win32-x64',
+        qualifier: 'installer',
         extension: 'exe',
       }),
       target: 'nsis',
@@ -41,7 +42,9 @@ export function buildReleaseArtifactFileName(input: {
   version: string;
   channel: ReleaseInfo['channel'];
   platform: string;
+  qualifier?: string;
   extension: string;
 }): string {
-  return `${input.productName}-${input.version}-${input.channel}-${input.platform}.${input.extension}`;
+  const qualifier = input.qualifier ? `-${input.qualifier}` : '';
+  return `${input.productName}-${input.version}-${input.channel}-${input.platform}${qualifier}.${input.extension}`;
 }

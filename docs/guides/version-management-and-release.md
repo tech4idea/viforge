@@ -86,13 +86,13 @@ v0.1.0
 建议所有桌面制品统一按如下规则命名：
 
 ```text
-<ProductName>-<version>-<channel>-<platform>.<ext>
+<ProductName>-<version>-<channel>-<platform>-<packageKind>.<ext>
 ```
 
 示例：
 
 ```text
-ViForge-0.1.0-beta-win32-x64.exe
+ViForge-0.1.0-beta-win32-x64-installer.exe
 ```
 
 该命名应与 `ReleaseInfo.artifacts` 中定义的文件名保持一致，以便发布校验、问题排查和用户支持。

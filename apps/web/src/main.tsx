@@ -5826,6 +5826,7 @@ function RuntimeSettingsPanel({
   const [embeddingModel, setEmbeddingModel] = useState('');
   const [embeddingDims, setEmbeddingDims] = useState('3072');
   const [embeddingAdvancedOpen, setEmbeddingAdvancedOpen] = useState(false);
+  const [releaseInfoOpen, setReleaseInfoOpen] = useState(false);
   const [localDataRoot, setLocalDataRoot] = useState('');
   const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
   const [modelTestState, setModelTestState] = useState<Record<'chat' | 'image' | 'embedding', LoadState>>({ chat: 'idle', image: 'idle', embedding: 'idle' });
@@ -5946,19 +5947,6 @@ function RuntimeSettingsPanel({
         <button type="button" onClick={onReload} disabled={busy}>刷新</button>
       </div>
 
-      {releaseInfo ? (
-        <section className="runtime-settings-section">
-          <h3>版本信息</h3>
-          <p className="runtime-settings-status">{releaseInfo.productName} {releaseInfo.version} · {releaseInfo.channel} · {releaseInfo.tag}</p>
-          <p className="runtime-settings-status">{releaseInfo.updateHeadline}</p>
-          <p className="runtime-settings-status">发布日期 {releaseInfo.releaseDate}{releaseInfo.currentArtifact ? ` · 当前制品 ${releaseInfo.currentArtifact.fileName}` : ''}</p>
-          <div className="runtime-release-notes">
-            {releaseInfo.updateNotes.map((note) => <p key={note} className="runtime-settings-status">- {note}</p>)}
-          </div>
-          {config?.desktop.enabled && window.viforgeDesktop?.getAppVersion ? <DesktopVersionLine /> : null}
-        </section>
-      ) : null}
-
       {config?.desktop.enabled ? (
         <section className="runtime-settings-section">
           <h3>本地数据路径</h3>
@@ -6057,6 +6045,29 @@ function RuntimeSettingsPanel({
         <h3>本地数据存储</h3>
         <p className="runtime-settings-status">工作区、聊天会话、Agent 记忆、Harness 产物和日志默认保存在本机数据目录。</p>
       </section>
+
+      {releaseInfo ? (
+        <section className="runtime-settings-section runtime-settings-section-collapsible">
+          <button type="button" className="runtime-advanced-config__toggle" onClick={() => setReleaseInfoOpen((open) => !open)} aria-expanded={releaseInfoOpen}>
+            <span>版本信息</span>
+            <span className="runtime-settings-toggle-indicator">
+              {releaseInfoOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              {releaseInfoOpen ? '收起' : '展开'}
+            </span>
+          </button>
+          {releaseInfoOpen ? (
+            <div className="runtime-advanced-config__body">
+              <p className="runtime-settings-status">{releaseInfo.productName} {releaseInfo.version} · {releaseInfo.channel} · {releaseInfo.tag}</p>
+              <p className="runtime-settings-status">{releaseInfo.updateHeadline}</p>
+              <p className="runtime-settings-status">发布日期 {releaseInfo.releaseDate}{releaseInfo.currentArtifact ? ` · 当前制品 ${releaseInfo.currentArtifact.fileName}` : ''}</p>
+              <div className="runtime-release-notes">
+                {releaseInfo.updateNotes.map((note) => <p key={note} className="runtime-settings-status">- {note}</p>)}
+              </div>
+              {config?.desktop.enabled && window.viforgeDesktop?.getAppVersion ? <DesktopVersionLine /> : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="runtime-settings-actions">
         <button
