@@ -11,11 +11,12 @@ export const releaseManifest: ReleaseInfo = {
   tag: normalizeReleaseTag(RELEASE_VERSION),
   releaseDate: '2026-07-15',
   commit: '',
-  updateHeadline: '建立统一版本管理链路',
+  updateHeadline: 'ViForge第一个版本发布，欢迎使用！',
   updateNotes: [
-    '统一源码 tag、桌面制品包、产品内版本展示与更新说明的数据来源。',
-    '新增版本信息 API，前端与桌面端可读取同一份 release metadata。',
-    '发布流程改为围绕 canonical release manifest 组织，降低人工维护漂移。',
+    '本地优先工作区：项目文件、Agent 配置、记忆、和评测产物默认保存在用户本机',
+    '多产品 profile：内置小说改编、情景剧创作和学习研究模板，可按项目选择不同Agent一起协作完成各种任务',
+    '桌面单机版：当前支持 Windows 安装包，下载安装后即可使用',
+    '微信接入与浏览器协作：支持微信入口和经过用户授权的浏览器自动化边界'
   ],
   artifacts: [
     {
