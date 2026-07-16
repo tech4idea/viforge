@@ -3,7 +3,7 @@
   "description": "ViForge standalone desktop app",
   "author": "ViForge contributors",
   "license": "MIT",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "dist/main.js",
@@ -14,8 +14,8 @@
     "build:postgres": "node scripts/build-postgres-from-source.mjs",
     "build:pgvector": "node scripts/build-pgvector-from-source.mjs",
     "prepare:postgres": "node scripts/prepare-postgres.mjs",
-    "pack": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder --dir",
-    "dist": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder"
+    "pack": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder --dir --config electron-builder.config.mjs",
+    "dist": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder --config electron-builder.config.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1"
@@ -27,71 +27,5 @@
     "esbuild": "^0.21.5",
     "sharp": "^0.34.5",
     "typescript": "^5.5.3"
-  },
-  "build": {
-    "appId": "cn.viforge.desktop",
-    "productName": "ViForge",
-    "executableName": "viforge",
-    "npmRebuild": false,
-    "directories": {
-      "output": "../../release/desktop"
-    },
-    "files": [
-      "dist/**/*",
-      "build/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../web/dist",
-        "to": "web"
-      },
-      {
-        "from": "dist/api",
-        "to": "api",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "resources/postgres",
-        "to": "postgres",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../../LICENSE",
-        "to": "LICENSE"
-      },
-      {
-        "from": "../../NOTICE",
-        "to": "NOTICE"
-      },
-      {
-        "from": "../../THIRD_PARTY_NOTICES.md",
-        "to": "THIRD_PARTY_NOTICES.md"
-      }
-    ],
-    "win": {
-      "target": ["nsis"],
-      "icon": "build/icon.ico",
-      "requestedExecutionLevel": "asInvoker"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "runAfterFinish": false,
-      "include": "installer.nsh"
-    },
-    "mac": {
-      "target": ["dmg"],
-      "icon": "build/icon.png"
-    },
-    "linux": {
-      "target": ["AppImage"],
-      "icon": "build/icon.png"
-    }
   }
 }

@@ -1,13 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import type { RuntimeConfig, RuntimeMemoryRebuildResponse, RuntimeModelTestResponse, UpdateRuntimeConfigInput } from '@viforge/shared';
+import type { ReleaseInfo, RuntimeConfig, RuntimeMemoryRebuildResponse, RuntimeModelTestResponse, UpdateRuntimeConfigInput } from '@viforge/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 
 import type { RuntimeConfigStore } from '../runtimeConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import { MemoryEmbeddingIndexUnavailableError, MemoryEmbeddingRebuildInProgressError, reindexProjectMemories } from '../runs/langGraphAgents';
+import { getReleaseInfo } from '../releaseInfo';
 
 const updateRuntimeConfigSchema = z.object({
   modelProvider: z.object({
@@ -38,6 +39,10 @@ export function createRuntimeConfigRoutes(store: RuntimeConfigStore, workspaceSt
 
   routes.get('/runtime-config', async (context) => {
     return context.json(await store.getConfig() satisfies RuntimeConfig);
+  });
+
+  routes.get('/release-info', (context) => {
+    return context.json(getReleaseInfo() satisfies ReleaseInfo);
   });
 
   routes.put('/runtime-config', async (context) => {
@@ -161,4 +166,3 @@ async function modelTestErrorMessage(response: Response): Promise<string> {
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
 }
-

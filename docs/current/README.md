@@ -2,6 +2,8 @@
 
 本文档集只描述当前代码库的最新实现，面向后续 agent 继续开发迭代使用。不追溯历史版本。
 
+操作类教程、发布流程和开发指南请查看 [docs/guides/README.md](../guides/README.md)。
+
 ## 项目形态
 
 viforge 是 ViForge 的当前 monorepo 实现，面向本地优先、可自定义、Agent 可迭代优化的 AI 协作工作台。核心由三层组成：

@@ -53,6 +53,8 @@ ipcMain.handle('viforge:select-data-root', async () => {
   };
 });
 
+ipcMain.handle('viforge:get-app-version', () => app.getVersion());
+
 async function startDesktopApp(): Promise<void> {
   if (startupPromise) return startupPromise;
   startupPromise = startDesktopAppOnce().finally(() => {
@@ -689,4 +691,3 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   quitApp();
 });
-
