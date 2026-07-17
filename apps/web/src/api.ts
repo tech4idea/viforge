@@ -36,6 +36,7 @@ import type {
   PromptBlock,
   ReferencedChatSnippet,
   ReferencedFile,
+  ReleaseInfo,
   RetrievalPolicy,
   RuntimeConfig,
   RuntimeMemoryRebuildResponse,
@@ -91,6 +92,7 @@ export type {
   PromptBlock,
   ReferencedChatSnippet,
   ReferencedFile,
+  ReleaseInfo,
   RetrievalPolicy,
   RuntimeConfig,
   RuntimeMemoryRebuildResponse,
@@ -111,6 +113,7 @@ export type {
 export type ApiClient = {
   getProductProfile(): Promise<ProductProfile>;
   getRuntimeConfig(): Promise<RuntimeConfig>;
+  getReleaseInfo(): Promise<ReleaseInfo>;
   updateRuntimeConfig(input: UpdateRuntimeConfigInput): Promise<RuntimeConfig>;
   rebuildMemoryIndex(): Promise<RuntimeMemoryRebuildResponse>;
   testRuntimeModel(input: UpdateRuntimeConfigInput['modelProvider']): Promise<RuntimeModelTestResponse>;
@@ -374,6 +377,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   return {
     getProductProfile: () => request<ProductProfile>(fetcher, baseUrl, '/api/product-profile'),
     getRuntimeConfig: () => request<RuntimeConfig>(fetcher, baseUrl, '/api/runtime-config'),
+    getReleaseInfo: () => request<ReleaseInfo>(fetcher, baseUrl, '/api/release-info'),
     updateRuntimeConfig: (input) =>
       request<RuntimeConfig>(fetcher, baseUrl, '/api/runtime-config', {
         method: 'PUT',

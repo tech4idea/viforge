@@ -56,6 +56,23 @@ describe('runtime config routes', () => {
     });
   });
 
+  it('returns canonical release info for product and artifact surfaces', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
+    tempDirs.push(root);
+    const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
+
+    const response = await app.request('/release-info');
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      productName: 'ViForge',
+      version: '0.1.0',
+      tag: 'v0.1.0',
+      channel: 'beta',
+      updateHeadline: '建立统一版本管理链路',
+    });
+  });
+
   it('forces embedded PostgreSQL in desktop mode even when legacy config points to an external database', async () => {
     process.env.VIFORGE_DESKTOP = '1';
     process.env.DATABASE_URL = 'postgresql://legacy:password@db.example.test:5432/viforge';
@@ -289,4 +306,3 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
   process.env[key] = value;
 }
-

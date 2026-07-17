@@ -73,7 +73,7 @@ private 仓库场景还需要在 workflow 的下载逻辑里把 token 传给 `VI
 .github/workflows/desktop-windows.yml
 ```
 
-workflow 只支持 `workflow_dispatch` 手动打包，不在 `pull_request` 或 `push` 时自动执行。手动触发时可以提供 `bundle_release_tag` 输入，默认下载 `YukeonWayne/pg_pgvector_binary` 的 `v18.4-pgvector0.8.3-win32-x64` release。
+workflow 只支持 `workflow_dispatch` 手动打包，不在 `pull_request` 或 `push` 时自动执行。手动触发时可以提供 `bundle_release_tag` 输入，默认下载 `YukeonWayne/pg_pgvector_binary` 的 `v18.4-pgvector0.8.3-win32-x64` release。产品版本号、tag 和 channel 不再通过 Actions 表单输入，而是直接从 `packages/shared/src/releaseManifest.ts` 读取。
 
 核心流程：
 
@@ -134,20 +134,40 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Read release metadata
+        id: release_meta
+        run: node scripts/release-metadata.mjs --github-output
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify or download PostgreSQL bundle
         run: pnpm --filter @viforge/desktop prepare:postgres
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Typecheck API
         run: pnpm --filter @viforge/api typecheck
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Typecheck web
         run: pnpm --filter @viforge/web typecheck
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Build Windows installer
         run: pnpm desktop:dist
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7

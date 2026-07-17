@@ -10,5 +10,6 @@ interface Window {
       dataRoot?: string;
       restartRequired?: boolean;
     }>;
+    getAppVersion(): Promise<string>;
   };
 }

@@ -20,6 +20,7 @@ jobs:
     env:
       VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
       VIFORGE_REQUIRE_PGVECTOR: '1'
+      VIFORGE_RELEASE_COMMIT: ${{ github.sha }}
       VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
       VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag || 'v18.4-pgvector0.8.3-win32-x64' }}
       VIFORGE_POSTGRES_BUNDLE_ASSET_NAME: postgres-18.4-pgvector-0.8.3-win32-x64.zip
@@ -39,20 +40,44 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Read release metadata
+        id: release_meta
+        run: node scripts/release-metadata.mjs --github-output
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Verify or download PostgreSQL bundle
         run: pnpm --filter @viforge/desktop prepare:postgres
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Typecheck API
         run: pnpm --filter @viforge/api typecheck
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Typecheck web
         run: pnpm --filter @viforge/web typecheck
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Build Windows installer
         run: pnpm desktop:dist
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7
