@@ -130,6 +130,7 @@ VIFORGE_WEB_PORT=8080 VIFORGE_API_PORT=3001 docker compose up -d --build
 - [19 单机桌面版构建与发布教程](./19-desktop-release-guide.md)
 - [20 私有 GitHub 二进制资源仓库与 Actions 打包方案](./20-private-binary-bundle-github-actions.md)
 - [21 项目架构图](./21-project-architecture-diagram.html)
+- [22 macOS（Apple Silicon）桌面版构建与发布教程](./22-mac-desktop-release-guide.md)
 
 ## 主要代码入口
 
