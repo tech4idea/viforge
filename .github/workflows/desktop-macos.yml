@@ -1,0 +1,94 @@
+name: Desktop macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_release_tag:
+        description: GitHub Release tag from YukeonWayne/pg_pgvector_binary
+        required: false
+        default: v18.4-pgvector0.8.3-darwin-arm64
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build macOS desktop installer (Apple Silicon)
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    env:
+      VIFORGE_POSTGRES_PLATFORM_ARCH: darwin-arm64
+      VIFORGE_REQUIRE_PGVECTOR: '1'
+      VIFORGE_RELEASE_COMMIT: ${{ github.sha }}
+      VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
+      VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag || 'v18.4-pgvector0.8.3-darwin-arm64' }}
+      VIFORGE_POSTGRES_BUNDLE_ASSET_NAME: postgres-18.4-pgvector-0.8.3-darwin-arm64.zip
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Read release metadata
+        id: release_meta
+        run: node scripts/release-metadata.mjs --github-output
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+
+      - name: Verify or download PostgreSQL bundle
+        run: pnpm --filter @viforge/desktop prepare:postgres
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+
+      - name: Typecheck API
+        run: pnpm --filter @viforge/api typecheck
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+
+      - name: Typecheck web
+        run: pnpm --filter @viforge/web typecheck
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+
+      - name: Build macOS installer
+        run: pnpm desktop:dist
+        env:
+          VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+          CSC_NAME: ${{ secrets.CSC_NAME }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: viforge-macos-desktop
+          path: |
+            release/desktop/*.dmg
+            release/desktop/*.blockmap
+            release/desktop/latest*.yml
+          if-no-files-found: error

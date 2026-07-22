@@ -72,6 +72,22 @@ export default {
   mac: {
     target: ['dmg'],
     icon: 'build/icon.png',
+    arch: ['arm64'],
+    artifactName: buildReleaseArtifactFileName({
+      productName,
+      version: releaseVersion,
+      channel: releaseChannel,
+      platform: 'darwin-arm64',
+      qualifier: 'installer',
+      extension: 'dmg',
+    }),
+    ...(shouldSignMacBuild() ? {
+      hardenedRuntime: true,
+      entitlements: 'build/entitlements.mac.plist',
+      entitlementsInherit: 'build/entitlements.mac.plist',
+      gatekeeperAssess: false,
+      notarize: { teamId: process.env.APPLE_TEAM_ID },
+    } : {}),
   },
   linux: {
     target: ['AppImage'],
@@ -93,4 +109,8 @@ function buildReleaseArtifactFileName(input) {
 
 function normalizeReleaseChannel(value) {
   return value === 'dev' || value === 'beta' || value === 'stable' ? value : undefined;
+}
+
+function shouldSignMacBuild() {
+  return Boolean(process.env.APPLE_TEAM_ID && (process.env.CSC_NAME || process.env.CSC_LINK));
 }

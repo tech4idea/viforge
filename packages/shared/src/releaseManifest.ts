@@ -15,7 +15,7 @@ export const releaseManifest: ReleaseInfo = {
   updateNotes: [
     '本地优先工作区：项目文件、Agent 配置、记忆、和评测产物默认保存在用户本机',
     '多产品 profile：内置小说改编、情景剧创作和学习研究模板，可按项目选择不同Agent一起协作完成各种任务',
-    '桌面单机版：当前支持 Windows 安装包，下载安装后即可使用',
+    '桌面单机版：当前支持 Windows 安装包和 macOS（Apple Silicon）DMG，下载安装后即可使用',
     '微信接入与浏览器协作：支持微信入口和经过用户授权的浏览器自动化边界'
   ],
   artifacts: [
@@ -30,6 +30,18 @@ export const releaseManifest: ReleaseInfo = {
         extension: 'exe',
       }),
       target: 'nsis',
+    },
+    {
+      platform: 'macos-arm64',
+      fileName: buildReleaseArtifactFileName({
+        productName: RELEASE_PRODUCT_NAME,
+        version: RELEASE_VERSION,
+        channel: RELEASE_CHANNEL,
+        platform: 'darwin-arm64',
+        qualifier: 'installer',
+        extension: 'dmg',
+      }),
+      target: 'dmg',
     },
   ],
 };
