@@ -63,8 +63,11 @@ else
     log "下载 PostgreSQL $POSTGRES_VERSION 源码..."
     PG_TARBALL="$BUILD_DIR/postgresql-$POSTGRES_VERSION.tar.gz"
     if [ ! -f "$PG_TARBALL" ]; then
-      curl -fSL -o "$PG_TARBALL" \
-        "https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.gz"
+      PG_MIRROR_URL="https://mirrors.huaweicloud.com/postgresql/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.gz"
+      PG_OFFICIAL_URL="https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.gz"
+      log "尝试华为云镜像下载: $PG_MIRROR_URL"
+      curl -fSL --connect-timeout 15 --max-time 600 -o "$PG_TARBALL" "$PG_MIRROR_URL" \
+        || { log "镜像下载失败，回退官方源..."; curl -fSL -o "$PG_TARBALL" "$PG_OFFICIAL_URL"; }
     fi
     log "解压 PostgreSQL 源码..."
     tar xzf "$PG_TARBALL" -C "$BUILD_DIR"
@@ -88,8 +91,11 @@ else
     log "下载 pgvector $PGVECTOR_VERSION 源码..."
     PGVECTOR_TARBALL="$BUILD_DIR/pgvector-$PGVECTOR_VERSION.tar.gz"
     if [ ! -f "$PGVECTOR_TARBALL" ]; then
-      curl -fSL -o "$PGVECTOR_TARBALL" \
-        "https://github.com/pgvector/pgvector/archive/refs/tags/v${PGVECTOR_VERSION}.tar.gz"
+      PGVECTOR_MIRROR_URL="https://ghfast.top/https://github.com/pgvector/pgvector/archive/refs/tags/v${PGVECTOR_VERSION}.tar.gz"
+      PGVECTOR_OFFICIAL_URL="https://github.com/pgvector/pgvector/archive/refs/tags/v${PGVECTOR_VERSION}.tar.gz"
+      log "尝试 GitHub 加速镜像下载 pgvector..."
+      curl -fSL --connect-timeout 15 --max-time 300 -o "$PGVECTOR_TARBALL" "$PGVECTOR_MIRROR_URL" \
+        || { log "镜像下载失败，回退官方源..."; curl -fSL -o "$PGVECTOR_TARBALL" "$PGVECTOR_OFFICIAL_URL"; }
     fi
     log "解压 pgvector 源码..."
     tar xzf "$PGVECTOR_TARBALL" -C "$BUILD_DIR"

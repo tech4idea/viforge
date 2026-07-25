@@ -34,6 +34,18 @@ if (!(await exists(pgConfig))) {
 await run('make', [], { cwd: sourceRoot, env: buildEnv(pgConfig) });
 await run('make', ['install'], { cwd: sourceRoot, env: buildEnv(pgConfig) });
 
+// On macOS, pgvector builds vector.dylib but PostgreSQL extension loading expects vector.so
+if (hostPlatform === 'darwin') {
+  const libDir = path.join(postgresRoot, 'lib');
+  const dylibPath = path.join(libDir, 'vector.dylib');
+  const soPath = path.join(libDir, 'vector.so');
+  if (await exists(dylibPath) && !(await exists(soPath))) {
+    const { copyFile } = await import('node:fs/promises');
+    await copyFile(dylibPath, soPath);
+    console.info(`Copied ${dylibPath} -> ${soPath} for macOS compatibility`);
+  }
+}
+
 console.info(`Built pgvector ${pgvectorVersion} into PostgreSQL bundle: ${postgresRoot}`);
 
 async function exists(filePath) {

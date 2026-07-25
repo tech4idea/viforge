@@ -39,11 +39,20 @@
 | # | 问题 | 影响 | 建议 |
 |---|------|------|------|
 | 1 | **PostgreSQL darwin-arm64 bundle 是否已发布？** workflow 依赖 `YukeonWayne/pg_pgvector_binary` 仓库的 `v18.4-pgvector0.8.3-darwin-arm64` release asset | 若 asset 不存在，CI 会在 `prepare:postgres` 步骤失败 | 确认该 release 已上传 `postgres-18.4-pgvector-0.8.3-darwin-arm64.zip` |
-| 2 | **文档第 14 节最后一条过时**：写着"mac 配置未设置 artifactName"，但代码已添加 | 文档与代码不一致，可能误导读者 | 删除或更新该条 |
+| 2 | ~~**文档第 14 节最后一条过时**~~ | 已修复 | 文档已更新，删除过时描述并添加 electron-builder 25.x 配置说明 |
 | 3 | **DMG 无自定义外观**（无 background、iconSize、窗口尺寸配置） | 用户打开 DMG 看到的是默认布局，不影响功能但体验一般 | 后续可加 `dmg: { background, contents }` 配置 |
 | 4 | **仅覆盖 arm64**，不支持 Intel mac | 文档已明确说明，非缺陷 | 如需 Intel 支持，另开 `macos-13` runner 打 x64 包 |
 | 5 | **workflow 中签名 secrets 未做 optional 保护**：若仓库未配置 `CSC_NAME` 等 secrets，`${{ secrets.X }}` 会注入空字符串 | `shouldSignMacBuild()` 会返回 false 从而跳过签名，不会报错——逻辑上安全 | 无需修改，但建议在 README 中注明首次运行可不配签名 |
 | 6 | **无 `afterSign` / `afterPack` 钩子验证 PostgreSQL binary 签名** | electron-builder 默认会递归签名 extraResources 内的可执行文件，一般够用 | 若公证失败再排查 |
+
+## 本次构建修复记录
+
+以下问题在实际 macOS 构建验证中发现并修复：
+
+1. **electron-builder 25.x `mac.arch` 配置无效**：原配置 `mac: { arch: ['arm64'] }` 导致 `Invalid configuration object` 错误。已修改为 `mac: { target: [{ target: 'dmg', arch: ['arm64'] }] }`，将架构信息嵌套在 target 对象中。
+2. **pgvector macOS `.dylib` → `.so` 兼容性**：pgvector 在 macOS 编译生成 `vector.dylib`，但 `prepare-postgres.mjs` 校验和 PostgreSQL 扩展加载机制均期望 `vector.so`。已在 `build-pgvector-from-source.mjs` 中添加 darwin 平台自动复制逻辑。
+3. **镜像源加速**：`build-macos-local.sh` 新增华为云 PostgreSQL 镜像和 GitHub 加速镜像，均带官方源自动回退。
+4. **文档同步更新**：`22-mac-desktop-release-guide.md` 新增「国内镜像源加速」和「一键本地构建脚本」章节，修正所有 `mac.arch` 配置示例，删除过时的 `artifactName` 缺失描述。
 
 ## 结论
 
@@ -54,4 +63,4 @@
 建议合并前：
 
 1. 确认 `YukeonWayne/pg_pgvector_binary` 仓库中 `v18.4-pgvector0.8.3-darwin-arm64` release 及对应 zip asset 存在。
-2. 修正 `docs/current/22-mac-desktop-release-guide.md` 第 14 节关于 `artifactName` 的过时描述。
+2. ~~修正文档过时描述~~（已完成）。

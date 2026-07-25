@@ -70,9 +70,8 @@ export default {
     include: 'installer.nsh',
   },
   mac: {
-    target: ['dmg'],
+    target: [{ target: 'dmg', arch: ['arm64'] }],
     icon: 'build/icon.png',
-    arch: ['arm64'],
     artifactName: buildReleaseArtifactFileName({
       productName,
       version: releaseVersion,

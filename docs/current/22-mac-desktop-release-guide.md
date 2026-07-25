@@ -30,15 +30,16 @@ macOS DMG 强烈建议在 macOS 机器或 GitHub Actions `macos-latest`（当前
 - `prepare-postgres.mjs` 通过 `process.arch === 'arm64'` 自动识别主机架构。
 - `electron-builder.config.mjs` 的 `mac.target` 已配置为 `['dmg']`。
 
-建议在 `mac` 配置中显式锁定 `arch: ['arm64']`，避免在 Intel mac 上误打 x64 包或触发 universal 合并：
+建议在 `mac.target` 中显式锁定架构，避免在 Intel mac 上误打 x64 包或触发 universal 合并：
 
 ```js
 mac: {
-  target: ['dmg'],
+  target: [{ target: 'dmg', arch: ['arm64'] }],
   icon: 'build/icon.png',
-  arch: ['arm64'],
 },
 ```
+
+> **注意**：electron-builder 25.x 中 `mac.arch` 不是合法配置项，会报 `Invalid configuration object` 错误。架构信息必须嵌套在 `mac.target` 数组中。
 
 ## 3. macOS 本地验证建议
 
@@ -204,6 +205,8 @@ apps/desktop/resources/postgres/darwin-arm64/share/extension/vector.control
 apps/desktop/resources/postgres/darwin-arm64/lib/vector.so
 ```
 
+> **macOS 兼容性**：pgvector 在 macOS 上编译默认生成 `vector.dylib`，但 PostgreSQL 扩展加载机制和 `prepare-postgres.mjs` 校验脚本均期望 `vector.so`。`build-pgvector-from-source.mjs` 已内置自动处理逻辑：在 darwin 平台上将 `vector.dylib` 复制为 `vector.so`，无需手动操作。
+
 发布前建议强制检查 pgvector：
 
 ```bash
@@ -262,18 +265,8 @@ release/desktop/
 
 ```js
 mac: {
-  target: ['dmg'],
+  target: [{ target: 'dmg', arch: ['arm64'] }],
   icon: 'build/icon.png',
-},
-```
-
-建议补充 `arch` 和 `artifactName`，使产物命名与 Windows 保持一致，并方便 release manifest 校验：
-
-```js
-mac: {
-  target: ['dmg'],
-  icon: 'build/icon.png',
-  arch: ['arm64'],
   artifactName: buildReleaseArtifactFileName({
     productName,
     version: releaseVersion,
@@ -285,9 +278,57 @@ mac: {
 },
 ```
 
+> **注意**：`arch` 必须放在 `target` 对象内，不能直接作为 `mac` 的属性（electron-builder 25.x 限制）。
+
 DMG 安装方式：用户打开 DMG 后，将 `ViForge.app` 拖入 `Applications` 文件夹即可。数据路径在首次启动应用时选择，不依赖安装器写入。
 
-## 9. 代码签名与公证（正式分发必须）
+## 9. 国内镜像源加速
+
+在网络受限环境下构建时，可通过环境变量加速下载：
+
+### Electron 二进制镜像
+
+```bash
+export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+pnpm install
+pnpm desktop:dist
+```
+
+### PostgreSQL / pgvector 源码下载镜像
+
+`scripts/build-macos-local.sh` 已内置镜像源回退机制：
+
+- **PostgreSQL 源码**：优先使用华为云镜像 `mirrors.huaweicloud.com/postgresql/`，失败自动回退官方源 `ftp.postgresql.org`
+- **pgvector 源码**：优先使用 GitHub 加速镜像 `ghfast.top`，失败自动回退官方 GitHub Release
+
+如需自定义下载源，可在运行脚本前设置环境变量，或手动下载源码包放到 `$BUILD_DIR`（默认 `/tmp/viforge-macos-build`）下，脚本会自动跳过下载。
+
+## 10. 一键本地构建脚本
+
+仓库提供了 `scripts/build-macos-local.sh` 一键完成全流程（下载源码 → 编译 PostgreSQL → 编译 pgvector → typecheck → 构建 .app → 构建 DMG）：
+
+```bash
+chmod +x scripts/build-macos-local.sh
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ./scripts/build-macos-local.sh
+```
+
+可选环境变量：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `VIFORGE_POSTGRES_VERSION` | PostgreSQL 版本 | `16.10` |
+| `VIFORGE_PGVECTOR_VERSION` | pgvector 版本 | `0.8.3` |
+| `VIFORGE_BUILD_DIR` | 编译工作目录 | `/tmp/viforge-macos-build` |
+| `VIFORGE_SKIP_PGVECTOR` | 设为 1 跳过 pgvector | 不跳过 |
+| `ELECTRON_MIRROR` | Electron 下载镜像 | 官方源 |
+
+脚本特性：
+- 自动检测已有 PostgreSQL bundle 并跳过编译
+- 自动检测已下载的源码包并跳过下载
+- 镜像源下载失败自动回退官方源
+- macOS 上自动处理 `vector.dylib` → `vector.so` 兼容性
+
+## 11. 代码签名与公证（正式分发必须）
 
 macOS 分发未签名的应用给普通用户时，Gatekeeper 会阻止打开并提示"无法验证开发者"。正式 release 必须完成签名和公证。
 
@@ -413,7 +454,7 @@ spctl --assess --type execute --verbose "release/desktop/mac-arm64/ViForge.app"
 
 正常输出应包含 `accepted`。
 
-## 10. Gatekeeper 与分发注意事项
+## 12. Gatekeeper 与分发注意事项
 
 ### 10.1 未签名版本（内部测试）
 
@@ -448,7 +489,7 @@ xcrun notarytool log <RequestUUID> \
 - entitlements 缺少 `disable-library-validation`，导致加载 pgvector `vector.so` 失败。
 - hardened runtime 未启用。
 
-## 11. 更新 releaseManifest
+## 13. 更新 releaseManifest
 
 正式发布前，在 `packages/shared/src/releaseManifest.ts` 的 `artifacts` 数组中追加 macOS 制品定义。共享合同 `ReleaseArtifact.platform` 已支持 `macos-arm64`，`target` 已支持 `dmg`：
 
@@ -472,7 +513,7 @@ artifacts: [
 
 这样 `/api/release-info` 会返回当前平台匹配的制品文件名，前端运行设置面板可据此展示下载入口。
 
-## 12. GitHub Actions 构建建议
+## 14. GitHub Actions 构建建议
 
 建议为 macOS 单独创建 workflow 文件 `.github/workflows/desktop-macos.yml`，每平台独立 job。`macos-latest` 当前为 M1 arm64 runner，适合打 Apple Silicon 包。
 
@@ -579,7 +620,7 @@ jobs:
           if-no-files-found: error
 ```
 
-### 12.1 在 CI 中启用签名与公证
+### 14.1 在 CI 中启用签名与公证
 
 在 GitHub 仓库 `Settings -> Secrets and variables -> Actions` 新增以下 secrets：
 
@@ -608,7 +649,7 @@ CSC_NAME=Developer ID Application: <your name> (<TeamID>)
 
 公证步骤会使构建时间增加 5-15 分钟，建议 `timeout-minutes` 设为 90 以上。
 
-## 13. 推送前检查清单
+## 15. 推送前检查清单
 
 提交前建议确认：
 
@@ -632,7 +673,7 @@ pnpm desktop:pack
 
 PostgreSQL binary bundle 目前被 `.gitignore` 排除，发布流程应通过 CI 下载/构建，或在本地构建安装包前临时放入资源目录。
 
-## 14. 当前已知注意点
+## 16. 当前已知注意点
 
 - 没有 pgvector 时应用仍能启动，但 LangGraph 长期记忆会退化为文本检索。正式包建议强制 `VIFORGE_REQUIRE_PGVECTOR=1`。
 - Homebrew 安装的 PostgreSQL 不可直接复制进 bundle：它链接 `/opt/homebrew` 下的库，换机器后会因路径不匹配无法启动。必须用源码 `--prefix` 编译或官方可重定位发行版。
@@ -640,4 +681,5 @@ PostgreSQL binary bundle 目前被 `.gitignore` 排除，发布流程应通过 C
 - macOS 上数据路径选择不依赖 NSIS 安装向导（`installer.nsh` 仅 Windows 生效），而是应用首次启动时通过 Electron `dialog.showOpenDialog` 选择。
 - 未签名 + 未公证的 DMG 分发给普通用户会触发 Gatekeeper 拦截和 App Translocation，内部测试时需告知用户执行 `xattr -cr`，正式分发必须完成签名公证。
 - Apple Silicon 上运行 Intel（x64）二进制需要 Rosetta 2；本指南只产出原生 arm64 包，不覆盖 universal binary。如需同时支持 Intel mac，建议在 `macos-13` runner 上单独打 x64 包。
-- `electron-builder.config.mjs` 当前 `mac` 配置未设置 `artifactName`，DMG 会使用默认命名；正式发布前应补充命名规则以匹配 `releaseManifest`。
+- pgvector 在 macOS 编译生成 `vector.dylib`，但 PostgreSQL 扩展加载和校验脚本期望 `vector.so`。`build-pgvector-from-source.mjs` 已自动处理此兼容性。
+- electron-builder 25.x 中 `mac.arch` 不是合法属性，架构必须放在 `mac.target` 数组对象内。
