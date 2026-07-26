@@ -30,7 +30,7 @@ describe('projects routes', () => {
       documentTitle: 'ViForge 创作助手',
       defaultProjectName: '长夜改编计划',
       workspaceSections: {
-        project: expect.objectContaining({ title: '创作项目区域' }),
+        project: expect.objectContaining({ title: '项目区域' }),
       },
       defaultAgentSkillNames: expect.arrayContaining(['brainstorm-agent', 'reviewer-agent']),
       artifactPaths: expect.objectContaining({ script: '03 剧本/01 第一集/剧本.md' }),

@@ -13,7 +13,7 @@ import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store';
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { z } from 'zod';
 
-import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viforge/shared';
+import { DEFAULT_TOOL_DESCRIPTIONS, type AgentLayerConfig, type AgentToolPolicy, type AigcHubModelMetadata, type BehaviorRuleConfig, type ChatMessageAttachment, type GeminiImageAspectRatio, type KnowledgeBaseEntry, type MemoryRecord, type ProductProfile, type RunImageGenerationOptions, type StreamEvent, type ToolDescriptionConfig } from '@viforge/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, PRODUCT_PROFILE } from '../env';
@@ -517,6 +517,10 @@ export function createWorkspaceTools(
     memoryFixture?: MemoryRecord[];
     mockMemoryWrites?: boolean;
     knowledgeFixture?: KnowledgeBaseEntry[];
+    toolMocks?: Record<string, unknown>;
+    allowedTools?: string[];
+    deniedTools?: string[];
+    toolDescriptionOverrides?: ToolDescriptionConfig[];
   } = {},
 ) {
   const projectMemory = getLangGraphMemoryBackend().then(({ store }) => createProjectMemoryStore(store));
@@ -525,11 +529,7 @@ export function createWorkspaceTools(
   const tools: Record<string, ReturnType<typeof createTool>> = {
     list_workspace_entries: createTool({
       id: 'list_workspace_entries',
-      description: [
-        '列出当前项目工作区中的文件和目录。',
-        '默认只列出顶层条目；传入 path 可浏览子目录；传入 query 可模糊搜索所有文件。',
-        '文件较多时优先用 path 或 query 缩小范围，避免一次性加载全部列表。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.list_workspace_entries,
       inputSchema: z.object({
         path: z.string().optional().describe('要列出的子目录路径（相对工作区根），不传则列顶层'),
         query: z.string().optional().describe('按文件名或路径模糊搜索，支持子序列匹配'),
@@ -540,7 +540,7 @@ export function createWorkspaceTools(
     }),
     read_workspace_file: createTool({
       id: 'read_workspace_file',
-      description: '读取当前项目工作区中的 UTF-8 文本文件。图片、PDF 等二进制文件只返回元数据摘要，不返回内容。',
+      description: DEFAULT_TOOL_DESCRIPTIONS.read_workspace_file,
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path: filePath }) => {
         const asset = await store.readWorkspaceFileBytes(projectId, filePath);
@@ -557,7 +557,7 @@ export function createWorkspaceTools(
     }),
     write_workspace_file: createTool({
       id: 'write_workspace_file',
-      description: '在项目工作区中写入一个 UTF-8 文本文件。用于输出分析、方案、剧本等工作成果。',
+      description: DEFAULT_TOOL_DESCRIPTIONS.write_workspace_file,
       inputSchema: z.object({ path: z.string().min(1), content: z.string() }),
       execute: async ({ path: filePath, content }) => {
         const existed = await workspaceFileExists(store, projectId, filePath);
@@ -568,7 +568,7 @@ export function createWorkspaceTools(
     }),
     delete_workspace_file: createTool({
       id: 'delete_workspace_file',
-      description: '删除当前项目工作区中的文件或目录。用于清理不再需要的工作成果。',
+      description: DEFAULT_TOOL_DESCRIPTIONS.delete_workspace_file,
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path: filePath }) => {
         const result = await store.deleteWorkspaceEntry(projectId, filePath);
@@ -578,12 +578,7 @@ export function createWorkspaceTools(
     }),
     move_workspace_entry: createTool({
       id: 'move_workspace_entry',
-      description: [
-        '移动或重命名当前项目工作区中的文件或目录。',
-        'source 与 target 都是相对项目工作区根目录的路径，如 "03 剧本/01 第一集/定稿剧本.md"。',
-        'target 已存在时会拒绝，避免覆盖；如需改名，请换一个不冲突的 target 路径。',
-        '典型用途：整理目录结构、把生成图片归档到 "分镜/第1集/" 等子目录、给文档改名。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.move_workspace_entry,
       inputSchema: z.object({
         source: z.string().min(1).describe('工作区中当前存在的路径（文件或目录）'),
         target: z.string().min(1).describe('希望移动/重命名到的新路径；目录不存在会自动创建，但目标路径不能已存在'),
@@ -607,12 +602,7 @@ export function createWorkspaceTools(
     }),
     run_bash: createTool({
       id: 'run_bash',
-      description: [
-        '在当前项目工作区目录下执行 shell 命令（bash）。',
-        '适合批量处理文件、用脚本提取内容、搜索大文件、格式转换等 read_workspace_file 不便处理的场景。',
-        '命令的工作目录就是项目工作区根目录；默认超时 120 秒，可按需要调整；输出超过 8000 字符会被截断。',
-        '不要执行需要交互输入的命令，不要安装系统级软件包，不要访问工作区之外的路径。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.run_bash,
       inputSchema: z.object({
         command: z.string().min(1).describe('要执行的 bash 命令'),
         timeout: z.number().int().min(1).max(300).default(120).describe('超时秒数，默认 120，最大 300'),
@@ -833,11 +823,7 @@ export function createWorkspaceTools(
     }),
     recall_project_memory: createTool({
       id: 'recall_project_memory',
-      description: [
-        '按语义检索当前项目中由 agent 主动写入的精选长期记忆。',
-        '适合在当前任务需要找回早期关键设定、用户偏好、角色关系、已否决方案、审稿结论时使用。',
-        '普通问候、短问题、当前上下文已经足够时不要调用。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.recall_project_memory,
       inputSchema: z.object({
         query: z.string().min(1).describe('用于语义检索的自然语言查询，写清要找回的信息类型'),
         topK: z.number().int().min(1).max(12).default(6),
@@ -868,11 +854,7 @@ export function createWorkspaceTools(
     }),
     remember_project_memory: createTool({
       id: 'remember_project_memory',
-      description: [
-        '把一条精选长期记忆写入语义索引，供 recall_project_memory 未来检索。',
-        '只保存对后续创作有复用价值的信息，例如已确认设定、角色规则、用户偏好、已否决方向、审稿结论。',
-        '每条 memory 应简洁、可独立理解，并包含必要上下文；不要保存整段对话或临时分析。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.remember_project_memory,
       inputSchema: z.object({
         memory: z.string().min(1).describe('要长期保存并建立语义索引的记忆条目'),
         category: z.enum(['user_preference', 'project_fact', 'character', 'continuity', 'plot_thread', 'rejected_option', 'quality_standard', 'other']).default('other'),
@@ -920,11 +902,7 @@ export function createWorkspaceTools(
     }),
     retrieve_knowledge_cards: createTool({
       id: 'retrieve_knowledge_cards',
-      description: [
-        '从全局知识库索引中检索可复用的创作机制卡、观点卡或笑点模式卡。',
-        '检索结果只用于启发，不要复制具体台词、完整桥段、人物身份或受版权保护的表达。',
-        '知识库索引优先读取 知识库/index.yaml；如果没有索引，会退化为扫描 知识库 下的 Markdown 文件。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.retrieve_knowledge_cards,
       inputSchema: z.object({
         query: z.string().min(1).describe('检索意图，例如“业主群误会升级机制”'),
         tags: z.array(z.string()).default([]).describe('可选标签过滤'),
@@ -1150,12 +1128,7 @@ export function createWorkspaceTools(
     const wechat = options.wechat;
     tools.send_wechat_message = createTool({
       id: 'send_wechat_message',
-      description: [
-        '立即向已绑定的用户微信发送一条文本消息。',
-        '只在本次运行中需要马上发送当前正文时使用，例如用户要求现在把摘要、通知或结果发到微信。',
-        '本工具不会创建未来或周期性任务；如果用户要求定时、每天、每周或隔一段时间发送，必须使用 create_scheduled_task。',
-        '由你根据当前上下文生成最终要发送的正文，再调用本工具发送；不要让外层系统替你发送。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.send_wechat_message,
       inputSchema: z.object({
         message: z.string().min(1).describe('要发送到微信的最终文本正文'),
       }),
@@ -1167,11 +1140,7 @@ export function createWorkspaceTools(
 
     tools.send_wechat_file = createTool({
       id: 'send_wechat_file',
-      description: [
-        '将项目工作区中的文件发送给用户微信。',
-        '当用户说"把xxx发给我"、"发送文件给我"、"发一下这个文件"等要求发送工作区文件时使用。',
-        '支持图片、PDF、文本、视频、音频等任意文件类型。',
-      ].join('\n'),
+      description: DEFAULT_TOOL_DESCRIPTIONS.send_wechat_file,
       inputSchema: z.object({
         path: z.string().min(1).describe('工作区中的文件路径，可通过 list_workspace_entries 查看可用文件'),
       }),
@@ -1188,7 +1157,114 @@ export function createWorkspaceTools(
     });
   }
 
+  return applyEvalToolControls(applyToolAvailabilityControls(applyToolDescriptionOverrides(tools, options.toolDescriptionOverrides), {
+    allowedTools: options.allowedTools,
+    deniedTools: options.deniedTools,
+  }), {
+    toolMocks: options.toolMocks,
+    deniedTools: options.deniedTools,
+  });
+}
+
+function applyToolAvailabilityControls<T extends Record<string, unknown>>(
+  tools: T,
+  options: { allowedTools?: string[]; deniedTools?: string[] },
+): T {
+  const allowed = new Set(options.allowedTools ?? []);
+  if (allowed.size === 0) return tools;
+  for (const toolId of Object.keys(tools)) {
+    if (!allowed.has(toolId)) {
+      delete tools[toolId];
+    }
+  }
   return tools;
+}
+
+function applyEvalToolControls<T extends Record<string, unknown>>(
+  tools: T,
+  options: { toolMocks?: Record<string, unknown>; deniedTools?: string[] },
+): T {
+  const mockedToolIds = new Set(Object.keys(options.toolMocks ?? {}));
+  const deniedToolIds = new Set(options.deniedTools ?? []);
+  for (const [toolId, tool] of Object.entries(tools)) {
+    if (!mockedToolIds.has(toolId) && !deniedToolIds.has(toolId)) continue;
+    if (!tool || typeof tool !== 'object' || !('execute' in tool)) continue;
+    const originalExecute = (tool as { execute?: unknown }).execute;
+    const originalInvoke = (tool as { invoke?: unknown }).invoke;
+    const originalCall = (tool as { call?: unknown }).call;
+    if (typeof originalExecute !== 'function' && typeof originalInvoke !== 'function' && typeof originalCall !== 'function') continue;
+    if (mockedToolIds.has(toolId)) {
+      const output = options.toolMocks?.[toolId];
+      Object.assign(tool, {
+        execute: async () => output,
+        invoke: async () => output,
+        call: async () => output,
+      });
+      continue;
+    }
+    const denied = async () => ({
+      error: `Tool ${toolId} is denied by the eval run configuration.`,
+      denied: true,
+    });
+    Object.assign(tool, { execute: denied, invoke: denied, call: denied });
+  }
+  return tools;
+}
+
+function applyToolDescriptionOverrides<T extends Record<string, unknown>>(tools: T, overrides: ToolDescriptionConfig[] | undefined): T {
+  if (!overrides || overrides.length === 0) return tools;
+  for (const override of overrides) {
+    const tool = tools[override.toolId];
+    if (!isLangGraphTool(tool)) continue;
+    tool.description = formatToolDescription(override);
+    const currentSchema = (tool as unknown as { schema?: unknown }).schema;
+    if (currentSchema instanceof z.ZodObject && override.parameterDescriptions) {
+      (tool as unknown as { schema?: z.AnyZodObject }).schema = applyParameterDescriptions(currentSchema, override.parameterDescriptions);
+    }
+  }
+  return tools;
+}
+
+function formatToolDescription(override: ToolDescriptionConfig): string {
+  return [override.description.trim(), override.outputDescription?.trim() ? `输出：${override.outputDescription.trim()}` : ''].filter(Boolean).join('\n');
+}
+
+function applyParameterDescriptions(schema: z.AnyZodObject, descriptions: Record<string, string>): z.AnyZodObject {
+  const shape = schema.shape;
+  const nextShape: Record<string, z.ZodTypeAny> = {};
+  for (const [key, value] of Object.entries(shape) as Array<[string, z.ZodTypeAny]>) {
+    const description = descriptions[key]?.trim();
+    nextShape[key] = description ? value.describe(description) : value;
+  }
+  return schema.extend(nextShape);
+}
+
+function createSpecialistToolset(
+  tools: ReturnType<typeof createWorkspaceTools>,
+  config: { toolPolicies?: AgentToolPolicy[]; toolDescriptionOverrides?: ToolDescriptionConfig[] } | undefined,
+  agentId: string,
+): ReturnType<typeof createWorkspaceTools> {
+  const policies = (config?.toolPolicies ?? []).filter((policy) => policy.scope !== 'agent' || policy.agentId === agentId);
+  const allowedTools = uniqueToolIds(policies.flatMap((policy) => policy.allowedToolIds));
+  const deniedTools = uniqueToolIds(policies.flatMap((policy) => policy.deniedToolIds));
+  const overrides = (config?.toolDescriptionOverrides ?? []).filter((override) => override.scope !== 'agent' || override.agentId === agentId);
+  return applyToolAvailabilityControls(applyToolDescriptionOverrides({ ...tools }, overrides), {
+    allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
+    deniedTools: deniedTools.length > 0 ? deniedTools : undefined,
+  }) as ReturnType<typeof createWorkspaceTools>;
+}
+
+function formatRuntimeBehaviorRules(rules: BehaviorRuleConfig[] | undefined, agentId: string): string {
+  const sections = (rules ?? [])
+    .filter((rule) => rule.status === 'active' || rule.status === 'candidate')
+    .filter((rule) => rule.scope !== 'agent' || rule.agentId === agentId)
+    .filter((rule) => rule.content.trim())
+    .map((rule) => `## ${rule.title}\n\n${rule.content.trim()}`);
+  return sections.length > 0 ? ['# Agent 行为规则', ...sections].join('\n\n') : '';
+}
+
+function uniqueToolIds(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 type AigcHubImage = {
@@ -1827,6 +1903,11 @@ export async function createAgentRegistry(
     traceId?: string;
     productProfile?: ProductProfile;
     layerConfig?: AgentLayerConfig;
+    resolvedConfig?: {
+      behaviorRules?: BehaviorRuleConfig[];
+      toolPolicies?: AgentToolPolicy[];
+      toolDescriptionOverrides?: ToolDescriptionConfig[];
+    };
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
@@ -1854,13 +1935,15 @@ export async function createAgentRegistry(
     ]);
     if (!instructions) return null;
 
-    const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
+    const behaviorRules = formatRuntimeBehaviorRules(options.resolvedConfig?.behaviorRules, def.id);
+    const agentInstructions = [instructions, behaviorRules, AGENT_MEMORY_TOOL_PROTOCOL].filter(Boolean).join('\n\n');
+    const specialistTools = createSpecialistToolset(tools, options.resolvedConfig, def.id);
     return createLangGraphAgentClient({
       id: def.id,
       name: def.name,
       instructions: agentInstructions,
       model: modelConfig,
-      tools,
+      tools: specialistTools,
       checkpointer,
       store: memoryStore,
     });
@@ -2148,4 +2231,3 @@ async function safeBrowserToolCall(execute: () => Promise<unknown>): Promise<unk
     };
   }
 }
-
