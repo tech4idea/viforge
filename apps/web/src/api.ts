@@ -51,6 +51,10 @@ import type {
   WechatSetupSession,
   WechatStatus,
   ChatSessionModelConfig,
+  DocumentAnnotation,
+  DocumentAnnotationFile,
+  DocumentAnnotationStatus,
+  DocumentAnnotationSummary,
   WorkspaceManifest,
   WorkspaceEntry,
   WorkspaceFile,
@@ -106,6 +110,10 @@ export type {
   TheaterSkill,
   WechatSetupSession,
   WechatStatus,
+  DocumentAnnotation,
+  DocumentAnnotationFile,
+  DocumentAnnotationStatus,
+  DocumentAnnotationSummary,
   WorkspaceEntry,
   WorkspaceFile,
 } from '@viforge/shared';
@@ -138,6 +146,12 @@ export type ApiClient = {
   createAsset(projectId: string, input: CreateAssetInput): Promise<WorkspaceEntry>;
   moveEntry(projectId: string, sourcePath: string, targetPath: string): Promise<WorkspaceEntry>;
   deleteEntry(projectId: string, path: string): Promise<{ deleted: true }>;
+  listDocumentAnnotationSummaries(projectId: string): Promise<DocumentAnnotationSummary[]>;
+  readDocumentAnnotations(projectId: string, filePath: string): Promise<DocumentAnnotationFile>;
+  createDocumentAnnotation(projectId: string, input: CreateDocumentAnnotationInput): Promise<DocumentAnnotationFile>;
+  updateDocumentAnnotation(projectId: string, annotationId: string, input: UpdateDocumentAnnotationInput): Promise<DocumentAnnotationFile>;
+  deleteDocumentAnnotation(projectId: string, filePath: string, annotationId: string): Promise<DocumentAnnotationFile>;
+  clearDocumentAnnotations(projectId: string, filePath: string): Promise<DocumentAnnotationFile>;
   listChatSessions(projectId: string, options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   listTemporaryChatSessions(options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   createChatSession(projectId: string, input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
@@ -248,6 +262,12 @@ export type ScheduleRunNowResponse = {
 export type StreamRunHandlers = {
   onEvent: (event: StreamEvent) => void;
   onError?: (error: Error) => void;
+};
+
+export type CreateDocumentAnnotationInput = Omit<DocumentAnnotation, 'id' | 'status' | 'createdAt' | 'updatedAt'>;
+
+export type UpdateDocumentAnnotationInput = Partial<Omit<DocumentAnnotation, 'id' | 'filePath' | 'createdAt' | 'updatedAt'>> & {
+  filePath: string;
 };
 
 export type CreateAssetInput = {
@@ -471,6 +491,28 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     deleteEntry: (projectId, path) =>
       request<{ deleted: true }>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/files/${encodeWorkspacePath(path)}`, {
+        method: 'DELETE',
+      }),
+    listDocumentAnnotationSummaries: (projectId) =>
+      request<DocumentAnnotationSummary[]>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/annotations`),
+    readDocumentAnnotations: (projectId, filePath) =>
+      request<DocumentAnnotationFile>(fetcher, baseUrl, withQuery(`/api/projects/${encodePathSegment(projectId)}/annotations`, { filePath })),
+    createDocumentAnnotation: (projectId, input) =>
+      request<DocumentAnnotationFile>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/annotations`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    updateDocumentAnnotation: (projectId, annotationId, input) =>
+      request<DocumentAnnotationFile>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/annotations/${encodePathSegment(annotationId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteDocumentAnnotation: (projectId, filePath, annotationId) =>
+      request<DocumentAnnotationFile>(fetcher, baseUrl, withQuery(`/api/projects/${encodePathSegment(projectId)}/annotations/${encodePathSegment(annotationId)}`, { filePath }), {
+        method: 'DELETE',
+      }),
+    clearDocumentAnnotations: (projectId, filePath) =>
+      request<DocumentAnnotationFile>(fetcher, baseUrl, withQuery(`/api/projects/${encodePathSegment(projectId)}/annotations`, { filePath }), {
         method: 'DELETE',
       }),
     listChatSessions: (projectId, options = {}) =>

@@ -13,17 +13,19 @@ import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store';
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { z } from 'zod';
 
-import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, StreamEvent } from '@viforge/shared';
+import type { AgentLayerConfig, AigcHubModelMetadata, ChatMessageAttachment, GeminiImageAspectRatio, KnowledgeBaseEntry, MemoryRecord, ProductProfile, RunImageGenerationOptions, RuntimeChatEndpoint, StreamEvent } from '@viforge/shared';
 
 import { buildAigcHubHeaders } from '../aigcHubHeaders';
 import { AIGC_HUB_API_KEY, AIGC_HUB_BASE_URL, AIGC_HUB_IMAGE_MODEL, PRODUCT_PROFILE } from '../env';
 import type { GitService } from '../storage/gitService';
 import type { GitConfigStore } from '../storage/gitConfigStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
+import { createDocumentAnnotationStore, isDocumentAnnotationPath } from '../storage/documentAnnotationStore';
 import type { PlaywriterService } from '../browser/playwriterService';
 import type { WechatSendContext } from './runService';
 import { getPromptText } from './langfusePromptStore';
 import { readProductSkillPrompt } from '../productProfilePrompts';
+import { appendJsonLog } from '../logger';
 
 type LangGraphMemoryBackend = {
   checkpointer: BaseCheckpointSaver;
@@ -108,16 +110,39 @@ async function getLangGraphMemoryBackend(): Promise<LangGraphMemoryBackend> {
 }
 
 async function createPostgresLangGraphMemoryBackend(databaseUrl: string): Promise<LangGraphMemoryBackend> {
+  const startedAt = Date.now();
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'langgraph-memory',
+    stage: 'postgres.setup.start',
+  });
+
   const checkpointer = PostgresSaver.fromConnString(databaseUrl, { schema: 'langgraph' });
+  const checkpointerStartedAt = Date.now();
   await checkpointer.setup();
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'langgraph-memory',
+    stage: 'checkpointer.setup.end',
+    durationMs: Date.now() - checkpointerStartedAt,
+  });
 
   const store = PostgresStore.fromConnString(databaseUrl, {
     schema: 'langgraph_store',
     index: createStoreIndexConfig(),
     textSearchLanguage: 'simple',
   });
+  const storeStartedAt = Date.now();
   await store.setup();
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'langgraph-memory',
+    stage: 'store.setup.end',
+    durationMs: Date.now() - storeStartedAt,
+  });
 
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'langgraph-memory',
+    stage: 'postgres.setup.end',
+    durationMs: Date.now() - startedAt,
+  });
   return { checkpointer, store };
 }
 
@@ -207,6 +232,14 @@ const AGENT_MEMORY_TOOL_PROTOCOL = [
   '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
   '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
 ].join('\n');
+const AGENT_DOCUMENT_ANNOTATION_TOOL_PROTOCOL = [
+  '## Markdown 批注工具使用原则',
+  '当任务上下文明示需要根据文档批注、评论或修改意见处理 Markdown 文档时，使用 list_document_annotations 和 read_document_annotations 查询批注。',
+  '不要猜测批注文件路径，也不要直接扫描隐藏批注文件。',
+  '读取批注后，根据 filePath、selectedText、beforeText、afterText、line range 和 comment 修改原文。line range 仅供参考，selectedText 和上下文锚点优先。',
+  '如果批注状态是 stale 或无法确认位置，不要猜测修改，应向用户说明需要确认。',
+  '完成文档修改后不要自动删除、清空或标记 resolved；只有用户明确要求清除批注或标记完成时，才能使用清理类批注工具。',
+].join('\n');
 
 type AgentDef = {
   id: string;
@@ -216,6 +249,9 @@ type AgentDef = {
 
 export type AgentRegistry = {
   brainstorm: LangGraphAgentClient | null;
+  blogWriting: LangGraphAgentClient | null;
+  research: LangGraphAgentClient | null;
+  publisher: LangGraphAgentClient | null;
   character: LangGraphAgentClient | null;
   continuity: LangGraphAgentClient | null;
   story: LangGraphAgentClient | null;
@@ -239,6 +275,40 @@ const AGENT_DEFS: AgentDef[] = [
       '- 已否决方案及原因：',
       '- 灵感关键词：',
       '- 用户偏好倾向：',
+    ].join('\n'),
+  },
+  {
+    id: 'blog-writing-agent',
+    name: '博客写作',
+    workingMemoryTemplate: [
+      '# 博客写作记忆',
+      '- 已确定选题：',
+      '- 核心观点：',
+      '- 标题方向：',
+      '- 风格偏好：',
+      '- 配图偏好：',
+    ].join('\n'),
+  },
+  {
+    id: 'research-agent',
+    name: '资料核查',
+    workingMemoryTemplate: [
+      '# 资料核查记忆',
+      '- 已核查事实：',
+      '- 可靠来源：',
+      '- 待验证内容：',
+      '- 引用限制：',
+    ].join('\n'),
+  },
+  {
+    id: 'publisher-agent',
+    name: '平台草稿',
+    workingMemoryTemplate: [
+      '# 平台发布记忆',
+      '- 平台账号状态：',
+      '- 已验证 SOP：',
+      '- 上传与排版踩坑：',
+      '- 禁止自动执行动作：最终发布',
     ].join('\n'),
   },
   {
@@ -520,6 +590,7 @@ export function createWorkspaceTools(
   } = {},
 ) {
   const projectMemory = getLangGraphMemoryBackend().then(({ store }) => createProjectMemoryStore(store));
+  const documentAnnotations = createDocumentAnnotationStore(store);
   const resource = projectId;
 
   const tools: Record<string, ReturnType<typeof createTool>> = {
@@ -529,20 +600,24 @@ export function createWorkspaceTools(
         '列出当前项目工作区中的文件和目录。',
         '默认只列出顶层条目；传入 path 可浏览子目录；传入 query 可模糊搜索所有文件。',
         '文件较多时优先用 path 或 query 缩小范围，避免一次性加载全部列表。',
+        'Markdown 批注 sidecar 属于内部存储，不会在此工具中返回；需要批注时使用 annotation 工具。',
       ].join('\n'),
       inputSchema: z.object({
         path: z.string().optional().describe('要列出的子目录路径（相对工作区根），不传则列顶层'),
         query: z.string().optional().describe('按文件名或路径模糊搜索，支持子序列匹配'),
       }),
       execute: async ({ path: subPath, query }) => ({
-        entries: await store.listWorkspaceEntries(projectId, { path: subPath, query }),
+        entries: (await store.listWorkspaceEntries(projectId, { path: subPath, query }))
+          .filter((entry) => !isDocumentAnnotationSidecarPath(entry.path)),
       }),
     }),
     read_workspace_file: createTool({
       id: 'read_workspace_file',
-      description: '读取当前项目工作区中的 UTF-8 文本文件。图片、PDF 等二进制文件只返回元数据摘要，不返回内容。',
+      description: '读取当前项目工作区中的 UTF-8 文本文件。图片、PDF 等二进制文件只返回元数据摘要，不返回内容。Markdown 批注 sidecar 不能通过此工具读取，请使用 annotation 工具。',
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path: filePath }) => {
+        const sidecarError = rejectDocumentAnnotationSidecarPath(filePath);
+        if (sidecarError) return sidecarError;
         const asset = await store.readWorkspaceFileBytes(projectId, filePath);
         if (!isTextMimeType(asset.mimeType)) {
           return {
@@ -555,11 +630,66 @@ export function createWorkspaceTools(
         return { path: asset.path, content: asset.bytes.toString('utf8') };
       },
     }),
+    list_document_annotations: createTool({
+      id: 'list_document_annotations',
+      description: [
+        '列出当前项目 Markdown 文档批注。',
+        '不返回批注正文，只返回每个文档的批注数量、状态统计和隐藏批注文件路径。',
+        '当用户要求根据批注、评论或修改意见处理文档时，先调用此工具确定哪些文档有批注。',
+        'filePath 可选；传入时只检查指定 Markdown 文档。',
+      ].join('\n'),
+      inputSchema: z.object({ filePath: z.string().optional().describe('可选的 Markdown 文档路径；不传则列出当前项目所有批注文档') }),
+      execute: async ({ filePath }) => ({ annotations: await documentAnnotations.listAnnotationSummaries(projectId, filePath) }),
+    }),
+    read_document_annotations: createTool({
+      id: 'read_document_annotations',
+      description: [
+        '读取指定 Markdown 文档的完整批注。',
+        '修改文档前必须同时读取批注和原文；line range 仅供参考，selectedText 与 beforeText/afterText 上下文锚点优先。',
+        '如果批注 status 是 stale，或无法在当前文档中确认位置，不要猜测修改，应向用户说明需要确认。',
+      ].join('\n'),
+      inputSchema: z.object({ filePath: z.string().min(1).describe('Markdown 文档路径，不是隐藏批注文件路径') }),
+      execute: async ({ filePath }) => documentAnnotations.readAnnotations(projectId, filePath),
+    }),
+    update_document_annotation_status: createTool({
+      id: 'update_document_annotation_status',
+      description: [
+        '更新单条 Markdown 批注状态。',
+        '只有用户明确要求“标记已完成/解决批注/恢复批注状态”时才能调用。',
+        '根据批注完成文档修改后不要自动调用；必须等待用户确认。',
+      ].join('\n'),
+      inputSchema: z.object({
+        filePath: z.string().min(1).describe('Markdown 文档路径，不是隐藏批注文件路径'),
+        annotationId: z.string().min(1).describe('批注 id'),
+        status: z.enum(['open', 'stale', 'resolved']).describe('目标状态'),
+      }),
+      execute: async ({ filePath, annotationId, status }) => {
+        const updated = await documentAnnotations.updateAnnotation(projectId, annotationId, { filePath, status });
+        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: documentAnnotations.annotationPathForFile(filePath), change: updated.annotations.length === 0 ? 'deleted' : 'modified' });
+        return updated;
+      },
+    }),
+    clear_document_annotations: createTool({
+      id: 'clear_document_annotations',
+      description: [
+        '清空指定 Markdown 文档的全部批注，并删除对应隐藏批注文件。',
+        '只有用户明确要求“清空批注/删除批注/批注已确认处理完”时才能调用。',
+        '根据批注完成文档修改后不要自动调用；必须等待用户确认。',
+      ].join('\n'),
+      inputSchema: z.object({ filePath: z.string().min(1).describe('Markdown 文档路径，不是隐藏批注文件路径') }),
+      execute: async ({ filePath }) => {
+        const cleared = await documentAnnotations.clearAnnotations(projectId, filePath);
+        publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: documentAnnotations.annotationPathForFile(filePath), change: 'deleted' });
+        return cleared;
+      },
+    }),
     write_workspace_file: createTool({
       id: 'write_workspace_file',
-      description: '在项目工作区中写入一个 UTF-8 文本文件。用于输出分析、方案、剧本等工作成果。',
+      description: '在项目工作区中写入一个 UTF-8 文本文件。用于输出分析、方案、剧本等工作成果。不能直接写入 Markdown 批注 sidecar。',
       inputSchema: z.object({ path: z.string().min(1), content: z.string() }),
       execute: async ({ path: filePath, content }) => {
+        const sidecarError = rejectDocumentAnnotationSidecarPath(filePath);
+        if (sidecarError) return sidecarError;
         const existed = await workspaceFileExists(store, projectId, filePath);
         const written = await store.writeWorkspaceFile(projectId, filePath, content);
         publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: written.path, change: existed ? 'modified' : 'created' });
@@ -568,9 +698,11 @@ export function createWorkspaceTools(
     }),
     delete_workspace_file: createTool({
       id: 'delete_workspace_file',
-      description: '删除当前项目工作区中的文件或目录。用于清理不再需要的工作成果。',
+      description: '删除当前项目工作区中的文件或目录。用于清理不再需要的工作成果。不能直接删除 Markdown 批注 sidecar；清理批注使用 clear_document_annotations。',
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path: filePath }) => {
+        const sidecarError = rejectDocumentAnnotationSidecarPath(filePath);
+        if (sidecarError) return sidecarError;
         const result = await store.deleteWorkspaceEntry(projectId, filePath);
         publish({ type: 'file.changed', runId, emittedAt: emittedAt(), path: filePath, change: 'deleted' });
         return result;
@@ -589,6 +721,10 @@ export function createWorkspaceTools(
         target: z.string().min(1).describe('希望移动/重命名到的新路径；目录不存在会自动创建，但目标路径不能已存在'),
       }),
       execute: async ({ source, target }) => {
+        const sourceSidecarError = rejectDocumentAnnotationSidecarPath(source);
+        if (sourceSidecarError) return sourceSidecarError;
+        const targetSidecarError = rejectDocumentAnnotationSidecarPath(target);
+        if (targetSidecarError) return targetSidecarError;
         if (source === target) {
           return { error: `source 与 target 不能相同: ${source}` };
         }
@@ -768,6 +904,30 @@ export function createWorkspaceTools(
           return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
         }
         return safeBrowserToolCall(() => options.browserService!.evaluate({ code, sessionId, timeoutMs }));
+      },
+    }),
+    browser_upload_file: createTool({
+      id: 'browser_upload_file',
+      description: [
+        '将当前项目工作区中的文件上传到 Playwriter 授权的真实浏览器页面。',
+        '适合用户明确要求把工作区文件上传到网页表单、素材库、网盘、后台或微信公众平台时使用。',
+        'selector 必须直接指向网页中的 input[type=file] 元素。',
+        '上传、提交、发布或修改远端数据前，必须先向用户说明将执行的动作并等待确认。',
+      ].join('\n'),
+      inputSchema: z.object({
+        path: z.string().min(1).describe('项目工作区中的文件路径，可通过 list_workspace_entries 查看'),
+        selector: z.string().min(1).describe('网页中 input[type=file] 元素的 Playwright selector'),
+      }),
+      execute: async ({ path: filePath, selector }) => {
+        if (!options.browserService) {
+          return { error: 'Playwriter 浏览器服务未配置。请先启动 playwriter serve 并设置 VIFORGE_PLAYWRITER_HOST。' };
+        }
+        const asset = await store.readWorkspaceFileBytes(projectId, filePath);
+        return safeBrowserToolCall(() => options.browserService!.uploadFile({
+          selector,
+          fileName: asset.path.split('/').pop() ?? asset.path,
+          bytes: asset.bytes,
+        }));
       },
     }),
     read_project_memory: createTool({
@@ -1176,6 +1336,8 @@ export function createWorkspaceTools(
         path: z.string().min(1).describe('工作区中的文件路径，可通过 list_workspace_entries 查看可用文件'),
       }),
       execute: async ({ path: filePath }) => {
+        const sidecarError = rejectDocumentAnnotationSidecarPath(filePath);
+        if (sidecarError) return sidecarError;
         const asset = await store.readWorkspaceFileBytes(projectId, filePath);
         await wechat.sendFile({
           bytes: asset.bytes,
@@ -1751,6 +1913,19 @@ function normalizeSearchText(value: string): string {
   return value.toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ').trim();
 }
 
+function isDocumentAnnotationSidecarPath(filePath: string): boolean {
+  try {
+    return isDocumentAnnotationPath(filePath);
+  } catch {
+    return false;
+  }
+}
+
+function rejectDocumentAnnotationSidecarPath(filePath: string): { error: string } | null {
+  return isDocumentAnnotationSidecarPath(filePath)
+    ? { error: 'Markdown 批注 sidecar 是内部存储文件；请使用 list_document_annotations/read_document_annotations/update_document_annotation_status/clear_document_annotations。' }
+    : null;
+}
 async function workspaceFileExists(store: WorkspaceStore, projectId: string, filePath: string): Promise<boolean> {
   try {
     await store.readWorkspaceFile(projectId, filePath);
@@ -1823,6 +1998,7 @@ export async function createAgentRegistry(
     model?: string;
     baseUrl?: string;
     apiKey?: string;
+    chatEndpoint?: RuntimeChatEndpoint;
     connectionString?: string;
     traceId?: string;
     productProfile?: ProductProfile;
@@ -1830,8 +2006,17 @@ export async function createAgentRegistry(
   },
   tools: ReturnType<typeof createWorkspaceTools>,
 ): Promise<AgentRegistry> {
+  const registryStartedAt = Date.now();
   const modelConfig = buildModelConfig(options);
+  const memoryStartedAt = Date.now();
   const { checkpointer, store: memoryStore } = await getLangGraphMemoryBackend();
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'langgraph-registry',
+    stage: 'memory.ready',
+    traceId: options.traceId,
+    productId: options.productProfile?.id,
+    durationMs: Date.now() - memoryStartedAt,
+  });
   const layerSpecialists = options.layerConfig?.specialists.filter((specialist) => specialist.defaultEnabled) ?? [];
   const enabledAgentIds = new Set(
     layerSpecialists.length > 0
@@ -1854,7 +2039,7 @@ export async function createAgentRegistry(
     ]);
     if (!instructions) return null;
 
-    const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
+    const agentInstructions = [instructions, AGENT_MEMORY_TOOL_PROTOCOL, AGENT_DOCUMENT_ANNOTATION_TOOL_PROTOCOL].join('\n\n');
     return createLangGraphAgentClient({
       id: def.id,
       name: def.name,
@@ -1866,13 +2051,23 @@ export async function createAgentRegistry(
     });
   };
 
-  const [brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, outline, knowledgeSearch, knowledgeOrganizer] = await Promise.all(
-    AGENT_DEFS.map(createAgentWithSkill),
+  const agentEntries = await Promise.all(
+    AGENT_DEFS.map(async (def) => [def.id, await createAgentWithSkill(def)] as const),
   );
+  const agentById = new Map(agentEntries);
+  appendJsonLog('api-runs.jsonl', {
+    scope: 'langgraph-registry',
+    stage: 'specialists.ready',
+    traceId: options.traceId,
+    productId: options.productProfile?.id,
+    enabledAgentIds: [...enabledAgentIds],
+    loadedAgentIds: [...agentById.entries()].filter(([, agent]) => Boolean(agent)).map(([agentId]) => agentId),
+    durationMs: Date.now() - registryStartedAt,
+  });
 
   const createSystemAgent = async (instructions: string, toolsOverride?: LangGraphToolset): Promise<LangGraphAgentClient> => {
     const configuredInstructions = options.layerConfig?.systemAgent.instructionOverride?.trim() || instructions;
-    const agentInstructions = [configuredInstructions, AGENT_MEMORY_TOOL_PROTOCOL].join('\n\n');
+    const agentInstructions = [configuredInstructions, AGENT_MEMORY_TOOL_PROTOCOL, AGENT_DOCUMENT_ANNOTATION_TOOL_PROTOCOL].join('\n\n');
     return createLangGraphAgentClient({
       id: 'viforge-system-agent',
       name: 'viforge 系统调度',
@@ -1884,7 +2079,23 @@ export async function createAgentRegistry(
     });
   };
 
-  return { brainstorm, character, continuity, story, sourceAnalyst, adaptationPlanner, screenwriter, reviewer, outline, knowledgeSearch, knowledgeOrganizer, systemAgent: createSystemAgent };
+  return {
+    brainstorm: agentById.get('brainstorm-agent') ?? null,
+    blogWriting: agentById.get('blog-writing-agent') ?? null,
+    research: agentById.get('research-agent') ?? null,
+    publisher: agentById.get('publisher-agent') ?? null,
+    character: agentById.get('character-agent') ?? null,
+    continuity: agentById.get('continuity-agent') ?? null,
+    story: agentById.get('story-agent') ?? null,
+    sourceAnalyst: agentById.get('source-analyst-agent') ?? null,
+    adaptationPlanner: agentById.get('adaptation-planner-agent') ?? null,
+    screenwriter: agentById.get('screenwriter-agent') ?? null,
+    reviewer: agentById.get('reviewer-agent') ?? null,
+    outline: agentById.get('outline-agent') ?? null,
+    knowledgeSearch: agentById.get('knowledge-search-agent') ?? null,
+    knowledgeOrganizer: agentById.get('knowledge-organizer-agent') ?? null,
+    systemAgent: createSystemAgent,
+  };
 }
 
 async function loadSkillInstructions(store: WorkspaceStore, agentId: string, productProfile?: ProductProfile): Promise<string> {
@@ -1924,8 +2135,9 @@ export function buildModelConfig(options: {
   model?: string;
   baseUrl?: string;
   apiKey?: string;
+  chatEndpoint?: RuntimeChatEndpoint;
   traceId?: string;
-}): { model: string; baseUrl: string; apiKey: string; headers: Record<string, string> } {
+}): { model: string; baseUrl: string; apiKey: string; chatEndpoint: RuntimeChatEndpoint; headers: Record<string, string> } {
   const rawId = options.model
     || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL
     || process.env.AIGC_HUB_CHAT_MODEL
@@ -1953,14 +2165,19 @@ export function buildModelConfig(options: {
     model: rawId,
     baseUrl,
     apiKey,
+    chatEndpoint: normalizeChatEndpoint(options.chatEndpoint || process.env.VIFORGE_AIGC_HUB_CHAT_ENDPOINT),
     headers: buildAigcHubHeaders({ traceId: options.traceId }),
   };
 }
 
+function normalizeChatEndpoint(value: unknown): RuntimeChatEndpoint {
+  return value === 'chat_completions' ? 'chat_completions' : 'responses';
+}
 function createChatModel(config: ReturnType<typeof buildModelConfig>): ChatOpenAI {
   return new ChatOpenAI({
     model: config.model,
     apiKey: config.apiKey || 'missing-api-key',
+    useResponsesApi: config.chatEndpoint === 'responses',
     configuration: {
       baseURL: trimTrailingSlashes(config.baseUrl),
       defaultHeaders: config.headers,
@@ -2148,4 +2365,3 @@ async function safeBrowserToolCall(execute: () => Promise<unknown>): Promise<unk
     };
   }
 }
-

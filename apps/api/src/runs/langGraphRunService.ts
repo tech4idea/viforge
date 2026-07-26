@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viforge/shared';
+import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type RuntimeChatEndpoint, type StreamEvent, type WorkspaceEntry } from '@viforge/shared';
 import { z } from 'zod';
 
 import { LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
@@ -29,9 +29,10 @@ type LangGraphRunOptions = {
     instructions: string;
     tools: ReturnType<typeof createWorkspaceTools>;
   }) => LangGraphAgentClient;
+  chatEndpoint?: RuntimeChatEndpoint;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string; productProfile?: ProductProfile; layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] },
+    context: { model?: string; baseUrl?: string; apiKey?: string; chatEndpoint?: RuntimeChatEndpoint; connectionString?: string; traceId?: string; productProfile?: ProductProfile; layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
@@ -63,6 +64,9 @@ type IsolatedWorkspaceStoreOptions = {
 
 const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'brainstorm-agent': '脑暴',
+  'blog-writing-agent': '博客写作',
+  'research-agent': '资料核查',
+  'publisher-agent': '平台草稿',
   'character-agent': '人物设定',
   'continuity-agent': '连续性检查',
   'story-agent': '故事创作',
@@ -236,13 +240,15 @@ async function executeLangGraphRun({
   const emittedAt = () => new Date().toISOString();
   let releaseMemoryRun: (() => void) | undefined;
   const publish = (event: StreamEvent) => {
-    appendJsonLog('api-runs.jsonl', {
-      scope: 'langgraph-run',
-      stage: 'stream.publish',
-      runId,
-      projectId: input.projectId,
-      event,
-    });
+    if (shouldLogStreamPublishEvent(event)) {
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'langgraph-run',
+        stage: 'stream.publish',
+        runId,
+        projectId: input.projectId,
+        event,
+      });
+    }
     void options.harnessStore?.recordRunArtifactEvent({
       runId,
       projectId: input.projectId,
@@ -347,20 +353,18 @@ async function executeLangGraphRun({
       publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
     }
   } catch (error) {
-    const modelNotFound = isModelNotFoundError(error);
-    
+    const modelServiceError = modelServiceErrorDetails(error);
+
     appendJsonLog('api-runs.jsonl', {
       scope: 'langgraph-run',
       stage: 'execute.error',
       runId,
       projectId: input.projectId,
       error,
-      modelNotFound,
+      modelServiceError,
     });
 
-    const errorMessage = modelNotFound
-      ? `模型 ${input.model || '当前'} 不可用，请更换模型或联系管理员。网关返回：模型未找到。`
-      : (error instanceof Error ? error.message : 'Run failed');
+    const errorMessage = userFacingModelServiceError(error, input.model);
 
     publish({
       type: 'run.end',
@@ -374,6 +378,10 @@ async function executeLangGraphRun({
   }
 }
 
+function shouldLogStreamPublishEvent(event: StreamEvent): boolean {
+  if (process.env.VIFORGE_RUN_VERBOSE_LOGS === '1') return true;
+  return event.type !== 'text.delta' && event.type !== 'thinking.delta' && event.type !== 'tool_use.delta';
+}
 function resolveRunModelParams(model: string | undefined): RunArtifact['modelParams'] {
   return {
     model,
@@ -472,11 +480,14 @@ function createSpecialistDelegationTool({
     description: [
       '将明确需要专业创作能力的子任务交给一个 viforge specialist agent。',
       '普通问候、解释、简单修改、文件读写和一般对话不要使用此工具，由主 agent 直接完成。',
-      '只有在任务明确属于脑暴、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作、学习大纲、知识点搜索、知识点整理或审稿复盘时才委派。',
+      '只有在任务明确属于脑暴、博客写作、资料核查、平台草稿、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作、学习大纲、知识点搜索、知识点整理或审稿复盘时才委派。',
     ].join('\n'),
     inputSchema: z.object({
       agentId: z.enum([
         'brainstorm-agent',
+        'blog-writing-agent',
+        'research-agent',
+        'publisher-agent',
         'character-agent',
         'continuity-agent',
         'story-agent',
@@ -746,6 +757,9 @@ async function runAgentGenerate(
 function getSpecialistAgent(registry: AgentRegistry, agentId: string): LangGraphAgentClient | null {
   switch (agentId) {
     case 'brainstorm-agent': return registry.brainstorm;
+    case 'blog-writing-agent': return registry.blogWriting;
+    case 'research-agent': return registry.research;
+    case 'publisher-agent': return registry.publisher;
     case 'character-agent': return registry.character;
     case 'continuity-agent': return registry.continuity;
     case 'story-agent': return registry.story;
@@ -1081,10 +1095,10 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '调用 create_scheduled_task 前必须确认有明确的 nextRunAt、频率和执行时内容生成要求；缺少时间或生成要求时先追问。',
     '创建定时任务后，用简短文字告诉用户任务标题、下次执行时间和执行时会实时生成微信内容。',
     'send_wechat_message 只用于当前 run 立即发送微信文本，不用于创建未来或周期性发送任务。',
-    '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点或整理在线资料时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
+    '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点、整理在线资料或生成平台草稿时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
     '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
-    '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',
-    '涉及登录、提交、购买、删除、发布、授权、付款或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
+    '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取；上传封面图、文中图或工作区文件时使用 browser_upload_file。',
+    '涉及登录、提交、购买、删除、发布、授权、付款、文件上传、保存草稿或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
     '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 playwriter serve。不要假装已访问网页。',
     '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
     '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
@@ -1092,12 +1106,12 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
     '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
     '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
-    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、outline-agent、knowledge-search-agent、knowledge-organizer-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
+    '可委派的 specialist agent：brainstorm-agent、blog-writing-agent、research-agent、publisher-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、outline-agent、knowledge-search-agent、knowledge-organizer-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
     '如果用户只是要求”帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
     '在情景剧故事创作中，如果人物动机、角色关系或角色行为边界不清，先委派 character-agent；如果涉及多集历史、固定设定或上一集状态，先委派 continuity-agent。',
-    '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿/生成学习大纲/搜索知识点/整理资料”，再委派给对应 specialist。',
+    '如果用户明确要求”脑暴方向/写博客文章/润色正文/核查资料/生成平台草稿/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿/生成学习大纲/搜索知识点/整理资料”，再委派给对应 specialist。',
   ];
 
   const localBase = base.join('\n\n');
@@ -1398,17 +1412,89 @@ function inferEvalMimeType(filePath: string): string {
   return 'application/octet-stream';
 }
 
-function isModelNotFoundError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const err = error as Record<string, unknown>;
-  if (err.statusCode === 404) return true;
-  if (typeof err.responseBody === 'string' && err.responseBody.includes('model_not_found')) return true;
-  const data = err.data as Record<string, unknown> | undefined;
-  if (data?.error && typeof data.error === 'object') {
-    const errObj = data.error as Record<string, unknown>;
-    if (errObj.code === 'model_not_found') return true;
+type ModelServiceErrorDetails = {
+  status?: number;
+  code?: string;
+  message?: string;
+  providerMessage?: string;
+  responseBody?: string;
+};
+
+function userFacingModelServiceError(error: unknown, _model: string | undefined): string {
+  const details = modelServiceErrorDetails(error);
+
+  if (isModelNotFoundError(error)) {
+    return '模型调用失败：模型不存在或不可用。';
   }
-  return false;
+
+  if (details.status === 401) {
+    return '模型调用失败：认证失败（401）。';
+  }
+
+  if (details.status === 403) {
+    return '模型调用失败：权限不足或账户无权访问该模型（403）。';
+  }
+
+  if (details.status === 429) {
+    return '模型调用失败：限流或额度不足（429）。';
+  }
+
+  if (details.status === 400) {
+    return '模型调用失败：请求参数无效或上下文过长（400）。';
+  }
+
+  if (details.status && details.status >= 500) {
+    return `模型调用失败：模型服务异常（${details.status}）。`;
+  }
+
+  if (isLikelyModelNetworkError(details.message)) {
+    return '模型调用失败：连接超时或网络不可达。';
+  }
+
+  return `模型调用失败：${details.providerMessage ?? details.message ?? '未知错误'}`;
+}
+
+function isModelNotFoundError(error: unknown): boolean {
+  const details = modelServiceErrorDetails(error);
+  return details.status === 404
+    || details.code === 'model_not_found'
+    || details.responseBody?.includes('model_not_found') === true;
+}
+
+function modelServiceErrorDetails(error: unknown): ModelServiceErrorDetails {
+  const err = isRecord(error) ? error : undefined;
+  const data = isRecord(err?.data) ? err.data : undefined;
+  const nestedError = isRecord(err?.error) ? err.error : isRecord(data?.error) ? data.error : undefined;
+  const response = isRecord(err?.response) ? err.response : undefined;
+
+  return {
+    status: numberValue(err?.statusCode) ?? numberValue(err?.status) ?? numberValue(response?.status) ?? statusFromMessage(error instanceof Error ? error.message : stringValue(error)),
+    code: stringValue(err?.code) ?? stringValue(nestedError?.code),
+    message: error instanceof Error ? error.message : stringValue(error),
+    providerMessage: stringValue(nestedError?.message),
+    responseBody: stringValue(err?.responseBody) ?? stringValue(err?.body),
+  };
+}
+
+function isLikelyModelNetworkError(message: string | undefined): boolean {
+  return Boolean(message && /(timeout|timed out|abort|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network)/i.test(message));
+}
+
+function statusFromMessage(message: string | undefined): number | undefined {
+  const status = message?.match(/\b(400|401|403|404|429|5\d{2})\b/)?.[1];
+  return status ? Number(status) : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 export const __langGraphRunServiceTest = {

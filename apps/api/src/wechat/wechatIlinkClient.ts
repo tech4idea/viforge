@@ -38,6 +38,146 @@ const ILINK_BASE = 'https://ilinkai.weixin.qq.com';
 const CDN_BASE = 'https://novac2c.cdn.weixin.qq.com/c2c';
 const AES_BLOCK_SIZE = 16;
 
+async function fetchIlink(url: URL, init: RequestInit, resourcePath: string): Promise<Response> {
+  try {
+    return await fetch(url.toString(), init);
+  } catch (error) {
+    throw new Error(`ilink ${resourcePath} fetch failed at ${safeIlinkUrl(url)}: ${describeFetchFailure(error)}`);
+  }
+}
+
+function normalizeIlinkBaseUrl(value?: string | null): string {
+  const trimmed = value?.trim().replace(/\/+$/, '');
+  return trimmed || ILINK_BASE;
+}
+
+function safeIlinkUrl(url: URL): string {
+  return `${url.origin}${url.pathname}`;
+}
+
+function describeFetchFailure(error: unknown): string {
+  const parts: string[] = [];
+  if (error instanceof Error && error.message) parts.push(error.message);
+  else parts.push(String(error));
+
+  const cause = error && typeof error === 'object' && 'cause' in error ? (error as { cause?: unknown }).cause : undefined;
+  if (cause && typeof cause === 'object') {
+    const record = cause as Record<string, unknown>;
+    const causeParts = [
+      stringField(record.code),
+      stringField(record.syscall),
+      stringField(record.hostname) ?? stringField(record.host),
+      stringField(record.address),
+      numberField(record.port),
+      stringField(record.message),
+    ].filter(Boolean);
+    if (causeParts.length > 0) parts.push(`cause=${causeParts.join(' ')}`);
+  } else if (cause) {
+    parts.push(`cause=${String(cause)}`);
+  }
+
+  return parts.join('; ');
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberField(value: unknown): string | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function firstArrayField(record: Record<string, unknown>, keys: string[]): unknown[] {
+  for (const key of keys) {
+    const value = arrayValue(record[key]);
+    if (value.length > 0) return value;
+  }
+  return [];
+}
+
+function extractIlinkMessages(data: Record<string, unknown>): Record<string, unknown>[] {
+  const candidates = [
+    firstArrayField(data, ['msgs', 'messages', 'msg_list', 'message_list', 'updates', 'update_list']),
+  ];
+  const nested = asRecord(data.data) ?? asRecord(data.result);
+  if (nested) {
+    candidates.push(firstArrayField(nested, ['msgs', 'messages', 'msg_list', 'message_list', 'updates', 'update_list']));
+  }
+  return candidates.flat().map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+function extractIlinkText(message: Record<string, unknown>): string {
+  const direct = stringValue(message.text) ?? stringValue(message.content);
+  if (direct) return direct;
+
+  const content = asRecord(message.content);
+  const contentText = content ? stringValue(content.text) ?? stringValue(content.content) : undefined;
+  if (contentText) return contentText;
+
+  for (const item of arrayValue(message.item_list ?? message.items)) {
+    const itemRecord = asRecord(item);
+    if (!itemRecord) continue;
+    const textItem = asRecord(itemRecord.text_item) ?? asRecord(itemRecord.textItem);
+    const text = stringValue(textItem?.text) ?? stringValue(textItem?.content) ?? stringValue(itemRecord.text) ?? stringValue(itemRecord.content);
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function summarizeMessageTypes(messages: Record<string, unknown>[]): string[] {
+  const counts = new Map<string, number>();
+  for (const message of messages) {
+    const type = numberValue(message.message_type ?? message.msg_type ?? message.type);
+    const key = type === undefined ? 'unknown' : String(type);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([type, count]) => `${type}:${count}`);
+}
+
+function summarizeIlinkMessage(message: Record<string, unknown>): Record<string, unknown> {
+  return {
+    messageId: stringValue(message.msg_id) ?? stringValue(message.message_id) ?? stringValue(message.id) ?? null,
+    fromUserId: stringValue(message.from_user_id) ?? stringValue(message.fromUserId) ?? null,
+    messageType: numberValue(message.message_type ?? message.msg_type ?? message.type) ?? null,
+    itemTypes: arrayValue(message.item_list ?? message.items)
+      .map((item) => asRecord(item))
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+      .map((item) => numberValue(item.type) ?? 'unknown'),
+    textLength: extractIlinkText(message).length,
+    hasContextToken: Boolean(stringValue(message.context_token) ?? stringValue(message.contextToken)),
+  };
+}
+
+function arrayKeys(record: Record<string, unknown>): string[] {
+  const keys = Object.entries(record).filter(([, value]) => Array.isArray(value)).map(([key]) => key);
+  const nested = asRecord(record.data) ?? asRecord(record.result);
+  if (nested) {
+    keys.push(...Object.entries(nested).filter(([, value]) => Array.isArray(value)).map(([key]) => `nested.${key}`));
+  }
+  return keys;
+}
 function randomUint32(): number {
   return randomBytes(4).readUInt32BE(0) >>> 0;
 }
@@ -107,7 +247,7 @@ function ilinkMediaType(mimeType: string): number {
 
 export type WechatIlinkClient = {
   getQrCode(): Promise<{ qrcode: string; scanUrl: string }>;
-  setBotToken(botToken: string): void;
+  setBotToken(botToken: string, baseUrl?: string | null): void;
   checkQrCodeStatus(qrcode: string): Promise<{
     status: 'pending' | 'confirmed' | 'expired';
     botToken?: string;
@@ -122,32 +262,31 @@ export type WechatIlinkClient = {
   downloadMedia?(input: WechatIlinkMediaRef): Promise<{ bytes: Buffer; mimeType: string; name: string }>;
 };
 
-export function createWechatIlinkClient(storedBotToken?: string | null): WechatIlinkClient {
+export function createWechatIlinkClient(storedBotToken?: string | null, storedBaseUrl?: string | null): WechatIlinkClient {
   let session: WechatBotSession | null = storedBotToken
-    ? { botToken: storedBotToken, baseUrl: ILINK_BASE }
+    ? { botToken: storedBotToken, baseUrl: normalizeIlinkBaseUrl(storedBaseUrl) }
     : null;
 
-  async function apiGet<T>(resourcePath: string, params?: Record<string, string>, token?: string): Promise<T> {
-    const url = new URL(resourcePath, ILINK_BASE);
+  async function apiGet<T>(resourcePath: string, params?: Record<string, string>, token?: string, baseUrl = ILINK_BASE): Promise<T> {
+    const url = new URL(resourcePath.replace(/^\/+/, ''), `${normalizeIlinkBaseUrl(baseUrl)}/`);
     if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    const response = await fetch(url.toString(), { headers: authHeaders(token) });
+    const response = await fetchIlink(url, { headers: authHeaders(token) }, resourcePath);
     if (!response.ok) throw new Error(`ilink ${resourcePath} ${response.status}`);
     return response.json() as T;
   }
 
-  async function apiPost<T>(resourcePath: string, body: unknown, token?: string): Promise<T> {
-    const url = new URL(resourcePath.replace(/^\/+/, ''), `${ILINK_BASE}/`);
-    const response = await fetch(url.toString(), {
+  async function apiPost<T>(resourcePath: string, body: unknown, token?: string, baseUrl = ILINK_BASE): Promise<T> {
+    const url = new URL(resourcePath.replace(/^\/+/, ''), `${normalizeIlinkBaseUrl(baseUrl)}/`);
+    const response = await fetchIlink(url, {
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify(body),
-    });
+    }, resourcePath);
     const rawText = await response.text();
     if (!response.ok) throw new Error(`ilink ${resourcePath} ${response.status}: ${rawText.slice(0, 200)}`);
     if (!rawText.trim()) return {} as T;
     return JSON.parse(rawText) as T;
   }
-
   async function uploadEncryptedMedia(
     toUserId: string,
     bytes: Buffer,
@@ -173,7 +312,7 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
       filesize: fileSize,
       no_need_thumb: true,
       aeskey: aesKey.toString('hex'),
-    }, session.botToken);
+    }, session.botToken, session.baseUrl);
 
     if (uploadResponse.ret !== undefined && uploadResponse.ret !== 0) {
       throw new Error(`ilink getuploadurl ret ${uploadResponse.ret}${uploadResponse.errmsg ? `: ${uploadResponse.errmsg}` : ''}`);
@@ -191,14 +330,14 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
     const maxRetries = 3;
     let downloadParam: string | undefined;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const uploadResult = await fetch(cdnUploadUrl, {
+      const uploadResult = await fetchIlink(new URL(cdnUploadUrl), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
           'Content-Length': String(encryptedBytes.length),
         },
         body: new Uint8Array(encryptedBytes),
-      });
+      }, '/ilink/cdn/upload');
 
       if (uploadResult.status >= 400 && uploadResult.status < 500) {
         const errMsg = uploadResult.headers.get('x-error-message') ?? await uploadResult.text().catch(() => '');
@@ -225,8 +364,8 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
   }
 
   return {
-    setBotToken(botToken) {
-      session = { botToken, baseUrl: ILINK_BASE };
+    setBotToken(botToken, baseUrl) {
+      session = { botToken, baseUrl: normalizeIlinkBaseUrl(baseUrl) };
     },
 
     async getQrCode() {
@@ -248,12 +387,12 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
       }>('/ilink/bot/get_qrcode_status', { qrcode });
 
       if (data.status === 'confirmed' && data.bot_token) {
-        session = { botToken: data.bot_token, baseUrl: data.baseurl ?? ILINK_BASE };
-        console.info('[ilink] QR confirmed', { baseUrl: data.baseurl ?? ILINK_BASE, userId: data.user_id, displayName: data.nick_name });
+        session = { botToken: data.bot_token, baseUrl: normalizeIlinkBaseUrl(data.baseurl) };
+        console.info('[ilink] QR confirmed', { baseUrl: session.baseUrl, userId: data.user_id, displayName: data.nick_name });
         return {
           status: 'confirmed' as const,
           botToken: data.bot_token,
-          baseUrl: data.baseurl ?? ILINK_BASE,
+          baseUrl: session.baseUrl,
           displayName: data.nick_name,
           externalUserId: data.user_id ?? `ilink:${qrcode}`,
         };
@@ -267,42 +406,71 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
 
     async getUpdates(cursor) {
       if (!session) throw new Error('Not connected');
-      const data = await apiPost<{
-        ret?: number;
-        msgs: Array<{
-          msg_id?: string;
-          from_user_id: string;
-          to_user_id: string;
-          message_type: number;
-          context_token: string;
-          item_list: Array<{ type: number; text_item?: { text: string } }>;
-        }>;
-        get_updates_buf: string;
-        longpolling_timeout_ms: number;
-      }>('/ilink/bot/getupdates', {
+      const data = await apiPost<Record<string, unknown>>('/ilink/bot/getupdates', {
         get_updates_buf: cursor || '',
         base_info: { channel_version: '1.0.2' },
-      }, session.botToken);
+      }, session.botToken, session.baseUrl);
 
-      if (data.ret !== undefined && data.ret !== 0) {
-        throw new Error(`ilink getupdates ret ${data.ret}`);
+      const ret = numberValue(data.ret);
+      if (ret !== undefined && ret !== 0) {
+        throw new Error(`ilink getupdates ret ${ret}`);
       }
 
-      const updates: WechatIlinkUpdate[] = (data.msgs ?? [])
-        .filter((message) => message.message_type === 1)
-        .map((message, index) => ({
-          updateId: `${cursor}-${index}`,
-          messageId: message.msg_id,
-          fromUserId: message.from_user_id,
-          fromDisplayName: message.from_user_id.split('@')[0] ?? '微信用户',
-          text: message.item_list?.[0]?.text_item?.text ?? '',
-          contextToken: message.context_token,
-          messageType: 1 as const,
-          itemList: message.item_list,
-          timestamp: new Date().toISOString(),
-        }));
+      const rawMessages = extractIlinkMessages(data);
+      const nextCursor = stringValue(data.get_updates_buf) ?? stringValue(data.cursor) ?? cursor;
+      const skipped: Record<string, unknown>[] = [];
+      const updates: WechatIlinkUpdate[] = [];
 
-      return { cursor: data.get_updates_buf ?? cursor, updates };
+      rawMessages.forEach((message, index) => {
+        const text = extractIlinkText(message);
+        const fromUserId = stringValue(message.from_user_id) ?? stringValue(message.fromUserId) ?? stringValue(message.sender) ?? '';
+        if (!fromUserId || !text.trim()) {
+          skipped.push(message);
+          return;
+        }
+
+        const messageId = stringValue(message.msg_id) ?? stringValue(message.message_id) ?? stringValue(message.id);
+        const messageType = numberValue(message.message_type ?? message.msg_type ?? message.type) ?? 1;
+        updates.push({
+          updateId: messageId ?? `${nextCursor || cursor || 'ilink'}-${index}`,
+          messageId,
+          fromUserId,
+          fromDisplayName: fromUserId.split('@')[0] ?? '微信用户',
+          text,
+          contextToken: stringValue(message.context_token) ?? stringValue(message.contextToken) ?? '',
+          messageType: (messageType >= 1 && messageType <= 5 ? messageType : 1) as WechatIlinkUpdate['messageType'],
+          itemList: arrayValue(message.item_list ?? message.items) as WechatIlinkUpdate['itemList'],
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      if (rawMessages.length > 0) {
+        console.info('[ilink] getupdates parsed', {
+          rawCount: rawMessages.length,
+          textCount: updates.length,
+          skippedCount: skipped.length,
+          messageTypes: summarizeMessageTypes(rawMessages),
+          previousCursor: cursor || '',
+          nextCursor,
+        });
+      }
+
+      if (skipped.length > 0) {
+        console.warn('[ilink] getupdates skipped messages', {
+          skippedCount: skipped.length,
+          samples: skipped.slice(0, 3).map(summarizeIlinkMessage),
+        });
+      }
+
+      const keysWithArrays = arrayKeys(data);
+      if (rawMessages.length === 0 && keysWithArrays.length > 0) {
+        console.warn('[ilink] getupdates response had unrecognized message arrays', {
+          topLevelKeys: Object.keys(data),
+          arrayKeys: keysWithArrays,
+        });
+      }
+
+      return { cursor: nextCursor, updates };
     },
 
     async sendText({ to, text, contextToken }) {
@@ -318,7 +486,7 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
           item_list: [{ type: 1, text_item: { text } }],
           context_token: contextToken,
         },
-      }, session.botToken);
+      }, session.botToken, session.baseUrl);
     },
 
     async sendImage({ to, bytes, name, mimeType, contextToken }) {
@@ -348,7 +516,7 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
           }],
           context_token: contextToken,
         },
-      }, session.botToken);
+      }, session.botToken, session.baseUrl);
 
       console.info('[ilink] sendimage sent', { to, name: fileName, byteLength: bytes.length });
     },
@@ -393,13 +561,13 @@ export function createWechatIlinkClient(storedBotToken?: string | null): WechatI
           item_list: [item],
           context_token: contextToken,
         },
-      }, session.botToken);
+      }, session.botToken, session.baseUrl);
 
       console.info('[ilink] sendfile sent', { to, name: fileName, mediaType, byteLength: bytes.length });
     },
 
     async downloadMedia({ cdnUrl, aesKey, mimeType, name }) {
-      const response = await fetch(cdnUrl);
+      const response = await fetchIlink(new URL(cdnUrl), {}, '/ilink/cdn/download');
       if (!response.ok) throw new Error(`ilink media download failed ${response.status}`);
       const encrypted = Buffer.from(await response.arrayBuffer());
       const key = Buffer.from(aesKey, 'base64');

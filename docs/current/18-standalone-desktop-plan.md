@@ -5,6 +5,7 @@
 ## 产品形态
 
 - 桌面端使用 Electron，安装包内置 Chromium 与 Node runtime，用户不需要预装 Node。
+- 桌面端内置 portable Git runtime，主进程启动 API 时注入 `VIFORGE_GIT_BIN`；版本管理功能不依赖用户本机是否安装 Git。
 - Windows 安装包允许用户选择安装路径，并在安装向导中强制选择数据路径。升级安装时只读取 `HKCU\\Software\\ViForge\\InstallLocation` 和 `HKCU\\Software\\ViForge\\DataRoot`。
 - Windows 安装包不会在结束页自动启动 ViForge，主程序 manifest 使用调用方权限启动。内置 PostgreSQL 通过 `pg_ctl start` 托管，兼容 Administrator 账户启动场景；ViForge 完全退出时会主动 `pg_ctl stop` 回收本次数据目录对应的 PostgreSQL 进程。
 - Electron 主进程启动本地 API 服务，再用内置 WebView 窗口加载 `http://127.0.0.1:<local-port>`。默认优先使用 `3001`，如端口被占用会在后续端口中寻找可用端口。
@@ -82,6 +83,20 @@ VIFORGE_POSTGRES_BUNDLE_SOURCE=/path/to/postgresql-root pnpm desktop:dist
 
 交叉打包时可用 `VIFORGE_POSTGRES_PLATFORM_ARCH=win32-x64` 指定要检查或复制的目标平台目录。
 
+Git binary 也不提交到仓库。打包前应把 portable Git 根目录放到：
+
+```text
+apps/desktop/resources/git/<platform>-<arch>/
+```
+
+Windows x64 至少需要：
+
+```text
+apps/desktop/resources/git/win32-x64/bin/git.exe
+```
+
+也可以用 `VIFORGE_GIT_BUNDLE_SOURCE` 指向外部 portable Git 根目录，`prepare:git` 会复制到目标资源目录。桌面主进程运行时会把 `VIFORGE_GIT_BIN` 指向 `resources/git/<platform>-<arch>/bin/git(.exe)`；API 直连开发模式可用 `VIFORGE_GIT_BIN` / `GIT_BIN` 覆盖，未覆盖时才回退到 `PATH` 里的 `git`。
+
 Linux 本机打包时，`prepare:postgres` 还会用 `ldd` 检查 bundled PostgreSQL binary 是否缺少动态库，避免安装包生成后才在用户机器上启动失败。资源包必须自带 PostgreSQL 运行所需的 `libpq`、ICU 等依赖库，或来自一个已经整理好的可重定位 PostgreSQL distribution。若 source 目录只有 PostgreSQL 自身的 `bin/lib/share`，可额外设置 `VIFORGE_POSTGRES_BUNDLE_LIB_SOURCE=/path/to/runtime-libs`，脚本会从该目录补齐缺失的 Linux 动态库。
 
 ## 运行设置
@@ -119,5 +134,5 @@ pnpm desktop:dist
 ## 当前边界
 
 - 已保留 Docker Compose 和普通 Web/API 开发模式；桌面模式通过 `VIFORGE_DESKTOP=1` 和 `VIFORGE_STATIC_WEB_ROOT` 启用。
-- 内置 PostgreSQL binary 的下载、校验和多平台资源准备还需要单独做 release 脚本。
+- 内置 PostgreSQL 和 portable Git binary 的下载、校验和多平台资源准备还需要单独做 release 脚本。
 - 数据迁移工具暂不纳入本阶段；后续可围绕 `runtime-config.json` 和 PostgreSQL dump/restore 做专门工具。

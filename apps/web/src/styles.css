@@ -981,7 +981,54 @@ body.is-resizing-panels .panel-resizer::after {
   outline: none;
 }
 
-.markdown-editor-viewer--source .markdown-source-editor { border-right: 0; }
+.markdown-source-annotation-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.markdown-source-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 16px 18px 24px;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: transparent;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.markdown-source-annotation-layer .annotation-highlight {
+  color: transparent;
+}
+
+.markdown-source-annotation-marker-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.markdown-source-annotation-marker-layer .annotation-line-marker {
+  position: absolute;
+  left: 4px;
+  pointer-events: auto;
+}
+
+.markdown-editor-viewer--source .markdown-source-editor {
+  position: relative;
+  z-index: 1;
+  border-right: 0;
+  background: transparent;
+}
 
 .markdown-rich-scroll {
   flex: 1;
@@ -1721,7 +1768,7 @@ body.is-resizing-panels .panel-resizer::after {
 }
 
 .scheduled-task-card + .scheduled-task-card { margin-top: 6px; }
-.scheduled-task-card.error { border-color: var(--danger); }
+.scheduled-task-card.error { border-color: var(--danger-text); }
 .scheduled-task-card.paused, .scheduled-task-card.cancelled, .scheduled-task-card.completed { opacity: 0.74; }
 
 .chat-schedule-card-list {
@@ -1863,7 +1910,7 @@ body.is-resizing-panels .panel-resizer::after {
 
 .scheduled-task-icon.danger:hover:not(:disabled) {
   color: var(--danger-text);
-  border-color: var(--danger);
+  border-color: var(--danger-text);
 }
 
 .scheduled-task-icon:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -2385,6 +2432,197 @@ body.is-resizing-panels .panel-resizer::after {
 
 /* ─── Composer ─── */
 
+.annotation-composer-bridge {
+  flex-shrink: 0;
+  margin: 0 10px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.annotation-composer-bridge__summary {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.annotation-composer-bridge__summary span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.annotation-composer-bridge__summary strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--warning-text);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-composer-bridge__summary small {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.annotation-composer-bridge__summary svg {
+  transition: transform var(--t-fast);
+}
+
+.annotation-composer-bridge.is-open .annotation-composer-bridge__summary svg {
+  transform: rotate(180deg);
+}
+
+.annotation-composer-bridge__panel {
+  display: grid;
+  gap: 6px;
+  padding: 0 8px 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.annotation-composer-bridge__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+.annotation-composer-bridge__actions button {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.annotation-composer-bridge__list {
+  display: grid;
+  gap: 5px;
+  max-height: 138px;
+  overflow: auto;
+}
+
+.annotation-composer-bridge__item {
+  display: grid;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+
+.annotation-composer-bridge__item-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+
+.annotation-composer-bridge__file {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.annotation-composer-bridge__file span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-composer-bridge__meta {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.annotation-composer-bridge__error {
+  margin: 6px 0 0;
+  color: var(--danger-text);
+  font-size: 0.74rem;
+}
+.annotation-composer-bridge__details {
+  display: grid;
+  gap: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-color);
+}
+
+.annotation-composer-bridge__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.annotation-composer-bridge__annotation {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-solid);
+}
+
+.annotation-composer-bridge__annotation--stale {
+  border-color: color-mix(in srgb, var(--danger-text) 42%, var(--border-color));
+}
+
+.annotation-composer-bridge__annotation-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.annotation-composer-bridge__annotation blockquote {
+  max-height: 4.8rem;
+  overflow: auto;
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-color-strong);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.annotation-composer-bridge__annotation p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.annotation-composer-bridge__annotation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
 .composer {
   display: flex;
   flex-direction: column;
@@ -2963,7 +3201,7 @@ body.is-resizing-panels .panel-resizer::after {
 .runtime-settings-grid input[type='checkbox'] { width: auto; justify-self: start; padding: 0; }
 .runtime-settings-wide { grid-column: 1 / -1; }
 .runtime-settings-status { margin: 0; color: var(--text-soft); font-size: 0.8rem; }
-.runtime-settings-status-error { color: var(--danger); }
+.runtime-settings-status-error { color: var(--danger-text); }
 .runtime-settings-actions { display: flex; justify-content: flex-end; }
 .runtime-settings-actions-inline { justify-content: flex-start; }
 .runtime-settings-grid-global { align-items: end; }
@@ -5381,4 +5619,291 @@ body.is-resizing-panels .panel-resizer::after {
 }
 @media (max-width: 980px) {
   .markdown-editor-viewer { min-height: 320px; }
+}
+
+.button-ghost {
+  border: 1px solid var(--border-color);
+  background: var(--surface-solid);
+  color: var(--text-secondary);
+  padding: 0.32rem 0.55rem;
+}
+
+.button-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  filter: none;
+}
+
+.button-danger { color: var(--danger-text); }
+
+.annotation-highlight {
+  border-radius: 4px;
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  cursor: pointer;
+  padding: 0.05rem 0.12rem;
+}
+
+.annotation-highlight--resolved { background: rgba(34, 197, 94, 0.18); }
+.annotation-highlight--stale { background: rgba(239, 68, 68, 0.16); text-decoration: line-through; }
+.annotation-highlight--transient {
+  background: var(--selection-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.annotation-highlight--active { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.annotation-line-marker {
+  display: inline-flex;
+  align-items: center;
+  height: 1.18rem;
+  padding: 0 0.34rem;
+  border: 1px solid color-mix(in srgb, var(--danger-text) 46%, var(--border-color));
+  border-radius: 999px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-xs);
+  color: var(--danger-text);
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.annotation-line-marker--open { color: var(--warning-text); border-color: color-mix(in srgb, var(--warning-text) 46%, var(--border-color)); }
+.annotation-line-marker--resolved { color: var(--success-text); border-color: color-mix(in srgb, var(--success-text) 46%, var(--border-color)); }
+.annotation-line-marker--active { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.annotation-composer-popover {
+  position: fixed;
+  z-index: 320;
+  display: grid;
+  width: min(360px, calc(100vw - 16px));
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-xl);
+  color: var(--text-primary);
+  animation: scale-in 160ms var(--ease-spring) both;
+  transform-origin: top left;
+}
+
+.annotation-composer-popover::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
+  background: var(--surface-solid);
+  transform: rotate(45deg);
+}
+
+.annotation-comment-textarea {
+  width: 100%;
+  height: 56px;
+  min-height: 56px;
+  max-height: 128px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  resize: none;
+  overflow: auto;
+}
+
+.annotation-comment-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--glow-accent);
+  outline: none;
+}
+
+.annotation-composer-popover__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.annotation-composer-popover__actions button {
+  padding: 0.4rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.markdown-annotation-popover {
+  position: absolute;
+  z-index: 30;
+  width: min(360px, calc(100% - 24px));
+  max-height: min(320px, calc(100% - 24px));
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+}
+
+.markdown-annotation-popover__close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+}
+
+.markdown-annotation-popover__meta,
+.markdown-annotation-summary__item span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.markdown-annotation-popover__drag-handle {
+  margin: -0.25rem 1.65rem 0.35rem -0.25rem;
+  padding: 0.25rem;
+  border-radius: 6px;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+.markdown-annotation-popover.is-pinned .markdown-annotation-popover__drag-handle {
+  cursor: grab;
+}
+
+.markdown-annotation-popover.is-pinned .markdown-annotation-popover__drag-handle:active,
+.markdown-annotation-popover.is-dragging .markdown-annotation-popover__drag-handle {
+  cursor: grabbing;
+  background: var(--surface-hover);
+}
+.markdown-annotation-popover__quote {
+  margin-top: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.markdown-annotation-popover__comment {
+  margin-top: 0.5rem;
+  padding-right: 1.5rem;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.markdown-annotation-popover__editor {
+  margin-top: 0.55rem;
+}
+
+.editor-panel .markdown-annotation-popover .annotation-comment-textarea {
+  box-sizing: border-box;
+  height: 56px;
+  min-height: 56px;
+  max-height: 96px;
+  flex: 0 0 auto;
+  padding: 0.5rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.markdown-annotation-popover__error {
+  margin: 0.45rem 0 0;
+  color: var(--danger-text);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.markdown-annotation-popover__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.markdown-annotation-summary {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 25;
+  width: min(320px, calc(100% - 1.5rem));
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+}
+
+.markdown-annotation-summary summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.markdown-annotation-summary summary::-webkit-details-marker { display: none; }
+.markdown-annotation-summary summary span { font-size: 0.82rem; font-weight: 600; }
+.markdown-annotation-summary summary small { color: var(--text-muted); font-size: 0.72rem; }
+
+.markdown-annotation-summary__error {
+  margin: 0;
+  padding: 0 0.6rem 0.6rem;
+  color: var(--danger-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.markdown-annotation-summary__list {
+  display: flex;
+  max-height: 320px;
+  overflow: auto;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0 0.6rem 0.6rem;
+}
+
+.markdown-annotation-summary__item {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+
+.markdown-annotation-summary__item.is-active { border-color: var(--accent); }
+
+.markdown-annotation-summary__item > button {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.markdown-annotation-summary__item strong {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.markdown-annotation-summary__item > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
