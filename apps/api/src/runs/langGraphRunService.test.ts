@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StreamEvent } from '@viforge/shared';
+import type { AgentLayerConfig, AgentToolPolicy, BehaviorRuleConfig, EvalRun, StreamEvent, ToolDescriptionConfig } from '@viforge/shared';
 
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
 import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
@@ -446,6 +446,141 @@ describe('langgraph run service', () => {
     ]));
   });
 
+  it('applies active runtime config policies to ordinary LangGraph runs', async () => {
+    const project = await store.createProject({ name: 'Runtime Config Ordinary Run', productId: 'sitcom' });
+    const now = '2026-07-25T00:00:00.000Z';
+    const layerConfig: AgentLayerConfig = {
+      id: 'runtime-layer-ordinary',
+      productId: 'sitcom',
+      version: 1,
+      status: 'active',
+      behaviorRuleRefs: ['ordinary-runtime-rule@1'],
+      toolPolicyRefs: ['ordinary-runtime-tool-policy@1'],
+      toolDescriptionRefs: ['ordinary-read-description@1'],
+      systemAgent: {
+        agentId: 'system',
+        promptBlockRefs: [],
+        allowedTools: [],
+        instructionOverride: 'ORDINARY RUNTIME SYSTEM OVERRIDE',
+      },
+      specialists: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const behaviorRule: BehaviorRuleConfig = {
+      id: 'ordinary-runtime-rule',
+      productId: 'sitcom',
+      title: 'Ordinary runtime behavior rule',
+      version: 1,
+      status: 'active',
+      scope: 'product',
+      content: 'ORDINARY RUNTIME BEHAVIOR RULE',
+      contentHash: 'sha256:rule',
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const toolPolicy: AgentToolPolicy = {
+      id: 'ordinary-runtime-tool-policy',
+      productId: 'sitcom',
+      title: 'Ordinary runtime tool policy',
+      version: 1,
+      status: 'active',
+      scope: 'product',
+      allowedToolIds: ['read_workspace_file', 'delegate_to_specialist_agent'],
+      deniedToolIds: [],
+      highRiskToolIds: [],
+      toolDescriptionRefs: ['ordinary-read-description@1'],
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const toolDescription: ToolDescriptionConfig = {
+      id: 'ordinary-read-description',
+      productId: 'sitcom',
+      title: 'Ordinary read description',
+      version: 1,
+      status: 'active',
+      scope: 'product',
+      toolId: 'read_workspace_file',
+      description: 'ORDINARY RUNTIME READ DESCRIPTION',
+      parameterDescriptions: { path: 'ORDINARY RUNTIME PATH PARAM' },
+      outputDescription: 'ORDINARY RUNTIME READ OUTPUT',
+      contentHash: 'sha256:tool-description',
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    let capturedInstructions = '';
+    let capturedToolKeys: string[] = [];
+    let capturedReadDescription = '';
+    let capturedPathDescription = '';
+
+    const harnessStore = {
+      async getActiveResolvedAgentConfig(): Promise<EvalRun['resolvedAgentConfig']> {
+        return {
+          layerConfig,
+          behaviorRules: [behaviorRule],
+          toolPolicies: [toolPolicy],
+          toolDescriptionOverrides: [toolDescription],
+          promptBlocks: [],
+          promptBlockRefs: [],
+          skillRefs: [],
+        };
+      },
+      async recordRunArtifactEvent() {},
+    } as never;
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      harnessStore,
+      async createAgentRegistry(tools) {
+        return {
+          brainstorm: null,
+          character: null,
+          continuity: null,
+          story: null,
+          sourceAnalyst: null,
+          adaptationPlanner: null,
+          screenwriter: null,
+          reviewer: null,
+          outline: null,
+          knowledgeSearch: null,
+          knowledgeOrganizer: null,
+          async systemAgent(instructions, toolsOverride) {
+            const runtimeTools = toolsOverride ?? tools;
+            capturedInstructions = instructions;
+            capturedToolKeys = Object.keys(runtimeTools).sort();
+            const readTool = runtimeTools.read_workspace_file as { description?: string; schema?: { shape?: { path?: { description?: string } } } };
+            capturedReadDescription = readTool.description ?? '';
+            capturedPathDescription = readTool.schema?.shape?.path?.description ?? '';
+            return {
+              id: 'viforge-system-agent',
+              async stream() {
+                return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: 'runtime config ok' } }]) };
+              },
+              async generate() {
+                return { text: 'runtime config ok' };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-runtime-config',
+      prompt: '检查线上运行配置',
+    });
+
+    await collectUntilEnd(bus, run.id);
+
+    expect(capturedInstructions).toContain('ORDINARY RUNTIME SYSTEM OVERRIDE');
+    expect(capturedInstructions).toContain('ORDINARY RUNTIME BEHAVIOR RULE');
+    expect(capturedToolKeys).toEqual(['delegate_to_specialist_agent', 'read_workspace_file']);
+    expect(capturedReadDescription).toContain('ORDINARY RUNTIME READ DESCRIPTION');
+    expect(capturedReadDescription).toContain('ORDINARY RUNTIME READ OUTPUT');
+    expect(capturedPathDescription).toBe('ORDINARY RUNTIME PATH PARAM');
+  });
+
 
 
   it('rejects memory index rebuild lock while a LangGraph run is active', async () => {
@@ -746,4 +881,3 @@ function restoreEnv(name: string, value: string | undefined): void {
   }
   process.env[name] = value;
 }
-

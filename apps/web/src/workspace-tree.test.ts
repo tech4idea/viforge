@@ -15,7 +15,7 @@ import type { WorkspaceEntry } from './api';
 
 describe('workspace tree navigation', () => {
   it('groups the sidebar into global and project workspaces', () => {
-    expect(WORKSPACE_SECTIONS.map((section) => section.title)).toEqual(['全局资料区', '创作项目区域']);
+    expect(WORKSPACE_SECTIONS.map((section) => section.title)).toEqual(['全局资料区', '项目区域']);
     expect(WORKSPACE_SECTIONS[0].description).toBe('统一管理知识库、素材库与模板库');
     expect(GLOBAL_TREE.map((node) => node.name)).toEqual(['知识库', '模板库']);
   });
