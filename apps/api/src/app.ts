@@ -11,6 +11,7 @@ import { createAigcHubRoutes } from './routes/aigcHub';
 import { createChatSessionRoutes } from './routes/chatSessions';
 import { createImageGenerationRoutes } from './routes/imageGenerations';
 import { createProjectsRoutes } from './routes/projects';
+import { createAnnotationRoutes } from './routes/annotations';
 import { createRunEventsRoutes } from './routes/runEvents';
 import { createRunsRoutes } from './routes/runs';
 import { createHarnessRoutes } from './routes/harness';
@@ -23,6 +24,7 @@ import { createRuntimeConfigRoutes } from './routes/runtimeConfig';
 import { createBrowserRoutes } from './routes/browser';
 import { createGitService } from './storage/gitService';
 import { createGitConfigStore } from './storage/gitConfigStore';
+import { createDocumentAnnotationStore } from './storage/documentAnnotationStore';
 import { createSkillStore } from './skills/skillStore';
 import { createHarnessStore } from './harness/harnessStore';
 import { createScheduleStore } from './schedules/scheduleStore';
@@ -49,6 +51,7 @@ export function createApp(): Hono {
   const app = new Hono();
   installDesktopAccessGuard(app);
   const chatSessionStore = createChatSessionStore(path.join(WORKSPACES_ROOT, '..', 'chat-sessions.json'));
+  const documentAnnotationStore = createDocumentAnnotationStore(workspaceStore);
 
   app.use('/api/*', cors());
   app.onError((error, context) => {
@@ -57,6 +60,7 @@ export function createApp(): Hono {
   });
 
   app.route('/api', createProjectsRoutes(workspaceStore));
+  app.route('/api', createAnnotationRoutes(documentAnnotationStore, workspaceStore));
   app.route('/api', createAigcHubRoutes());
   app.route('/api', createRuntimeConfigRoutes(createRuntimeConfigStore(), workspaceStore));
   app.route('/api', createBrowserRoutes());
@@ -257,9 +261,10 @@ export function createApp(): Hono {
   // Restore poller if previously connected
   void (async () => {
     const botToken = await wechatStore.getIlinkBotToken();
+    const ilinkBaseUrl = await wechatStore.getIlinkBaseUrl();
     if (botToken) {
-      ilinkClient.setBotToken(botToken);
-      console.info('[wechat] restored ilink bot token');
+      ilinkClient.setBotToken(botToken, ilinkBaseUrl);
+      console.info('[wechat] restored ilink bot token', { baseUrl: ilinkBaseUrl ?? 'default' });
     }
 
     if (botToken && await wechatStore.isIlinkPollerEnabled()) {

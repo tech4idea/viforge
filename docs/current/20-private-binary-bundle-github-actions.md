@@ -82,9 +82,10 @@ workflow 只支持 `workflow_dispatch` 手动打包，不在 `pull_request` 或 
 3. 安装 pnpm 11.3.0 和 Node.js 22。
 4. 运行 `pnpm install --frozen-lockfile`。
 5. 设置 `VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO`、`VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG` 和 `VIFORGE_POSTGRES_BUNDLE_ASSET_NAME`，运行 `prepare:postgres` 自动下载并校验 PostgreSQL + pgvector bundle。
-6. 运行 API 和 Web typecheck。
-7. 运行 `pnpm desktop:dist` 生成 Windows NSIS 安装包。
-8. 上传 `release/desktop/*.exe`、`*.blockmap` 和 `latest*.yml` 为 Actions artifact。
+6. 从 Windows runner 的 Git for Windows 安装目录解析 `VIFORGE_GIT_BUNDLE_SOURCE`，运行 `prepare:git` 复制并校验 bundled Git runtime。
+7. 运行 API 和 Web typecheck。
+8. 运行 `pnpm desktop:dist` 生成 Windows NSIS 安装包。
+9. 上传 `release/desktop/*.exe`、`*.blockmap` 和 `latest*.yml` 为 Actions artifact。
 
 workflow 使用 `actions/checkout@v7`、`actions/setup-node@v6`、`pnpm/action-setup@v6` 和 `actions/upload-artifact@v7`，避免 GitHub Actions 对 Node 20 action runtime 的 deprecation warning。
 
@@ -115,6 +116,7 @@ jobs:
     env:
       VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
       VIFORGE_REQUIRE_PGVECTOR: '1'
+      VIFORGE_GIT_PLATFORM_ARCH: win32-x64
       VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
       VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag || 'v18.4-pgvector0.8.3-win32-x64' }}
       VIFORGE_POSTGRES_BUNDLE_ASSET_NAME: postgres-18.4-pgvector-0.8.3-win32-x64.zip
@@ -147,6 +149,32 @@ jobs:
           VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
           VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+
+      - name: Resolve Git runtime source
+        shell: pwsh
+        run: |
+          $gitCommand = Get-Command git.exe -ErrorAction Stop
+          $candidate = Split-Path -Parent $gitCommand.Source
+          $gitRoot = $null
+          while ($candidate) {
+            $binGit = Join-Path $candidate 'bin/git.exe'
+            $cmdGit = Join-Path $candidate 'cmd/git.exe'
+            $mingwGit = Join-Path $candidate 'mingw64/bin/git.exe'
+            if ((Test-Path -LiteralPath $binGit) -and ((Test-Path -LiteralPath $cmdGit) -or (Test-Path -LiteralPath $mingwGit))) {
+              $gitRoot = $candidate
+              break
+            }
+            $parent = Split-Path -Parent $candidate
+            if ($parent -eq $candidate) { break }
+            $candidate = $parent
+          }
+          if (-not $gitRoot) {
+            throw "Could not resolve Git for Windows root from $($gitCommand.Source)"
+          }
+          "VIFORGE_GIT_BUNDLE_SOURCE=$gitRoot" >> $env:GITHUB_ENV
+
+      - name: Verify bundled Git runtime
+        run: pnpm --filter @viforge/desktop prepare:git
 
       - name: Typecheck API
         run: pnpm --filter @viforge/api typecheck

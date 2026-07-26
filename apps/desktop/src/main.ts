@@ -281,6 +281,7 @@ async function startApiServer(): Promise<string> {
       PLAYWRITER_HOST: playwriterHost,
       VIFORGE_DATABASE_MODE: process.env.VIFORGE_DATABASE_MODE ?? 'embedded-postgres',
       VIFORGE_POSTGRES_BIN_DIR: process.env.VIFORGE_POSTGRES_BIN_DIR ?? path.join(resourceRoots.postgres, platformArch(), 'bin'),
+      VIFORGE_GIT_BIN: process.env.VIFORGE_GIT_BIN ?? resolveGitBinary(resourceRoots.git),
       WORKSPACES_ROOT: path.join(dataRoot, 'workspaces'),
       LOGS_ROOT: path.join(dataRoot, 'logs'),
       VIFORGE_STATIC_WEB_ROOT: resourceRoots.web,
@@ -563,14 +564,22 @@ function resolvePlaywriterEntry(resourcesPath: string): string {
   return path.resolve(projectRoot(), 'apps', 'desktop', 'dist', 'playwriter-cli.mjs');
 }
 
-function resolvePreloadEntry(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.js');
+function resolveGitBinary(gitRoot: string): string {
+  const executable = process.platform === 'win32' ? 'git.exe' : 'git';
+  const bundledBinary = path.join(gitRoot, platformArch(), 'bin', executable);
+  if (app.isPackaged || fs.existsSync(bundledBinary)) return bundledBinary;
+  return 'git';
 }
 
-function resolveResourceRoots(resourcesPath: string): { postgres: string; web: string; productPrompts: string } {
+function resolvePreloadEntry(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs');
+}
+
+function resolveResourceRoots(resourcesPath: string): { postgres: string; git: string; web: string; productPrompts: string } {
   if (app.isPackaged) {
     return {
       postgres: path.join(resourcesPath, 'postgres'),
+      git: path.join(resourcesPath, 'git'),
       web: path.join(resourcesPath, 'web'),
       productPrompts: path.join(resourcesPath, 'api', 'product-profiles'),
     };
@@ -579,6 +588,7 @@ function resolveResourceRoots(resourcesPath: string): { postgres: string; web: s
   const root = projectRoot();
   return {
     postgres: path.resolve(root, 'apps', 'desktop', 'resources', 'postgres'),
+    git: path.resolve(root, 'apps', 'desktop', 'resources', 'git'),
     web: path.resolve(root, 'apps', 'web', 'dist'),
     productPrompts: path.resolve(root, 'apps', 'desktop', 'dist', 'api', 'product-profiles'),
   };

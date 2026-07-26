@@ -20,11 +20,11 @@ Electron Builder 有一定交叉打包能力，但 PostgreSQL binary、动态库
 
 ## 3. 准备基础环境
 
-Windows 本地需要：
+Windows 本地开发和构建需要：
 
 1. Node.js 22。
 2. pnpm。
-3. Git。
+3. Git。仅构建机需要；桌面安装包会内置 portable Git，最终用户不需要安装 Git。
 4. Visual Studio Build Tools，用于编译 PostgreSQL/pgvector 时使用 MSVC 工具链。
 
 安装依赖：
@@ -107,7 +107,44 @@ $env:VIFORGE_POSTGRES_BUNDLE_ASSET_NAME="postgres-18.4-pgvector-0.8.3-win32-x64.
 
 如果仓库或 release 是私有的，给构建环境设置 `VIFORGE_POSTGRES_BUNDLE_GITHUB_TOKEN` 或 `GITHUB_TOKEN`，token 只需要 release 资源读取权限。
 
-## 5. 准备 pgvector
+## 5. 准备 Git runtime
+
+桌面版不会要求用户安装 Git，但版本管理功能需要安装包里内置一份 portable Git runtime。资源目录约定为：
+
+```text
+apps/desktop/resources/git/<platform>-<arch>/
+```
+
+Windows x64 对应：
+
+```text
+apps/desktop/resources/git/win32-x64/
+```
+
+目录里至少需要：
+
+```text
+bin/git.exe
+```
+
+推荐来源是 Git 官方或 Git for Windows 的 portable distribution。复制后运行检查：
+
+```powershell
+$env:VIFORGE_GIT_PLATFORM_ARCH="win32-x64"
+pnpm --filter @viforge/desktop prepare:git
+```
+
+也可以从外部目录复制：
+
+```powershell
+$env:VIFORGE_GIT_BUNDLE_SOURCE="C:\path\to\PortableGit"
+$env:VIFORGE_GIT_PLATFORM_ARCH="win32-x64"
+pnpm --filter @viforge/desktop prepare:git
+```
+
+打包脚本会自动执行 `prepare:git`。如果 Git bundle 缺失，打包会失败，避免发布出依赖用户本地 Git 的安装包。
+
+## 6. 准备 pgvector
 
 LangGraph Store 的语义检索需要 pgvector。正式安装包建议包含 pgvector，否则应用会退化为 PostgreSQL 文本检索。
 
@@ -133,7 +170,7 @@ $env:VIFORGE_POSTGRES_PLATFORM_ARCH="win32-x64"
 pnpm --filter @viforge/desktop prepare:postgres
 ```
 
-## 6. 构建目录版
+## 7. 构建目录版
 
 目录版适合本地快速验证，不生成安装器：
 
@@ -160,8 +197,9 @@ release/desktop/win-unpacked/
 9. 运行设置页面能打开，并显示当前数据路径。
 10. 默认数据库模式是内置 PostgreSQL。
 11. 填写 OpenAI 协议 Base URL、API Key、模型后能保存。
+12. 配置远程仓库时不要求系统已安装 Git；缺少 bundled Git 时应返回“版本管理组件不可用”的明确提示。
 
-## 7. 构建 exe 安装包
+## 8. 构建 exe 安装包
 
 Windows 一键安装包：
 
@@ -177,7 +215,7 @@ release/desktop/
 
 Electron Builder 当前配置使用 NSIS `oneClick: false`、`allowToChangeInstallationDirectory: true` 和自定义 `installer.nsh`。安装向导会允许用户选择安装路径，并强制选择数据路径。项目、配置、日志和内置 PostgreSQL 数据路径不跟随安装目录，会写入 Electron `userData/data-root.txt` 供应用启动时读取。
 
-## 8. GitHub Actions 构建建议
+## 9. GitHub Actions 构建建议
 
 可以把代码推到 GitHub 后用 Actions 构建。推荐每个平台单独 job：
 
@@ -185,10 +223,10 @@ Electron Builder 当前配置使用 NSIS `oneClick: false`、`allowToChangeInsta
 - `macos-latest` 构建 DMG。
 - `ubuntu-latest` 构建 AppImage。
 
-关键问题是 PostgreSQL/pgvector bundle 的准备。不要在每次 CI 都从零手动处理一遍，建议二选一：
+关键问题是 PostgreSQL/pgvector 和 Git bundle 的准备。不要在每次 CI 都从零手动处理一遍，建议二选一：
 
 1. 在 CI 中从官方源码编译 PostgreSQL 和 pgvector，然后打包。
-2. 预先把可信的 PostgreSQL/pgvector bundle 放到 GitHub Release，再由 `prepare:postgres` 自动下载到 `apps/desktop/resources/postgres/<platform>-<arch>/`。
+2. 预先把可信的 PostgreSQL/pgvector bundle 放到 GitHub Release，再由 `prepare:postgres` 自动下载到 `apps/desktop/resources/postgres/<platform>-<arch>/`；Git bundle 可由 CI 从 Windows runner 自带的 Git for Windows 目录复制，或通过 `VIFORGE_GIT_BUNDLE_SOURCE` 指向可信 portable Git 根目录。
 
 CI 中至少运行：
 
@@ -198,6 +236,7 @@ pnpm --filter @viforge/api typecheck
 pnpm --filter @viforge/web typecheck
 pnpm --filter @viforge/desktop build
 VIFORGE_REQUIRE_PGVECTOR=1 pnpm --filter @viforge/desktop prepare:postgres
+pnpm --filter @viforge/desktop prepare:git
 pnpm desktop:dist
 ```
 
@@ -212,6 +251,34 @@ Windows GitHub Actions 可以直接使用：
     VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
     VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: v18.4-pgvector0.8.3-win32-x64
 
+- name: Resolve Git runtime source
+  shell: pwsh
+  run: |
+    $gitCommand = Get-Command git.exe -ErrorAction Stop
+    $candidate = Split-Path -Parent $gitCommand.Source
+    $gitRoot = $null
+    while ($candidate) {
+      $binGit = Join-Path $candidate 'bin/git.exe'
+      $cmdGit = Join-Path $candidate 'cmd/git.exe'
+      $mingwGit = Join-Path $candidate 'mingw64/bin/git.exe'
+      if ((Test-Path -LiteralPath $binGit) -and ((Test-Path -LiteralPath $cmdGit) -or (Test-Path -LiteralPath $mingwGit))) {
+        $gitRoot = $candidate
+        break
+      }
+      $parent = Split-Path -Parent $candidate
+      if ($parent -eq $candidate) { break }
+      $candidate = $parent
+    }
+    if (-not $gitRoot) {
+      throw "Could not resolve Git for Windows root from $($gitCommand.Source)"
+    }
+    "VIFORGE_GIT_BUNDLE_SOURCE=$gitRoot" >> $env:GITHUB_ENV
+
+- name: Verify Git bundle
+  run: pnpm --filter @viforge/desktop prepare:git
+  env:
+    VIFORGE_GIT_PLATFORM_ARCH: win32-x64
+
 - name: Build installer
   run: pnpm desktop:dist
   env:
@@ -219,7 +286,7 @@ Windows GitHub Actions 可以直接使用：
     VIFORGE_REQUIRE_PGVECTOR: '1'
 ```
 
-## 9. 推送前检查清单
+## 10. 推送前检查清单
 
 提交前建议确认：
 
@@ -228,6 +295,7 @@ git status --short
 pnpm --filter @viforge/api typecheck
 pnpm --filter @viforge/web typecheck
 pnpm --filter @viforge/desktop build
+pnpm --filter @viforge/desktop prepare:git
 pnpm --filter @viforge/api test -- runtimeConfig.test.ts desktopAccess.test.ts
 pnpm desktop:pack
 ```
@@ -238,12 +306,14 @@ pnpm desktop:pack
 - `apps/web/dist/`
 - `apps/desktop/dist/`
 - PostgreSQL 运行数据目录
+- portable Git binary bundle
 - `.env` 或 API Key
 
-PostgreSQL binary bundle 目前被 `.gitignore` 排除，发布流程应通过 CI 下载/构建，或在本地构建安装包前临时放入资源目录。
+PostgreSQL binary bundle 和 Git binary bundle 目前被 `.gitignore` 排除，发布流程应通过 CI 下载/构建，或在本地构建安装包前临时放入资源目录。
 
-## 10. 当前已知注意点
+## 11. 当前已知注意点
 
 - 没有 pgvector 时应用仍能启动，但 LangGraph 长期记忆会退化为文本检索。正式包建议强制 `VIFORGE_REQUIRE_PGVECTOR=1`。
+- 没有 bundled Git 时打包会失败；API 直连开发模式仍可通过系统 `git` 或 `VIFORGE_GIT_BIN` 调试版本管理功能。
 - Linux/WSL 下运行图形应用可能受沙箱或显示环境限制，目录包能构建不代表 GUI 可在 WSL 中正常打开。
 - GitHub Actions 生成 macOS 包若要分发给普通用户，还需要 Apple Developer 签名和 notarization；内部测试可先跳过。
