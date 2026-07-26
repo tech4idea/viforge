@@ -226,7 +226,7 @@ Electron Builder 当前配置使用 NSIS `oneClick: false`、`allowToChangeInsta
 关键问题是 PostgreSQL/pgvector 和 Git bundle 的准备。不要在每次 CI 都从零手动处理一遍，建议二选一：
 
 1. 在 CI 中从官方源码编译 PostgreSQL 和 pgvector，然后打包。
-2. 预先把可信的 PostgreSQL/pgvector bundle 放到 GitHub Release，再由 `prepare:postgres` 自动下载到 `apps/desktop/resources/postgres/<platform>-<arch>/`；Git bundle 可由 CI 下载或通过 `VIFORGE_GIT_BUNDLE_SOURCE` 从构建机缓存目录复制。
+2. 预先把可信的 PostgreSQL/pgvector bundle 放到 GitHub Release，再由 `prepare:postgres` 自动下载到 `apps/desktop/resources/postgres/<platform>-<arch>/`；Git bundle 可由 CI 从 Windows runner 自带的 Git for Windows 目录复制，或通过 `VIFORGE_GIT_BUNDLE_SOURCE` 指向可信 portable Git 根目录。
 
 CI 中至少运行：
 
@@ -251,11 +251,33 @@ Windows GitHub Actions 可以直接使用：
     VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
     VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: v18.4-pgvector0.8.3-win32-x64
 
+- name: Resolve Git runtime source
+  shell: pwsh
+  run: |
+    $gitCommand = Get-Command git.exe -ErrorAction Stop
+    $candidate = Split-Path -Parent $gitCommand.Source
+    $gitRoot = $null
+    while ($candidate) {
+      $binGit = Join-Path $candidate 'bin/git.exe'
+      $cmdGit = Join-Path $candidate 'cmd/git.exe'
+      $mingwGit = Join-Path $candidate 'mingw64/bin/git.exe'
+      if ((Test-Path -LiteralPath $binGit) -and ((Test-Path -LiteralPath $cmdGit) -or (Test-Path -LiteralPath $mingwGit))) {
+        $gitRoot = $candidate
+        break
+      }
+      $parent = Split-Path -Parent $candidate
+      if ($parent -eq $candidate) { break }
+      $candidate = $parent
+    }
+    if (-not $gitRoot) {
+      throw "Could not resolve Git for Windows root from $($gitCommand.Source)"
+    }
+    "VIFORGE_GIT_BUNDLE_SOURCE=$gitRoot" >> $env:GITHUB_ENV
+
 - name: Verify Git bundle
   run: pnpm --filter @viforge/desktop prepare:git
   env:
     VIFORGE_GIT_PLATFORM_ARCH: win32-x64
-    VIFORGE_GIT_BUNDLE_SOURCE: "C:\\path\\to\\PortableGit"
 
 - name: Build installer
   run: pnpm desktop:dist

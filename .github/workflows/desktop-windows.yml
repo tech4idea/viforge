@@ -20,6 +20,7 @@ jobs:
     env:
       VIFORGE_POSTGRES_PLATFORM_ARCH: win32-x64
       VIFORGE_REQUIRE_PGVECTOR: '1'
+      VIFORGE_GIT_PLATFORM_ARCH: win32-x64
       VIFORGE_RELEASE_COMMIT: ${{ github.sha }}
       VIFORGE_POSTGRES_BUNDLE_RELEASE_REPO: YukeonWayne/pg_pgvector_binary
       VIFORGE_POSTGRES_BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag || 'v18.4-pgvector0.8.3-win32-x64' }}
@@ -57,6 +58,32 @@ jobs:
           VIFORGE_RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
           VIFORGE_RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           VIFORGE_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+
+      - name: Resolve Git runtime source
+        shell: pwsh
+        run: |
+          $gitCommand = Get-Command git.exe -ErrorAction Stop
+          $candidate = Split-Path -Parent $gitCommand.Source
+          $gitRoot = $null
+          while ($candidate) {
+            $binGit = Join-Path $candidate 'bin/git.exe'
+            $cmdGit = Join-Path $candidate 'cmd/git.exe'
+            $mingwGit = Join-Path $candidate 'mingw64/bin/git.exe'
+            if ((Test-Path -LiteralPath $binGit) -and ((Test-Path -LiteralPath $cmdGit) -or (Test-Path -LiteralPath $mingwGit))) {
+              $gitRoot = $candidate
+              break
+            }
+            $parent = Split-Path -Parent $candidate
+            if ($parent -eq $candidate) { break }
+            $candidate = $parent
+          }
+          if (-not $gitRoot) {
+            throw "Could not resolve Git for Windows root from $($gitCommand.Source)"
+          }
+          "VIFORGE_GIT_BUNDLE_SOURCE=$gitRoot" >> $env:GITHUB_ENV
+
+      - name: Verify bundled Git runtime
+        run: pnpm --filter @viforge/desktop prepare:git
 
       - name: Typecheck API
         run: pnpm --filter @viforge/api typecheck
