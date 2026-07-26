@@ -14,8 +14,9 @@
     "build:postgres": "node scripts/build-postgres-from-source.mjs",
     "build:pgvector": "node scripts/build-pgvector-from-source.mjs",
     "prepare:postgres": "node scripts/prepare-postgres.mjs",
-    "pack": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder --dir --config electron-builder.config.mjs",
-    "dist": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && electron-builder --config electron-builder.config.mjs"
+    "prepare:git": "node scripts/prepare-git.mjs",
+    "pack": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && pnpm prepare:git && electron-builder --dir --config electron-builder.config.mjs",
+    "dist": "pnpm --filter @viforge/web build && pnpm --filter @viforge/api build && pnpm build && pnpm prepare:postgres && pnpm prepare:git && electron-builder --config electron-builder.config.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1"

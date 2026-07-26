@@ -1,0 +1,62 @@
+{
+  "id": "blog-write",
+  "name": "ViForge 博客写作工作台",
+  "documentTitle": "ViForge 博客写作工作台",
+  "defaultProjectName": "日常思考文章",
+  "defaultProjectDescription": "围绕一篇文稿完成选题讨论、资料整理、正文写作、配图和平台草稿生成。",
+  "workspaceSections": {
+    "global": { "title": "全局写作资料区", "description": "统一管理写作方法、常用模板与长期素材" },
+    "project": {
+      "title": "文章项目区域",
+      "description": "",
+      "emptyText": "暂无文章项目。"
+    }
+  },
+  "promptPlaceholder": {
+    "archived": "归档会话只读，恢复后可继续写作",
+    "project": "输入选题、观点、修改要求或平台草稿需求，输入 @ 引用项目文件",
+    "temporary": "继续临时写作会话，可直接讨论选题、改稿或生成配图"
+  },
+  "defaultSkillDraft": {
+    "title": "博客写作助手",
+    "description": "围绕单篇文章完成选题、大纲、正文、润色、配图建议和平台草稿准备。",
+    "prompt": "请基于当前主题生成一篇文章的标题备选、大纲和正文初稿，并说明需要补充核查的资料。"
+  },
+  "promptSuggestions": [
+    "围绕这个想法，帮我整理成一篇公众号文章",
+    "先和我讨论这个选题的核心观点和读者价值",
+    "根据正文给我 10 个标题备选",
+    "把这篇文章润色得更适合移动端阅读",
+    "根据正文规划封面图和文中配图",
+    "按发布 SOP 帮我生成平台草稿"
+  ],
+  "defaultAgentSkillNames": [
+    "blog-writing-agent",
+    "research-agent",
+    "publisher-agent",
+    "reviewer-agent"
+  ],
+  "agentLabels": {
+    "system": "系统",
+    "blog-writing-agent": "写作",
+    "research-agent": "资料",
+    "publisher-agent": "发布",
+    "reviewer-agent": "检查"
+  },
+  "mastra": {
+    "requestTitle": "# 博客写作请求",
+    "systemIntro": [
+      "你是 ViForge 博客写作工作台里的 system agent，负责围绕单篇文章推进选题讨论、资料整理、正文写作、润色、配图建议和平台草稿生成。",
+      "你拥有读取、列出和写入项目工作区文件的工具。所有文件读写必须通过这些工具完成。",
+      "博客写作默认围绕 正文.md 迭代，不要把任务拆成过细流程目录。用户手动创建的主题文件夹必须尊重。",
+      "本地写作、标题、大纲、正文、润色、配图建议优先委派 blog-writing-agent；资料检索和事实核查委派 research-agent；平台草稿生成委派 publisher-agent；发布前内容与排版检查委派 reviewer-agent。",
+      "Agent 可以协助创建或更新平台草稿，但不能替用户点击最终发布。涉及上传文件、保存草稿或修改远端数据前必须先说明动作并等待用户确认。",
+      "回答使用中文。"
+    ],
+    "fallbackProtocol": "# viforge system agent\n\n你负责博客写作链路：\n1. 先使用 list_workspace_entries 了解项目文件结构。\n2. 默认围绕 正文.md 工作；如果用户指定主题文件夹或文件，以用户指定路径为准。\n3. 选题讨论、标题、大纲、正文、润色、配图建议委派 blog-writing-agent。\n4. 信息收集、资料来源、事实核查和引用整理委派 research-agent。\n5. 生成平台草稿前读取 发布/ 下的对应 SOP 和检查清单；需要操作浏览器时使用 Playwriter 工具。\n6. 平台草稿生成委派 publisher-agent，但最终发布必须由用户决定。\n7. 平台预览、截图、DOM 或导出草稿检查委派 reviewer-agent，不能只看本地 Markdown 就判断平台效果。\n\n关键路径：\n- 正文.md：主要文章文稿。\n- 素材/：资料、摘录、链接、截图、事实核查记录。\n- 配图/：封面图、文中图、截图和图片提示词。\n- 发布/：平台 SOP、踩坑记录、发布记录和检查清单。"
+  },
+  "artifactPaths": {
+    "plan": ["正文.md"],
+    "script": "正文.md"
+  }
+}

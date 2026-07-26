@@ -18,6 +18,7 @@ const updateRuntimeConfigSchema = z.object({
     chatBaseUrl: z.string().optional(),
     chatApiKey: z.string().optional(),
     chatModel: z.string().optional(),
+    chatEndpoint: z.enum(['responses', 'chat_completions']).optional(),
     imageBaseUrl: z.string().optional(),
     imageApiKey: z.string().optional(),
     imageModel: z.string().optional(),
@@ -111,13 +112,19 @@ async function testModelProvider(input: NonNullable<UpdateRuntimeConfigInput['mo
     : target === 'embedding'
       ? input.embeddingModel || process.env.VIFORGE_AIGC_HUB_EMBEDDING_MODEL || 'text-embedding-3-large'
       : input.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || 'gpt-5.5';
+  const chatEndpoint = normalizeChatEndpoint(input.chatEndpoint || process.env.VIFORGE_AIGC_HUB_CHAT_ENDPOINT);
+  const endpointPath = target === 'image'
+    ? 'images/generations'
+    : target === 'embedding'
+      ? 'embeddings'
+      : chatEndpoint === 'responses' ? 'responses' : 'chat/completions';
   if (!apiKey) return { ok: false, message: '请先填写 API Key 后再测试。' };
 
   try {
-    const response = await fetch(`${baseUrl}/${target === 'image' ? 'images/generations' : target === 'embedding' ? 'embeddings' : 'chat/completions'}`, {
+    const response = await fetch(`${baseUrl}/${endpointPath}`, {
       method: 'POST',
       headers: buildAigcHubHeaders({ apiKey, contentType: 'application/json' }),
-      body: JSON.stringify(modelTestBody(target, model)),
+      body: JSON.stringify(modelTestBody(target, model, chatEndpoint)),
       signal: AbortSignal.timeout(20_000),
     });
 
@@ -130,12 +137,19 @@ async function testModelProvider(input: NonNullable<UpdateRuntimeConfigInput['mo
   }
 }
 
-function modelTestBody(target: NonNullable<UpdateRuntimeConfigInput['modelProvider']>['testTarget'], model: string): Record<string, unknown> {
+function modelTestBody(target: NonNullable<UpdateRuntimeConfigInput['modelProvider']>['testTarget'], model: string, chatEndpoint = normalizeChatEndpoint(undefined)): Record<string, unknown> {
   if (target === 'image') {
     return { model, prompt: 'test', size: '1024x1024', n: 1 };
   }
   if (target === 'embedding') {
     return { model, input: 'ping' };
+  }
+  if (chatEndpoint === 'responses') {
+    return {
+      model,
+      input: 'ping',
+      max_output_tokens: 8,
+    };
   }
   return {
     model,
@@ -163,6 +177,9 @@ async function modelTestErrorMessage(response: Response): Promise<string> {
   }
 }
 
+function normalizeChatEndpoint(value: unknown): 'responses' | 'chat_completions' {
+  return value === 'chat_completions' ? 'chat_completions' : 'responses';
+}
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
 }

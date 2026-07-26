@@ -6,6 +6,8 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createWorkspaceStore } from '../storage/workspaceStore';
+import { createDocumentAnnotationStore } from '../storage/documentAnnotationStore';
+import { createAnnotationRoutes } from './annotations';
 import { createProjectsRoutes } from './projects';
 
 let root: string;
@@ -13,7 +15,10 @@ let app: Hono;
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'viforge-api-routes-'));
-  app = new Hono().route('/api', createProjectsRoutes(createWorkspaceStore(root)));
+  const workspaceStore = createWorkspaceStore(root);
+  app = new Hono()
+    .route('/api', createProjectsRoutes(workspaceStore))
+    .route('/api', createAnnotationRoutes(createDocumentAnnotationStore(workspaceStore), workspaceStore));
 });
 
 afterEach(async () => {
@@ -327,6 +332,139 @@ describe('projects routes', () => {
     expect(rawResponse.status).toBe(200);
     expect(rawResponse.headers.get('content-type')).toBe('image/png');
     expect(await rawResponse.text()).toBe('fake-image-bytes');
+  });
+
+  it('creates and clears hidden Markdown annotation files', async () => {
+    const project = await createProject('Annotation Writers');
+    const filePath = '03 剧本/01 第一集/剧本.md';
+
+    const createResponse = await app.request(`/api/projects/${project.id}/annotations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        filePath,
+        selectedText: 'Annotation Writers',
+        startLine: 1,
+        endLine: 1,
+        startOffset: 0,
+        endOffset: 18,
+        beforeText: '',
+        afterText: '',
+        fileContentHash: 'fnv1a-test',
+        comment: '强化开场冲突',
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { annotations: Array<{ id: string; comment: string }> };
+    expect(created.annotations).toEqual([expect.objectContaining({ comment: '强化开场冲突' })]);
+
+    const hiddenReadResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/.剧本.md.annotations.json')}`);
+    expect(hiddenReadResponse.status).toBe(200);
+    await expect(hiddenReadResponse.json()).resolves.toMatchObject({ path: '03 剧本/01 第一集/.剧本.md.annotations.json' });
+
+    const summaryResponse = await app.request(`/api/projects/${project.id}/annotations`);
+    expect(summaryResponse.status).toBe(200);
+    await expect(summaryResponse.json()).resolves.toEqual([
+      expect.objectContaining({ filePath, count: 1, openCount: 1, annotationPath: '03 剧本/01 第一集/.剧本.md.annotations.json' }),
+    ]);
+
+    const readResponse = await app.request(`/api/projects/${project.id}/annotations?filePath=${encodeURIComponent(filePath)}`);
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({ filePath, annotations: [expect.objectContaining({ status: 'open' })] });
+
+    const updateResponse = await app.request(`/api/projects/${project.id}/annotations/${created.annotations[0].id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePath, status: 'resolved' }),
+    });
+    expect(updateResponse.status).toBe(200);
+    await expect(updateResponse.json()).resolves.toMatchObject({ filePath, annotations: [expect.objectContaining({ status: 'resolved' })] });
+
+    const deleteResponse = await app.request(`/api/projects/${project.id}/annotations/${created.annotations[0].id}?filePath=${encodeURIComponent(filePath)}`, { method: 'DELETE' });
+    expect(deleteResponse.status).toBe(200);
+    await expect(deleteResponse.json()).resolves.toMatchObject({ filePath, annotations: [] });
+
+    const deletedHiddenReadResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/.剧本.md.annotations.json')}`);
+    expect(deletedHiddenReadResponse.status).toBe(404);
+  });
+  it('moves and deletes Markdown annotation sidecar files with their source document', async () => {
+    const project = await createProject('Annotation File Lifecycle');
+    const sourcePath = '03 剧本/01 第一集/剧本.md';
+    const targetPath = '03 剧本/01 第一集/终稿.md';
+
+    const createResponse = await app.request(`/api/projects/${project.id}/annotations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        filePath: sourcePath,
+        selectedText: 'Annotation File Lifecycle',
+        startLine: 1,
+        endLine: 1,
+        startOffset: 0,
+        endOffset: 25,
+        beforeText: '',
+        afterText: '',
+        fileContentHash: 'fnv1a-test',
+        comment: '跟随文件移动',
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+
+    const moveResponse = await app.request(`/api/projects/${project.id}/files/${encodePath(sourcePath)}/move`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ targetPath }),
+    });
+    expect(moveResponse.status).toBe(200);
+
+    const oldHiddenReadResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/.剧本.md.annotations.json')}`);
+    expect(oldHiddenReadResponse.status).toBe(404);
+
+    const newHiddenReadResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/.终稿.md.annotations.json')}`);
+    expect(newHiddenReadResponse.status).toBe(200);
+    await expect(newHiddenReadResponse.json()).resolves.toMatchObject({
+      path: '03 剧本/01 第一集/.终稿.md.annotations.json',
+      content: expect.stringContaining(`"filePath": "${targetPath}"`),
+    });
+
+    const summaryResponse = await app.request(`/api/projects/${project.id}/annotations`);
+    expect(summaryResponse.status).toBe(200);
+    await expect(summaryResponse.json()).resolves.toEqual([
+      expect.objectContaining({ filePath: targetPath, annotationPath: '03 剧本/01 第一集/.终稿.md.annotations.json', count: 1 }),
+    ]);
+
+    const deleteResponse = await app.request(`/api/projects/${project.id}/files/${encodePath(targetPath)}`, { method: 'DELETE' });
+    expect(deleteResponse.status).toBe(200);
+
+    const deletedHiddenReadResponse = await app.request(`/api/projects/${project.id}/files/${encodePath('03 剧本/01 第一集/.终稿.md.annotations.json')}`);
+    expect(deletedHiddenReadResponse.status).toBe(404);
+  });
+
+  it('rejects annotations for non-Markdown files and returns empty files for unannotated Markdown', async () => {
+    const project = await createProject('Annotation Boundaries');
+
+    const emptyResponse = await app.request(`/api/projects/${project.id}/annotations?filePath=${encodeURIComponent('03 剧本/01 第一集/剧本.md')}`);
+    expect(emptyResponse.status).toBe(200);
+    await expect(emptyResponse.json()).resolves.toMatchObject({ filePath: '03 剧本/01 第一集/剧本.md', annotations: [] });
+
+    const invalidResponse = await app.request(`/api/projects/${project.id}/annotations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        filePath: '素材/notes.txt',
+        selectedText: 'notes',
+        startLine: 1,
+        endLine: 1,
+        startOffset: 0,
+        endOffset: 5,
+        beforeText: '',
+        afterText: '',
+        fileContentHash: 'fnv1a-test',
+        comment: '不应允许',
+      }),
+    });
+    expect(invalidResponse.status).toBe(400);
   });
 });
 

@@ -42,7 +42,12 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
     const pollStatus = poller?.status();
     return context.json({
       ...status,
-      ilink: { ...status.ilink, pollerRunning: pollStatus?.running ?? false },
+      ilink: {
+        ...status.ilink,
+        pollerRunning: pollStatus?.running ?? false,
+        lastPollAt: pollStatus?.lastPollAt ?? status.ilink.lastPollAt ?? null,
+        pollError: pollStatus?.error ?? status.ilink.pollError ?? null,
+      },
     });
   });
 
@@ -69,7 +74,7 @@ export function createWechatRoutes(deps: WechatRouteDeps): Hono {
             const status = await ilinkClient.checkQrCodeStatus(qr.qrcode);
             if (status.status === 'confirmed') {
               if (status.botToken) {
-                await wechatStore.setIlinkBotToken(status.botToken);
+                await wechatStore.setIlinkBotToken(status.botToken, status.baseUrl);
               }
               await wechatStore.completeSetupSession(session.sessionId, {
                 displayName: status.displayName ?? '微信用户',

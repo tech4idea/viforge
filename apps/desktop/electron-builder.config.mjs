@@ -37,6 +37,11 @@ export default {
       filter: ['**/*'],
     },
     {
+      from: 'resources/git',
+      to: 'git',
+      filter: ['**/*'],
+    },
+    {
       from: '../../LICENSE',
       to: 'LICENSE',
     },

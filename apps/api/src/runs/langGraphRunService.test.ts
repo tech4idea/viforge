@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentLayerConfig, AgentToolPolicy, BehaviorRuleConfig, EvalRun, StreamEvent, ToolDescriptionConfig } from '@viforge/shared';
 
+import { createDocumentAnnotationStore } from '../storage/documentAnnotationStore';
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
 import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
 import { assertMemoryEmbeddingIndexAvailable, runWithMemoryEmbeddingRebuildLock } from './langGraphAgents';
@@ -130,6 +131,35 @@ describe('langgraph run service', () => {
     expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
   });
 
+  it('returns a clear message for model service 403 errors', async () => {
+    const project = await store.createProject({ name: 'Forbidden Model' });
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      createAgent() {
+        return {
+          async stream() {
+            throw Object.assign(new Error('403 status code (no body)'), { status: 403 });
+          },
+          async generate() {
+            return { text: 'should not run' };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-forbidden',
+      prompt: 'hello',
+      model: 'restricted-model',
+    });
+
+    const events = await collectUntilEnd(bus, run.id);
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'run.end',
+      status: 'error',
+      errorMessage: '模型调用失败：权限不足或账户无权访问该模型（403）。',
+    });
+  });
   it('uses the project product profile for prompts and specialist registry setup', async () => {
     const project = await store.createProject({ name: 'Studio Sitcom', productId: 'sitcom' });
     let capturedPrompt = '';
@@ -141,6 +171,9 @@ describe('langgraph run service', () => {
         capturedProfileId = context.productProfile?.id ?? '';
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -189,6 +222,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          blogWriting: specialistAgent('blog-writing-agent', specialistCalls),
+          research: specialistAgent('research-agent', specialistCalls),
+          publisher: specialistAgent('publisher-agent', specialistCalls),
           character: specialistAgent('character-agent', specialistCalls),
           continuity: specialistAgent('continuity-agent', specialistCalls),
           story: specialistAgent('story-agent', specialistCalls),
@@ -235,6 +271,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          blogWriting: specialistAgent('blog-writing-agent', specialistCalls),
+          research: specialistAgent('research-agent', specialistCalls),
+          publisher: specialistAgent('publisher-agent', specialistCalls),
           character: specialistAgent('character-agent', specialistCalls),
           continuity: specialistAgent('continuity-agent', specialistCalls),
           story: specialistAgent('story-agent', specialistCalls),
@@ -300,6 +339,7 @@ describe('langgraph run service', () => {
 
   it('exposes Playwriter browser tools to the main agent', async () => {
     const project = await store.createProject({ name: 'Browser Study', productId: 'study' });
+    await store.writeWorkspaceFile(project.id, 'uploads/example.txt', 'upload me');
     const browserCalls: string[] = [];
     let browserToolResult: unknown = null;
 
@@ -318,6 +358,10 @@ describe('langgraph run service', () => {
         browserCalls.push(`evaluate:${input.code}`);
         return { stdout: { title: 'Example' } };
       },
+      async uploadFile(input: { selector: string; fileName: string; bytes: Buffer }) {
+        browserCalls.push(`upload:${input.selector}:${input.fileName}:${input.bytes.toString('utf8')}`);
+        return { stdout: { uploaded: true, fileName: input.fileName } };
+      },
     };
 
     const { run } = await createLangGraphRunService(store, bus, {
@@ -325,6 +369,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -342,6 +389,7 @@ describe('langgraph run service', () => {
               async stream() {
                 browserToolResult = await runtimeTools.browser_navigate.execute?.({ url: 'example.com' }, {} as never);
                 await runtimeTools.browser_snapshot.execute?.({}, {} as never);
+                await runtimeTools.browser_upload_file.execute?.({ path: 'uploads/example.txt', selector: 'input[type=file]' }, {} as never);
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '已读取网页。' } }]) };
               },
               async generate() {
@@ -359,7 +407,7 @@ describe('langgraph run service', () => {
 
     await collectUntilEnd(bus, run.id);
 
-    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot']);
+    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot', 'upload:input[type=file]:example.txt:upload me']);
     expect(browserToolResult).toEqual({ stdout: { url: 'example.com', title: 'Example' } });
   });
 
@@ -389,6 +437,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -536,6 +587,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -690,6 +744,57 @@ describe('langgraph run service', () => {
   });
 
 
+  it('exposes Markdown document annotation tools without requiring hidden path scanning', async () => {
+    const project = await store.createProject({ name: 'Annotation Tools' });
+    const filePath = '03 剧本/01 第一集/剧本.md';
+    const annotationStore = createDocumentAnnotationStore(store);
+    const created = await annotationStore.createAnnotation(project.id, {
+      filePath,
+      selectedText: 'Annotation Tools',
+      startLine: 1,
+      endLine: 1,
+      startOffset: 0,
+      endOffset: 16,
+      beforeText: '',
+      afterText: '',
+      fileContentHash: 'fnv1a-test',
+      comment: '补充一个反常细节',
+    });
+    const annotationId = created.annotations[0]!.id;
+    const events: StreamEvent[] = [];
+    const tools = __langGraphRunServiceTest.createWorkspaceTools(
+      store,
+      project.id,
+      (event) => events.push(event),
+      'run_annotation_tools',
+      () => '2026-07-19T00:00:00.000Z',
+    );
+
+    expect(tools.list_document_annotations.description).not.toContain('扫描隐藏批注文件');
+    expect(tools.read_document_annotations.description).toContain('selectedText');
+    expect(tools.clear_document_annotations.description).toContain('不要自动调用');
+
+    const workspaceEntries = await tools.list_workspace_entries.execute?.({ query: '' }, {} as never) as { entries: Array<{ path: string }> };
+    const directSidecarRead = await tools.read_workspace_file.execute?.({ path: '03 剧本/01 第一集/.剧本.md.annotations.json' }, {} as never) as { error: string };
+
+    expect(workspaceEntries.entries.map((entry) => entry.path)).not.toContain('03 剧本/01 第一集/.剧本.md.annotations.json');
+    expect(directSidecarRead.error).toContain('annotation');
+
+    const listed = await tools.list_document_annotations.execute?.({}, {} as never) as { annotations: Array<{ filePath: string; count: number; openCount: number }> };
+    const read = await tools.read_document_annotations.execute?.({ filePath }, {} as never) as { annotations: Array<{ id: string; comment: string }> };
+    const resolved = await tools.update_document_annotation_status.execute?.({ filePath, annotationId, status: 'resolved' }, {} as never) as { annotations: Array<{ status: string }> };
+    const cleared = await tools.clear_document_annotations.execute?.({ filePath }, {} as never) as { annotations: unknown[] };
+
+    expect(listed.annotations).toEqual([expect.objectContaining({ filePath, count: 1, openCount: 1 })]);
+    expect(read.annotations).toEqual([expect.objectContaining({ id: annotationId, comment: '补充一个反常细节' })]);
+    expect(resolved.annotations).toEqual([expect.objectContaining({ status: 'resolved' })]);
+    expect(cleared.annotations).toEqual([]);
+    await expect(store.readWorkspaceFile(project.id, '03 剧本/01 第一集/.剧本.md.annotations.json')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'file.changed', path: '03 剧本/01 第一集/.剧本.md.annotations.json', change: 'modified' }),
+      expect.objectContaining({ type: 'file.changed', path: '03 剧本/01 第一集/.剧本.md.annotations.json', change: 'deleted' }),
+    ]));
+  });
   it('blocks semantic memory tools while memory index rebuild is in progress', async () => {
     const project = await store.createProject({ name: 'Memory Tools Rebuild Lock' });
     const tools = __langGraphRunServiceTest.createWorkspaceTools(

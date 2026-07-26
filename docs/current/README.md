@@ -22,7 +22,7 @@ viforge 是 ViForge 的当前 monorepo 实现，面向本地优先、可自定�
 
 ## 单机桌面版
 
-单机版面向快速上手：用户安装 exe 后直接打开 ViForge，不需要预装 Node，也不需要手动启动浏览器、API、PostgreSQL 或向量库。Electron 安装包内置 Chromium 和 Node runtime；应用启动时由主进程拉起本地 API，API 在桌面模式下托管 `apps/web/dist`。
+单机版面向快速上手：用户安装 exe 后直接打开 ViForge，不需要预装 Node、Git，也不需要手动启动浏览器、API、PostgreSQL 或向量库。Electron 安装包内置 Chromium、Node runtime 和 portable Git；应用启动时由主进程拉起本地 API，API 在桌面模式下托管 `apps/web/dist`。
 
 默认数据库策略是内置 PostgreSQL binary + pgvector，保持和 LangGraph `PostgresSaver` / `PostgresStore` 一致。运行设置界面不再暴露 LangGraph 存储配置，产品默认使用内置 PostgreSQL；模型提供商只要求兼容 OpenAI 协议，可配置 Base URL、API Key、文本/图片/embedding 模型和 embedding 维度。
 
@@ -48,6 +48,7 @@ VIFORGE_API_PORT=13001
 VIFORGE_AIGC_HUB_BASE_URL=
 VIFORGE_AIGC_HUB_API_KEY=
 VIFORGE_AIGC_HUB_CHAT_MODEL=
+VIFORGE_AIGC_HUB_CHAT_ENDPOINT=responses
 VIFORGE_WECHAT_CHAT_MODEL=minimax/minimax-m2.7
 VIFORGE_AIGC_HUB_IMAGE_MODEL=
 PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
@@ -55,10 +56,10 @@ PHOENIX_COLLECTOR_ENDPOINT=http://192.168.43.167:6006
 
 其中：
 
-- `VIFORGE_PRODUCT` 当前可选 `novel-adaptation`、`sitcom` 和 `study`，只作为默认产品 profile 和默认数据目录选择；单个项目和临时会话会把创建时的 `productId` 写入项目 metadata，后续 agent 运行会按项目自动切换到对应产品 profile。
+- `VIFORGE_PRODUCT` 当前可选 `novel-adaptation`、`sitcom`、`study` 和 `blog-write`，只作为默认产品 profile 和默认数据目录选择；单个项目和临时会话会把创建时的 `productId` 写入项目 metadata，后续 agent 运行会按项目自动切换到对应产品 profile。
 - `VITE_API_BASE_URL` 在 compose 部署中应保持为空；只有前端需要直连外部 API 时才覆盖。
 - `DATABASE_URL` 和 `QDRANT_URL` 由 `docker-compose.yml` 注入到 `api` 容器，默认分别指向 `postgres:5432` 和 `qdrant:6333`。
-- `VIFORGE_AIGC_HUB_*` 是当前 compose 默认注入到 `api` 容器的关键运行时环境变量。
+- `VIFORGE_AIGC_HUB_*` 是当前 compose 默认注入到 `api` 容器的关键运行时环境变量；`VIFORGE_AIGC_HUB_CHAT_ENDPOINT` 可设为 `responses`（默认）或 `chat_completions`。
 - `VIFORGE_WECHAT_CHAT_MODEL` 是微信入口专用文本模型，默认使用不触发 coding plan 能力的 `minimax/minimax-m2.7`，避免部分上游模型在微信会话中返回 coding plan 不支持错误。
 - `VIFORGE_PLAYWRITER_BIN` 可选，用于指定 Playwriter CLI 路径，默认 `playwriter`；`VIFORGE_PLAYWRITER_HOST` 默认 `http://127.0.0.1:19988`，如 relay 启用了 token，可设置 `VIFORGE_PLAYWRITER_TOKEN`。
 - `VIFORGE_LANGGRAPH_STORE_EMBEDDING_DIMS` 控制 LangGraph Store pgvector 索引维度，默认 `1024`，应与 `VIFORGE_AIGC_HUB_EMBEDDING_MODEL` 的输出维度一致。
@@ -105,7 +106,7 @@ VIFORGE_WEB_PORT=8080 VIFORGE_API_PORT=3001 docker compose up -d --build
 - LangGraph 短期状态和长期记忆：通过 `DATABASE_URL` 使用 PostgreSQL/pgvector；checkpoint schema 为 `langgraph`，Store schema 为 `langgraph_store`。
 - API 日志：`logs/api.log`、`logs/api.error.log` 和 agent 提交链路诊断 `logs/api-runs.jsonl`，compose 中覆盖为 `/data/logs`。
 
-`VIFORGE_PRODUCT` 选择默认产品 profile，默认 `novel-adaptation`。新项目和临时会话可以携带 `productId`，API 会把该值保存到 `project.json`，之后 LangGraph agent 运行时按项目 metadata 自动选择 `novel-adaptation`、`sitcom`、`study` 或未来新增产品 profile 的 system prompt、specialist skills 和工作区模板。Vite 已允许读取该非 `VITE_` 前缀变量，启动前后端时使用同一个值即可。`WORKSPACES_ROOT`、`LOGS_ROOT` 和 `DATABASE_URL` 可通过环境变量覆盖；实现入口在 [apps/api/src/env.ts](../../apps/api/src/env.ts)。
+`VIFORGE_PRODUCT` 选择默认产品 profile，默认 `novel-adaptation`。新项目和临时会话可以携带 `productId`，API 会把该值保存到 `project.json`，之后 LangGraph agent 运行时按项目 metadata 自动选择 `novel-adaptation`、`sitcom`、`study` 或 `blog-write` 的 system prompt、specialist skills 和工作区模板。Vite 已允许读取该非 `VITE_` 前缀变量，启动前后端时使用同一个值即可。`WORKSPACES_ROOT`、`LOGS_ROOT` 和 `DATABASE_URL` 可通过环境变量覆盖；实现入口在 [apps/api/src/env.ts](../../apps/api/src/env.ts)。
 
 ## 功能文档
 
@@ -131,6 +132,7 @@ VIFORGE_WEB_PORT=8080 VIFORGE_API_PORT=3001 docker compose up -d --build
 - [20 私有 GitHub 二进制资源仓库与 Actions 打包方案](./20-private-binary-bundle-github-actions.md)
 - [21 项目架构图](./21-project-architecture-diagram.html)
 - [22 Agent Harness 当前功能边界](./22-agent-harness-functional-boundary.md)
+- [22 Markdown 文档批注功能设计](./22-markdown-annotation-design.md)
 - [23 Agent Harness RuntimeConfig PRD](./23-agent-harness-runtime-config-prd.md)
 - [24 Agent Harness RuntimeConfig 交互逻辑稿](./24-agent-harness-runtime-config-interaction.html)
 

@@ -61,6 +61,18 @@ describe('workspace tree navigation', () => {
     expect(filterVisibleGlobalWorkspaceEntries(entries, []).map((entry) => entry.path)).toEqual(['知识库', '知识库/改编知识']);
   });
 
+  it('hides Markdown annotation sidecar files from project trees', () => {
+    const entries: WorkspaceEntry[] = [
+      { path: '03 剧本', name: '03 剧本', type: 'directory' },
+      { path: '03 剧本/剧本.md', name: '剧本.md', type: 'file' },
+      { path: '03 剧本/.剧本.md.annotations.json', name: '.剧本.md.annotations.json', type: 'file' },
+    ];
+
+    expect(filterVisibleWorkspaceEntries(entries, []).map((entry) => entry.path)).toEqual([
+      '03 剧本',
+      '03 剧本/剧本.md',
+    ]);
+  });
   it('defaults project workspace directories to collapsed', () => {
     const entries: WorkspaceEntry[] = [
       { path: '01 原著资料', name: '01 原著资料', type: 'directory' },

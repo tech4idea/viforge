@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { MarkdownReadPreview, buildMarkdownInstanceKey, renderEditorViewer } from './viewer-components';
 import { buildMarkdownRawUrl, resolveMarkdownWorkspacePath } from './markdown-workspace';
-import { MarkdownEditor, detectLanguage } from './editors';
+import { MarkdownEditor, calculateAnnotationPopoverPosition, detectLanguage } from './editors';
+import type { LocatedDocumentAnnotation } from './document-annotations';
 
 describe('buildMarkdownInstanceKey', () => {
   it('changes when switching files', () => {
@@ -117,5 +118,86 @@ describe('markdown workspace references', () => {
     expect(html).toContain('../生成图片/世界观/2026-07-13T16-10-57-924Z.png');
     expect(html).not.toContain('markdown-image-node-view');
   });
-});
+  it('renders Markdown annotations inline instead of duplicating the document preview', () => {
+    const annotation: LocatedDocumentAnnotation = {
+      id: 'anno-1',
+      filePath: 'draft.md',
+      selectedText: '重点文本',
+      startLine: 1,
+      endLine: 1,
+      startOffset: 0,
+      endOffset: 4,
+      beforeText: '',
+      afterText: '\n其他内容',
+      fileContentHash: 'fnv1a-test',
+      comment: '这里需要补充论据。',
+      status: 'open',
+      effectiveStatus: 'open',
+      currentStartOffset: 0,
+      currentEndOffset: 4,
+      currentStartLine: 1,
+      currentEndLine: 1,
+      createdAt: '2026-07-19T00:00:00.000Z',
+      updatedAt: '2026-07-19T00:00:00.000Z',
+    };
 
+    const html = renderToStaticMarkup(createElement(MarkdownEditor, {
+      filePath: 'draft.md',
+      value: '重点文本\n其他内容',
+      mode: 'source',
+      annotations: [annotation],
+      onChange: () => undefined,
+    }));
+
+    expect(html).toContain('data-document-annotation-id="anno-1"');
+    expect(html).toContain('这里需要补充论据。');
+    expect(html).not.toContain('markdown-annotations__preview');
+  });
+  it('positions annotation popovers away from the trigger marker when width is constrained', () => {
+    const position = calculateAnnotationPopoverPosition(
+      { left: 4, right: 48, top: 38, bottom: 56, width: 44, height: 18 } as DOMRect,
+      { left: 0, right: 260, top: 0, bottom: 420, width: 260, height: 420 } as DOMRect,
+      260,
+      420,
+    );
+
+    expect(position.left).toBe(12);
+    expect(position.top).toBe(72);
+  });
+  it('keeps stale Markdown annotations clickable when their source text is gone', () => {
+    const annotation: LocatedDocumentAnnotation = {
+      id: 'anno-stale',
+      filePath: 'draft.md',
+      selectedText: '已经删除的原文',
+      startLine: 12,
+      endLine: 12,
+      startOffset: 80,
+      endOffset: 87,
+      beforeText: '',
+      afterText: '',
+      fileContentHash: 'fnv1a-test',
+      comment: '这条批注需要处理。',
+      status: 'stale',
+      effectiveStatus: 'stale',
+      currentStartOffset: null,
+      currentEndOffset: null,
+      currentStartLine: null,
+      currentEndLine: null,
+      createdAt: '2026-07-19T00:00:00.000Z',
+      updatedAt: '2026-07-19T00:00:00.000Z',
+    };
+
+    const html = renderToStaticMarkup(createElement(MarkdownEditor, {
+      filePath: 'draft.md',
+      value: '现有第一行\n现有第二行',
+      mode: 'source',
+      annotations: [annotation],
+      onChange: () => undefined,
+    }));
+
+    expect(html).toContain('data-document-annotation-id="anno-stale"');
+    expect(html).toContain('annotation-line-marker--stale');
+    expect(html).toContain('top:38.3px');
+  });
+
+});

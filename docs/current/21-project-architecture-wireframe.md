@@ -41,7 +41,7 @@
 flowchart LR
   subgraph Shared["共享合同与产品配置"]
     Contracts["共享合同<br/>packages/shared/src/contracts.ts"]
-    ProductProfiles["产品 Profile<br/>sitcom / novel-adaptation / study"]
+    ProductProfiles["产品 Profile<br/>sitcom / novel-adaptation / study / blog-write"]
     Templates["默认模板<br/>workspace templates"]
     Prompts["默认 Agent 指令<br/>product-profiles/*/prompts"]
   end
@@ -218,4 +218,3 @@ flowchart LR
 1. 全局分层图采用左侧 Harness 侧栏 + 右侧五层堆叠的经典分层布局。
 2. 分模块调用关系图保持拆分呈现，分别表达入口/API、核心/工具/存储、Harness/观测评估。
 3. “运行产物与日志”并入文件系统，不再单独绘制存储节点。
-

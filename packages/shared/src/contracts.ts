@@ -37,6 +37,42 @@ export type ReferencedChatSnippet = {
   createdAt: string;
 };
 
+export type DocumentAnnotationStatus = 'open' | 'stale' | 'resolved';
+
+export type DocumentAnnotation = {
+  id: string;
+  filePath: string;
+  selectedText: string;
+  startLine: number;
+  endLine: number;
+  startOffset: number;
+  endOffset: number;
+  beforeText: string;
+  afterText: string;
+  fileContentHash: string;
+  comment: string;
+  status: DocumentAnnotationStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DocumentAnnotationFile = {
+  version: 1;
+  filePath: string;
+  updatedAt: string;
+  annotations: DocumentAnnotation[];
+};
+
+export type DocumentAnnotationSummary = {
+  filePath: string;
+  annotationPath: string;
+  count: number;
+  openCount: number;
+  staleCount: number;
+  resolvedCount: number;
+  updatedAt: string;
+};
+
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled';
 
 export type RunSource = 'web' | 'schedule' | 'qq' | 'wechat' | 'eval';
@@ -199,6 +235,8 @@ export type RuntimeMemoryConfig = {
   statusMessage: string;
   lastReindexedAt?: string;
 };
+export type RuntimeChatEndpoint = 'responses' | 'chat_completions';
+
 export type RuntimeModelProviderConfig = {
   baseUrl: string;
   apiKeyConfigured: boolean;
@@ -206,6 +244,7 @@ export type RuntimeModelProviderConfig = {
   chatApiKeyConfigured?: boolean;
   chatUsesGlobalConfig?: boolean;
   chatModel?: string;
+  chatEndpoint?: RuntimeChatEndpoint;
   imageBaseUrl?: string;
   imageApiKeyConfigured?: boolean;
   imageUsesGlobalConfig?: boolean;
@@ -287,6 +326,7 @@ export type UpdateRuntimeConfigInput = {
     chatBaseUrl?: string;
     chatApiKey?: string;
     chatModel?: string;
+    chatEndpoint?: RuntimeChatEndpoint;
     imageBaseUrl?: string;
     imageApiKey?: string;
     imageModel?: string;
