@@ -47,7 +47,7 @@ API 启动入口会把 `console.log/info/debug` 写入 `logs/api.log`，把 `con
 
 LangGraph run 失败时，后端会先打印包含 `runId`、`projectId`、`sessionId` 和 `threadId` 的原始错误，再向前端返回用户可读的错误文案。定位“连接中断”类问题时优先查看 `logs/api.error.log`。
 
-如果需要看一次聊天提交的输入输出链路，查看 `logs/api-runs.jsonl`。这个文件按 JSONL 记录 `POST /api/runs` 请求/响应、后端拼接后的 prompt、线程参数、队列等待、关键流式事件和最终错误状态。默认不会逐条记录高频 `text.delta`、`thinking.delta` 和 `tool_use.delta`，避免日志快速膨胀；需要完整 delta 诊断时设置 `VIFORGE_RUN_VERBOSE_LOGS=1`。桌面端默认不为每次普通聊天同步复制 Agent Harness 输入快照，因为大型本地工作区会阻塞提交请求；需要保留完整快照回放证据时设置 `VIFORGE_RUN_INPUT_SNAPSHOTS=1`。它会记录用户提交的 prompt 和工具输入输出，但不会记录环境变量里的 token/key。
+如果需要看一次聊天提交的完整输入输出链路，查看 `logs/api-runs.jsonl`。这个文件按 JSONL 记录 `POST /api/runs` 请求/响应、后端拼接后的 prompt、线程参数、LangGraph/LangChain stream 事件、发给前端的流式事件以及最终错误状态。它会记录用户提交的 prompt 和工具输入输出，但不会记录环境变量里的 token/key。
 
 ## 类型检查
 

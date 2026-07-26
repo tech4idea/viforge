@@ -15,7 +15,7 @@ import type { WorkspaceEntry } from './api';
 
 describe('workspace tree navigation', () => {
   it('groups the sidebar into global and project workspaces', () => {
-    expect(WORKSPACE_SECTIONS.map((section) => section.title)).toEqual(['全局资料区', '项目区域']);
+    expect(WORKSPACE_SECTIONS.map((section) => section.title)).toEqual(['全局资料区', '创作项目区域']);
     expect(WORKSPACE_SECTIONS[0].description).toBe('统一管理知识库、素材库与模板库');
     expect(GLOBAL_TREE.map((node) => node.name)).toEqual(['知识库', '模板库']);
   });
@@ -61,18 +61,6 @@ describe('workspace tree navigation', () => {
     expect(filterVisibleGlobalWorkspaceEntries(entries, []).map((entry) => entry.path)).toEqual(['知识库', '知识库/改编知识']);
   });
 
-  it('hides Markdown annotation sidecar files from project trees', () => {
-    const entries: WorkspaceEntry[] = [
-      { path: '03 剧本', name: '03 剧本', type: 'directory' },
-      { path: '03 剧本/剧本.md', name: '剧本.md', type: 'file' },
-      { path: '03 剧本/.剧本.md.annotations.json', name: '.剧本.md.annotations.json', type: 'file' },
-    ];
-
-    expect(filterVisibleWorkspaceEntries(entries, []).map((entry) => entry.path)).toEqual([
-      '03 剧本',
-      '03 剧本/剧本.md',
-    ]);
-  });
   it('defaults project workspace directories to collapsed', () => {
     const entries: WorkspaceEntry[] = [
       { path: '01 原著资料', name: '01 原著资料', type: 'directory' },

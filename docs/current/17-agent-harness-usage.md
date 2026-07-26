@@ -11,7 +11,7 @@
 Agent Harness 不是普通配置页，而是一个 agent 改动发布流水线：
 
 ```text
-新建或打开运行配置流程 -> 固定评测案例上下文 -> 修改 Agent 配置 -> 保存评测运行配置和断言配置 -> 运行 EvalRun -> 人工审阅 -> 发布为运行配置
+看清当前 agent 完整提示词 -> 修改或新增行为规则 -> 创建候选 AgentSpec -> 从历史对话沉淀 Fixture -> 运行 EvalRun -> 人工审阅 -> 发布为运行配置
 ```
 
 关键点：创建候选配置不会影响真实运行；发布为运行配置才会改变真实默认 agent 行为。
@@ -33,7 +33,7 @@ AgentSpec 是一次 agent 运行配置的版本。它绑定：
 
 ### Agent 行为规则
 
-UI 里说的“Agent 行为规则”，当前优先对应版本化 `BehaviorRuleConfig`；历史 `PromptBlock` 仍作为兼容来源参与 resolved config。它只应该存 agent 的工作规则，不应该存项目事实。
+UI 里说的“Agent 行为规则”，代码里仍叫 `PromptBlock`。它只应该存 agent 的工作规则，不应该存项目事实。
 
 合理内容：
 
@@ -51,15 +51,9 @@ UI 里说的“Agent 行为规则”，当前优先对应版本化 `BehaviorRule
 
 一个行为规则可以被多个 AgentSpec 绑定，也就可以被多个 agent 复用。但不要默认滥用复用：通用写入边界可以共享，角色质量规则最好先按 agent/product 分开，跨 agent 复用必须通过评测证明没有误伤。
 
-### ToolDescriptionConfig 与 AgentToolPolicy
-
-`ToolDescriptionConfig` 管工具 description、参数说明和输出说明。`AgentToolPolicy` 管工具允许、禁用和高风险工具集合。不要把工具可用范围写进工具描述正文里。
-
-发布后，普通 run 会读取 active runtime config 中的行为规则、工具描述和工具策略。draft/candidate 只在 EvalRun 中生效。
-
 ### EvalFixture
 
-EvalFixture 是一个固定评测案例上下文。它包含失败或回归案例需要的工作区快照、输入消息、记忆 fixture、知识库 fixture、预期工具事件、工具 mock 和 tool retention 裁剪证据。断言已经收敛到独立 AssertionConfig；历史 `EvalFixture.assertions` 只作为兼容 fallback。
+EvalFixture 是一个固定评测案例。它包含失败或回归案例需要的工作区快照、输入消息、记忆 fixture、知识库 fixture、预期工具事件和断言。
 
 它回答的是：“我要用哪个固定场景测试这个候选 AgentSpec？”
 
@@ -69,12 +63,6 @@ EvalRun 是一次实际评测运行。它复制 fixture 工作区到隔离目录
 
 评测中的 memory write 工具应该 mock：agent 可以调用，系统记录它试图写什么，但不写入真实 memory。
 
-### AssertionConfig 与 EvalRunConfig
-
-`AssertionConfig` 是可复用的程序断言集合，覆盖文件变化、路径约束、Markdown section、工具事件、diff 限制和 WorkspaceManifest 合规检查。
-
-`EvalRunConfig` 是评测执行策略，覆盖 Repro/Live、模型临时覆盖、memory/knowledge 模式、高风险工具处理和工具 mock。它只影响 EvalRun，不会随运行配置发布到普通 run。
-
 ### HumanReview
 
 程序断言只能证明结构和边界没坏，不能证明故事质量变好。HumanReview 是人工评分和发布判断。
@@ -83,7 +71,7 @@ EvalRun 是一次实际评测运行。它复制 fixture 工作区到隔离目录
 
 发布是把某个 AgentSpec 设为 `active`。发布后，普通 run 才应该默认使用它。
 
-发布 gate 当前要求：至少有一个 passed EvalRun。人工评分作为参考证据保存，不阻塞发布。强制发布可以绕过 gate，但必须写审计原因。
+发布 gate 当前要求：至少有一个 passed EvalRun，并且人工评分 decision 是 `pass` 或 `improved`。强制发布可以绕过 gate，但必须写审计原因。
 
 ## 推荐操作流程
 
@@ -142,7 +130,7 @@ Harness 会自动准备 baseline active AgentSpec：
 
 它创建一个新的 draft AgentSpec，绑定当前选择的产品、agent 和 Agent 行为规则。
 
-它不会立即成为线上运行配置，也不会影响普通创作 run。只有发布为 `active` 后，同产品普通 LangGraph run 才会读取对应 active runtime config，并应用其中的行为规则、工具描述和工具 policy。
+它不会成为线上运行配置，也不会影响普通创作 run。
 
 创建候选时会优先从当前 active AgentSpec 复制 layer、skill、memory、retrieval、tool、model policy 引用，再叠加用户选中的行为规则。这样候选不会变成半空配置，active/candidate 对比也有真实基线。
 
@@ -167,13 +155,13 @@ Harness 会自动准备 baseline active AgentSpec：
 1. 从历史会话选择一条用户消息创建 Fixture。
 2. 从失败 RunArtifact 创建 Fixture。
 3. 从 RunInputSnapshot 创建 Fixture。
-4. 在评测与断言步骤创建或选择 AssertionConfig。
+4. 手动编辑 assertions。
 
 从历史会话创建 Fixture 时，只能选择一条用户消息。系统会使用这条消息对应 run 的输入快照恢复 workspace，并保存这条消息之前的最近会话上下文；EvalRun 会按 user/assistant 消息序列送入 LangGraph，而不是把多条消息拼成一段文本。agent 输出只作为历史上下文或预期结果来源，不会被当作新的用户输入。
 
 从失败 RunArtifact 创建也可以保留，因为它能带出当时的文件 diff、工具事件、memory recall、knowledge retrieval 和 resolved config 线索；但普通用户入口优先走历史会话。
 
-评测案例步骤只固定上下文，不再作为主断言编辑入口。断言构建器迁移到评测与断言步骤：选择一个断言类型，填对应字段，保存为 AssertionConfig 后再绑定到 EvalRun。高级 JSON 仍保留用于兼容历史 fixture assertions。
+断言构建器是“选择一个断言类型 -> 填对应字段 -> 添加断言”。自动生成的断言会显示成可勾选列表，可批量删除；同时保留 JSON 高级编辑。手动编辑 JSON 时不会被后台刷新覆盖，只有点击“保存断言”后才写入 Fixture。
 
 ### 6. 运行 EvalRun
 
@@ -182,9 +170,9 @@ Harness 会自动准备 baseline active AgentSpec：
 - Repro：默认模式。读取 fixture 中固定的 memory/knowledge，适合回归比较。
 - Live：读取当前 live memory/knowledge，用于诊断真实环境下是否仍然正常。
 
-Repro 模式不能读取 live memory/knowledge；Live 模式必须显式读取 live memory 或 live knowledge。除非 EvalRunConfig 明确允许 live 写入路径，评测中的 memory write 默认 mock 并记录到 artifact。
+无论 Repro 还是 Live，EvalRun 都不应该写真实 memory。memory write 工具应该 mock 并记录到 artifact。
 
-EvalRun 会使用 source RunArtifact 记录的模型参数；如果 source 没有模型记录，才回退到当前运行时默认模型。候选 AgentSpec 新增或修改的 PromptBlock 会拼入对应 agent 的 instruction，行为规则、工具描述覆盖和工具允许/禁用 policy 也会进入隔离 LangGraph executor，避免“界面绑定了配置但评测实际没用”的情况。
+EvalRun 会使用 source RunArtifact 记录的模型参数；如果 source 没有模型记录，才回退到当前运行时默认模型。候选 AgentSpec 新增或修改的 PromptBlock 会拼入对应 agent 的 instruction，避免“界面绑定了规则但评测实际没用”的情况。
 
 ### 7. 人工审阅
 
@@ -202,18 +190,15 @@ EvalRun 会使用 source RunArtifact 记录的模型参数；如果 source 没�
 
 按钮：`检查发布 Gate`、`发布为运行配置`
 
-完成 EvalRun 后即可进入这个节点；HumanReview 评分是参考证据，可以先保存，也可以跳过。
+只有完成 EvalRun 和 HumanReview 后才进入这个节点。
 
 发布前应确认：
 
 - candidate 相比 active 改了哪些行为规则或 policy。
-- 工具描述是否是 product/system 级共享配置，还是明确的 agent 级覆盖；不要把某个 agent 可用范围写进工具描述正文里。
 - EvalRun 是否 passed。
-- HumanReview 评分是否能支持你的质量判断。
+- HumanReview 是否 pass/improved。
 - 是否存在高风险 mocked memory writes。
 - 文件 diff 是否符合预期。
-
-发布成功后，普通 run 会读取当前 product 的 active resolved config：`BehaviorRuleConfig` 拼入主 agent instruction，`AgentToolPolicy` 控制可用工具和禁用工具，`ToolDescriptionConfig` 覆盖工具 description/参数说明/输出说明。draft/candidate 只用于评测，不会线上生效。
 
 如果 gate blocked，不要直接强制发布，除非是明确紧急修复，并写审计原因。
 

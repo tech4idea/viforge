@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { DEFAULT_TOOL_DESCRIPTIONS, resolveProductProfile, type AgentToolPolicy, type BehaviorRuleConfig, type ProductProfile, type Project, type RunArtifact, type RuntimeChatEndpoint, type StreamEvent, type ToolDescriptionConfig, type WorkspaceEntry } from '@viforge/shared';
+import { resolveProductProfile, type ProductProfile, type Project, type RunArtifact, type StreamEvent, type WorkspaceEntry } from '@viforge/shared';
 import { z } from 'zod';
 
 import { LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, PRODUCT_PROFILE } from '../env';
@@ -29,10 +29,9 @@ type LangGraphRunOptions = {
     instructions: string;
     tools: ReturnType<typeof createWorkspaceTools>;
   }) => LangGraphAgentClient;
-  chatEndpoint?: RuntimeChatEndpoint;
   createAgentRegistry?: (
     tools: ReturnType<typeof createWorkspaceTools>,
-    context: { model?: string; baseUrl?: string; apiKey?: string; chatEndpoint?: RuntimeChatEndpoint; connectionString?: string; traceId?: string; productProfile?: ProductProfile; layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig']; resolvedConfig?: EvalRunExecutorInput['resolvedAgentConfig'] },
+    context: { model?: string; baseUrl?: string; apiKey?: string; connectionString?: string; traceId?: string; productProfile?: ProductProfile; layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] },
   ) => Promise<AgentRegistry>;
   model?: string;
   baseUrl?: string;
@@ -45,8 +44,6 @@ type LangGraphRunOptions = {
   harnessStore?: HarnessStore;
   scheduleService?: ScheduleService;
 };
-
-type RuntimeToolPolicy = { allowedTools?: string[]; deniedTools?: string[] };
 
 type ToolState = {
   inputByToolCallId: Map<string, string>;
@@ -66,9 +63,6 @@ type IsolatedWorkspaceStoreOptions = {
 
 const SPECIALIST_AGENT_LABELS: Record<string, string> = {
   'brainstorm-agent': '脑暴',
-  'blog-writing-agent': '博客写作',
-  'research-agent': '资料核查',
-  'publisher-agent': '平台草稿',
   'character-agent': '人物设定',
   'continuity-agent': '连续性检查',
   'story-agent': '故事创作',
@@ -154,11 +148,7 @@ export function createLangGraphEvalRunExecutor(
   let releaseMemoryRun: (() => void) | undefined;
     const prompt = buildEvalRunPrompt(input);
     const evalModel = resolveEvalModel(input, options.model);
-    const evalResolvedConfig = buildResolvedRuntimeConfigWithPromptBlocks(input.resolvedAgentConfig);
-    const evalLayerConfig = evalResolvedConfig?.layerConfig;
-    const evalToolPolicy = resolveToolPolicy(evalResolvedConfig, 'system');
-    const evalToolDescriptionOverrides = resolveToolDescriptionOverrides(evalResolvedConfig, 'system');
-    const evalDeniedTools = mergeToolIds(evalToolPolicy.deniedTools, input.evalRunConfig?.highRiskToolMode === 'deny' ? HIGH_RISK_EVAL_TOOLS : undefined);
+    const evalLayerConfig = buildEvalLayerConfigWithPromptBlocks(input);
     const runInput: CreateRunInput = {
       runId,
       projectId: EVAL_PROJECT_ID,
@@ -173,20 +163,15 @@ export function createLangGraphEvalRunExecutor(
       traceId,
       productProfile,
       layerConfig: evalLayerConfig,
-      resolvedConfig: evalResolvedConfig,
     };
     const tools = createWorkspaceTools(isolatedStore, runInput.projectId, publish, runId, emittedAt, {
       traceId,
       gitService: options.gitService,
       gitConfigStore: options.gitConfigStore,
       browserService: options.browserService ?? createPlaywriterService(),
-      memoryFixture: shouldUseFixtureMemory(input) ? input.fixture.memoryFixture : undefined,
-      mockMemoryWrites: input.evalRunConfig?.memoryMode !== 'live',
-      knowledgeFixture: shouldUseFixtureKnowledge(input) ? input.fixture.knowledgeFixture : undefined,
-      toolMocks: resolveEvalToolMocks(input),
-      allowedTools: evalToolPolicy.allowedTools,
-      deniedTools: evalDeniedTools,
-      toolDescriptionOverrides: evalToolDescriptionOverrides,
+      memoryFixture: input.runMode === 'repro' ? input.fixture.memoryFixture : undefined,
+      mockMemoryWrites: true,
+      knowledgeFixture: input.runMode === 'repro' ? input.fixture.knowledgeFixture : undefined,
     });
     const registry = options.createAgentRegistry
       ? await options.createAgentRegistry(tools, registryOptions)
@@ -197,9 +182,9 @@ export function createLangGraphEvalRunExecutor(
     let outputMessage = '';
     if (options.createAgent) {
       const instructions = buildSystemInstructions(productProfile, evalLayerConfig);
-      const singleAgentTools = applyToolPolicyControls(registry
-        ? applyToolDescriptionOverrides({ ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId: runId, input: runInput, productId: productProfile.id, resolvedConfig: evalResolvedConfig }) }, evalToolDescriptionOverrides)
-        : tools, { allowedTools: evalToolPolicy.allowedTools });
+      const singleAgentTools = registry
+        ? { ...tools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId: runId, input: runInput, productId: productProfile.id }) }
+        : tools;
       const agent = options.createAgent({ instructions, tools: singleAgentTools });
       const streamed = await agent.stream(prompt, {
         runId,
@@ -222,9 +207,6 @@ export function createLangGraphEvalRunExecutor(
         runId,
         threadId: runId,
         options,
-        layerConfig: evalLayerConfig,
-        resolvedConfig: evalResolvedConfig,
-        toolDescriptionOverrides: evalToolDescriptionOverrides,
       });
     }
 
@@ -254,15 +236,13 @@ async function executeLangGraphRun({
   const emittedAt = () => new Date().toISOString();
   let releaseMemoryRun: (() => void) | undefined;
   const publish = (event: StreamEvent) => {
-    if (shouldLogStreamPublishEvent(event)) {
-      appendJsonLog('api-runs.jsonl', {
-        scope: 'langgraph-run',
-        stage: 'stream.publish',
-        runId,
-        projectId: input.projectId,
-        event,
-      });
-    }
+    appendJsonLog('api-runs.jsonl', {
+      scope: 'langgraph-run',
+      stage: 'stream.publish',
+      runId,
+      projectId: input.projectId,
+      event,
+    });
     void options.harnessStore?.recordRunArtifactEvent({
       runId,
       projectId: input.projectId,
@@ -287,11 +267,6 @@ async function executeLangGraphRun({
   try {
     releaseMemoryRun = beginMemorySensitiveLangGraphRun();
     const productProfile = options.productProfile ?? await store.getProjectProductProfile(input.projectId) ?? PRODUCT_PROFILE;
-    const resolvedAgentConfig = await options.harnessStore?.getActiveResolvedAgentConfig(productProfile.id);
-    const runtimeConfig = buildResolvedRuntimeConfigWithPromptBlocks(resolvedAgentConfig);
-    const runtimeLayerConfig = runtimeConfig?.layerConfig;
-    const toolDescriptionOverrides = resolveToolDescriptionOverrides(runtimeConfig, 'system');
-    const runtimeToolPolicy = resolveToolPolicy(runtimeConfig, 'system');
 
     // Build tools
     const tools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
@@ -301,12 +276,9 @@ async function executeLangGraphRun({
       gitService: options.gitService,
       gitConfigStore: options.gitConfigStore,
       browserService: options.browserService ?? createPlaywriterService(),
-      allowedTools: runtimeToolPolicy.allowedTools,
-      deniedTools: runtimeToolPolicy.deniedTools,
-      toolDescriptionOverrides,
     });
     const runTools = input.sessionId && options.scheduleService && input.source !== 'schedule'
-      ? { ...tools, ...applyToolDescriptionOverrides({ create_scheduled_task: createScheduledTaskTool({ scheduleService: options.scheduleService, projectId: input.projectId, sessionId: input.sessionId }) } as LangGraphToolset, toolDescriptionOverrides) }
+      ? { ...tools, create_scheduled_task: createScheduledTaskTool({ scheduleService: options.scheduleService, projectId: input.projectId, sessionId: input.sessionId }) }
       : tools;
     // Create agent registry from skills
     const registryOptions = {
@@ -314,8 +286,6 @@ async function executeLangGraphRun({
       model: input.model ?? options.model,
       traceId: input.traceId,
       productProfile,
-      layerConfig: runtimeLayerConfig,
-      resolvedConfig: runtimeConfig,
     };
     const registry = options.createAgentRegistry
       ? await options.createAgentRegistry(runTools, registryOptions)
@@ -330,10 +300,10 @@ async function executeLangGraphRun({
     let assistantText = '';
     if (options.createAgent) {
       // Backward compat: single agent mode
-      const instructions = buildSystemInstructions(productProfile, runtimeLayerConfig);
-      const singleAgentTools = applyToolPolicyControls(registry
-        ? applyToolDescriptionOverrides({ ...runTools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input, productId: productProfile.id, resolvedConfig: runtimeConfig }) }, toolDescriptionOverrides)
-        : runTools, runtimeToolPolicy);
+      const instructions = buildSystemInstructions(productProfile);
+      const singleAgentTools = registry
+        ? { ...runTools, delegate_to_specialist_agent: createSpecialistDelegationTool({ registry, publish, emittedAt, runId, threadId, input, productId: productProfile.id }) }
+        : runTools;
       const agent = options.createAgent({ instructions, tools: singleAgentTools });
 
       appendJsonLog('api-runs.jsonl', {
@@ -366,9 +336,6 @@ async function executeLangGraphRun({
         runId,
         threadId,
         options,
-        layerConfig: runtimeLayerConfig,
-        resolvedConfig: runtimeConfig,
-        toolDescriptionOverrides,
         signal,
       });
     }
@@ -380,18 +347,20 @@ async function executeLangGraphRun({
       publish({ type: 'run.end', runId, emittedAt: emittedAt(), status: 'success', errorMessage: null });
     }
   } catch (error) {
-    const modelServiceError = modelServiceErrorDetails(error);
-
+    const modelNotFound = isModelNotFoundError(error);
+    
     appendJsonLog('api-runs.jsonl', {
       scope: 'langgraph-run',
       stage: 'execute.error',
       runId,
       projectId: input.projectId,
       error,
-      modelServiceError,
+      modelNotFound,
     });
 
-    const errorMessage = userFacingModelServiceError(error, input.model);
+    const errorMessage = modelNotFound
+      ? `模型 ${input.model || '当前'} 不可用，请更换模型或联系管理员。网关返回：模型未找到。`
+      : (error instanceof Error ? error.message : 'Run failed');
 
     publish({
       type: 'run.end',
@@ -405,10 +374,6 @@ async function executeLangGraphRun({
   }
 }
 
-function shouldLogStreamPublishEvent(event: StreamEvent): boolean {
-  if (process.env.VIFORGE_RUN_VERBOSE_LOGS === '1') return true;
-  return event.type !== 'text.delta' && event.type !== 'thinking.delta' && event.type !== 'tool_use.delta';
-}
 function resolveRunModelParams(model: string | undefined): RunArtifact['modelParams'] {
   return {
     model,
@@ -429,9 +394,6 @@ async function executeMultiAgentWorkflow({
   runId,
   threadId,
   options,
-  layerConfig,
-  resolvedConfig,
-  toolDescriptionOverrides,
   signal,
 }: {
   registry: AgentRegistry;
@@ -444,12 +406,8 @@ async function executeMultiAgentWorkflow({
   runId: string;
   threadId: string;
   options: LangGraphRunOptions;
-  layerConfig?: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'];
-  resolvedConfig?: EvalRunExecutorInput['resolvedAgentConfig'];
-  toolDescriptionOverrides?: ToolDescriptionConfig[];
   signal?: AbortSignal;
 }): Promise<string> {
-  const toolPolicy = resolveToolPolicy(resolvedConfig, 'system');
   const baseTools = createWorkspaceTools(store, input.projectId, publish, runId, emittedAt, {
     imageGeneration: input.imageGeneration,
     traceId: input.traceId,
@@ -457,14 +415,11 @@ async function executeMultiAgentWorkflow({
     gitService: options.gitService,
     gitConfigStore: options.gitConfigStore,
     browserService: options.browserService ?? createPlaywriterService(),
-    allowedTools: toolPolicy.allowedTools,
-    deniedTools: toolPolicy.deniedTools,
-    toolDescriptionOverrides,
   });
   const scheduleTools: LangGraphToolset = input.sessionId && options.scheduleService && input.source !== 'schedule'
-    ? applyToolDescriptionOverrides({ create_scheduled_task: createScheduledTaskTool({ scheduleService: options.scheduleService, projectId: input.projectId, sessionId: input.sessionId }) } as LangGraphToolset, toolDescriptionOverrides ?? [])
+    ? { create_scheduled_task: createScheduledTaskTool({ scheduleService: options.scheduleService, projectId: input.projectId, sessionId: input.sessionId }) } as LangGraphToolset
     : {} as LangGraphToolset;
-  const orchestrationTools: LangGraphToolset = applyToolPolicyControls({
+  const orchestrationTools: LangGraphToolset = {
     ...baseTools,
     ...scheduleTools,
     delegate_to_specialist_agent: createSpecialistDelegationTool({
@@ -475,14 +430,12 @@ async function executeMultiAgentWorkflow({
       threadId,
       input,
       productId: productProfile.id,
-      resolvedConfig,
     }),
-  }, toolPolicy);
-  const systemInstructions = buildSystemInstructions(productProfile, layerConfig);
+  };
+  const systemInstructions = buildSystemInstructions(productProfile);
   const behaviorRulesStore = createBehaviorRulesStore(store);
   const behaviorRules = await behaviorRulesStore.getRules();
-  const policyBehaviorRules = resolvedBehaviorRulesFromConfig(resolvedConfig);
-  const mainInstructions = await buildMainAgentInstructions(systemInstructions, [...behaviorRules, ...policyBehaviorRules]);
+  const mainInstructions = await buildMainAgentInstructions(systemInstructions, behaviorRules);
   const mainAgent = await registry.systemAgent(mainInstructions, orchestrationTools);
 
   appendJsonLog('api-runs.jsonl', {
@@ -505,7 +458,6 @@ function createSpecialistDelegationTool({
   threadId,
   input,
   productId,
-  resolvedConfig,
 }: {
   registry: AgentRegistry;
   publish: (event: StreamEvent) => void;
@@ -514,17 +466,17 @@ function createSpecialistDelegationTool({
   threadId: string;
   input: CreateRunInput;
   productId: string;
-  resolvedConfig?: EvalRunExecutorInput['resolvedAgentConfig'];
 }) {
   return createTool({
     id: 'delegate_to_specialist_agent',
-    description: DEFAULT_TOOL_DESCRIPTIONS.delegate_to_specialist_agent,
+    description: [
+      '将明确需要专业创作能力的子任务交给一个 viforge specialist agent。',
+      '普通问候、解释、简单修改、文件读写和一般对话不要使用此工具，由主 agent 直接完成。',
+      '只有在任务明确属于脑暴、人物设定、连续性检查、原著分析、改编方案、故事/剧本创作、学习大纲、知识点搜索、知识点整理或审稿复盘时才委派。',
+    ].join('\n'),
     inputSchema: z.object({
       agentId: z.enum([
         'brainstorm-agent',
-        'blog-writing-agent',
-        'research-agent',
-        'publisher-agent',
         'character-agent',
         'continuity-agent',
         'story-agent',
@@ -539,12 +491,7 @@ function createSpecialistDelegationTool({
       task: z.string().min(1),
       context: z.string().default(''),
     }),
-    execute: async ({ agentId, task, context }) => {
-      const specialistPolicy = resolveToolPolicy(resolvedConfig, agentId);
-      if (specialistPolicy.deniedTools?.includes('delegate_to_specialist_agent')) {
-        return { agentId, output: `delegate_to_specialist_agent is denied for ${agentId}.`, summary: '' };
-      }
-      return runSpecialistAgent({
+    execute: async ({ agentId, task, context }) => runSpecialistAgent({
       registry,
       agentId,
       task,
@@ -555,8 +502,7 @@ function createSpecialistDelegationTool({
       threadId,
       input,
       productId,
-    });
-    },
+    }),
   });
 }
 
@@ -571,7 +517,14 @@ function createScheduledTaskTool({
 }) {
   return createTool({
     id: 'create_scheduled_task',
-    description: DEFAULT_TOOL_DESCRIPTIONS.create_scheduled_task,
+    description: [
+      '创建绑定当前会话的定时任务。',
+      '仅当用户明确要求在未来某个时间、周期性、每天、每周、每隔一段时间执行提醒或通知时调用。',
+      '本工具只负责创建任务，不会立即发送微信消息；任务到期后会启动一次 schedule 来源的 agent run。',
+      '当前 MVP 的任务动作是在执行时实时生成一条微信消息，并由执行 run 调用 send_wechat_message 发送给已绑定微信。',
+      '不要在创建任务时提前写死将来要发送的正文。',
+      '如果用户没有给出可执行时间或实时生成内容的要求，先追问，不要创建任务。',
+    ].join('\n'),
     inputSchema: z.object({
       title: z.string().min(1).optional().describe('任务标题，简短描述该提醒任务'),
       sourcePrompt: z.string().min(1).describe('用户原始请求或你归纳的创建依据'),
@@ -793,9 +746,6 @@ async function runAgentGenerate(
 function getSpecialistAgent(registry: AgentRegistry, agentId: string): LangGraphAgentClient | null {
   switch (agentId) {
     case 'brainstorm-agent': return registry.brainstorm;
-    case 'blog-writing-agent': return registry.blogWriting;
-    case 'research-agent': return registry.research;
-    case 'publisher-agent': return registry.publisher;
     case 'character-agent': return registry.character;
     case 'continuity-agent': return registry.continuity;
     case 'story-agent': return registry.story;
@@ -1131,10 +1081,10 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '调用 create_scheduled_task 前必须确认有明确的 nextRunAt、频率和执行时内容生成要求；缺少时间或生成要求时先追问。',
     '创建定时任务后，用简短文字告诉用户任务标题、下次执行时间和执行时会实时生成微信内容。',
     'send_wechat_message 只用于当前 run 立即发送微信文本，不用于创建未来或周期性发送任务。',
-    '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点、整理在线资料或生成平台草稿时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
+    '当用户要求访问网页、读取当前浏览器页面、用已登录网页查资料、搜索知识点或整理在线资料时，使用 browser_status、browser_navigate、browser_snapshot 和 browser_evaluate。',
     '如果用户需要启用浏览器访问，或 browser_status/browser_navigate 提示 Playwriter 未安装、relay 不可达、没有授权标签页，调用 browser_use_install 给出安装和连接指引。',
-    '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取；上传封面图、文中图或工作区文件时使用 browser_upload_file。',
-    '涉及登录、提交、购买、删除、发布、授权、付款、文件上传、保存草稿或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
+    '浏览器工具基于 Playwriter，连接用户授权的真实浏览器标签页。优先用 browser_snapshot 获取页面文字和 aria-ref，再用 browser_evaluate 做必要点击、输入、等待或结构化提取。',
+    '涉及登录、提交、购买、删除、发布、授权、付款或修改远端数据的浏览器操作，必须先向用户说明将执行的动作并等待确认。',
     '如果 Playwriter 未连接，直接告诉用户需要安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 playwriter serve。不要假装已访问网页。',
     '系统只自动保留最近几轮短期对话；语义检索和长期记忆更新由你按任务需要主动调用工具。',
     '当当前上下文不足以确认早期设定、用户偏好、角色关系、伏笔、已否决方案或审稿标准时，调用 recall_project_memory。',
@@ -1142,12 +1092,12 @@ async function buildMainAgentInstructions(systemInstructions: string, behaviorRu
     '当本轮产生了未来仍有复用价值的稳定事实、偏好、角色规则、连续性约束、已否决方向或质量标准时，调用 remember_project_memory 写入精选语义记忆。',
     '不要把一次性过程、临时推理、工具流水账、未经确认的猜测或整段对话写入长期记忆。',
     '只有当任务明确需要专业判断或专业产物时，才使用 delegate_to_specialist_agent 委派给 specialist agent。',
-    '可委派的 specialist agent：brainstorm-agent、blog-writing-agent、research-agent、publisher-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、outline-agent、knowledge-search-agent、knowledge-organizer-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
+    '可委派的 specialist agent：brainstorm-agent、character-agent、continuity-agent、story-agent、source-analyst-agent、adaptation-planner-agent、screenwriter-agent、outline-agent、knowledge-search-agent、knowledge-organizer-agent、reviewer-agent；如果对应 skill 未安装，工具会返回未找到。',
     '委派时只拆出必要的子任务，并把当前上下文、已读取文件摘要、用户目标和期望输出传给 specialist。',
     '收到 specialist 结果后，由你继续综合、解释、决定是否写入文件，并向用户给出最终答复。',
     '如果用户只是要求”帮我改一句/润色一段/解释这个文件/打个招呼”，不要委派。',
     '在情景剧故事创作中，如果人物动机、角色关系或角色行为边界不清，先委派 character-agent；如果涉及多集历史、固定设定或上一集状态，先委派 continuity-agent。',
-    '如果用户明确要求”脑暴方向/写博客文章/润色正文/核查资料/生成平台草稿/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿/生成学习大纲/搜索知识点/整理资料”，再委派给对应 specialist。',
+    '如果用户明确要求”脑暴方向/完善人物/检查连续性/做原著分析/制定改编方案/写正式故事或剧本/严格审稿/生成学习大纲/搜索知识点/整理资料”，再委派给对应 specialist。',
   ];
 
   const localBase = base.join('\n\n');
@@ -1197,151 +1147,35 @@ function stringifyAgentInput(input: LangGraphAgentInput): string {
   return input.map((message) => `${message.role}: ${message.content}`).join('\n\n');
 }
 
-function buildResolvedRuntimeConfigWithPromptBlocks(
-  config: EvalRunExecutorInput['resolvedAgentConfig'] | undefined,
-): EvalRunExecutorInput['resolvedAgentConfig'] | undefined {
-  if (!config) return undefined;
-  return {
-    ...config,
-    layerConfig: buildRuntimeLayerConfigWithPromptBlocks(config.layerConfig, config.promptBlocks),
-  };
-}
-
-function buildRuntimeLayerConfigWithPromptBlocks(
-  layerConfig: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] | undefined,
-  promptBlocks: NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['promptBlocks'] | undefined,
-): NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] | undefined {
+function buildEvalLayerConfigWithPromptBlocks(input: EvalRunExecutorInput): NonNullable<EvalRunExecutorInput['resolvedAgentConfig']>['layerConfig'] | undefined {
+  const layerConfig = input.resolvedAgentConfig?.layerConfig;
   if (!layerConfig) return undefined;
-  const behaviorRules = (promptBlocks ?? [])
-    .filter((block) => block.content?.trim())
+  const behaviorRules = (input.resolvedAgentConfig?.promptBlocks ?? [])
+    .filter((block) => input.agentSpec.promptBlockRefs.includes(block.ref) && block.content?.trim())
     .map((block) => `### ${block.ref}\n${block.content!.trim()}`);
   if (behaviorRules.length === 0) return layerConfig;
 
   const behaviorSection = ['## Agent 行为规则', ...behaviorRules].join('\n\n');
+  if (input.agentSpec.agentId === 'system') {
+    return {
+      ...layerConfig,
+      systemAgent: {
+        ...layerConfig.systemAgent,
+        instructionOverride: appendInstructionSection(layerConfig.systemAgent.instructionOverride, behaviorSection),
+      },
+    };
+  }
+
   return {
     ...layerConfig,
-    systemAgent: {
-      ...layerConfig.systemAgent,
-      instructionOverride: appendInstructionSection(layerConfig.systemAgent.instructionOverride, behaviorSection),
-    },
-    specialists: layerConfig.specialists.map((specialist) => ({
-      ...specialist,
-      instructionOverride: appendInstructionSection(specialist.instructionOverride, behaviorSection),
-    })),
+    specialists: layerConfig.specialists.map((specialist) => specialist.agentId === input.agentSpec.agentId
+      ? { ...specialist, instructionOverride: appendInstructionSection(specialist.instructionOverride, behaviorSection) }
+      : specialist),
   };
 }
 
 function appendInstructionSection(base: string | undefined, section: string): string {
   return [base?.trim(), section.trim()].filter(Boolean).join('\n\n');
-}
-
-function resolveToolDescriptionOverrides(
-  config: EvalRunExecutorInput['resolvedAgentConfig'] | undefined,
-  agentId?: string,
-): ToolDescriptionConfig[] {
-  const overrides = config?.toolDescriptionOverrides ?? config?.layerConfig?.toolDescriptionOverrides ?? [];
-  return overrides.filter((override) => override.scope !== 'agent' || !agentId || override.agentId === agentId);
-}
-
-function resolveToolPolicy(config: EvalRunExecutorInput['resolvedAgentConfig'] | undefined, agentId?: string): RuntimeToolPolicy {
-  const policies = filterPoliciesForAgent(config?.toolPolicies ?? [], agentId);
-  const allowed = uniqueStrings(policies.flatMap((policy) => policy.allowedToolIds));
-  const denied = uniqueStrings(policies.flatMap((policy) => policy.deniedToolIds));
-  return {
-    allowedTools: allowed.length > 0 ? allowed : undefined,
-    deniedTools: denied.length > 0 ? denied : undefined,
-  };
-}
-
-function filterPoliciesForAgent(policies: AgentToolPolicy[], agentId?: string): AgentToolPolicy[] {
-  return policies.filter((policy) => policy.scope !== 'agent' || !agentId || policy.agentId === agentId);
-}
-
-function applyToolPolicyControls<T extends Record<string, unknown>>(
-  tools: T,
-  policy: RuntimeToolPolicy,
-): T {
-  const allowed = new Set(policy.allowedTools ?? []);
-  const denied = new Set(policy.deniedTools ?? []);
-  for (const toolId of Object.keys(tools)) {
-    if (denied.has(toolId) || (allowed.size > 0 && !allowed.has(toolId))) {
-      delete tools[toolId];
-    }
-  }
-  return tools;
-}
-
-function mergeToolIds(...groups: Array<string[] | undefined>): string[] | undefined {
-  const merged = uniqueStrings(groups.flatMap((group) => group ?? []));
-  return merged.length > 0 ? merged : undefined;
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-}
-
-function resolvedBehaviorRulesFromConfig(
-  config: EvalRunExecutorInput['resolvedAgentConfig'] | undefined,
-): BehaviorRule[] {
-  const rules = config?.behaviorRules ?? [];
-  return rules
-    .filter((rule) => rule.status === undefined || rule.status === 'active' || rule.status === 'candidate')
-    .map((rule) => ({ id: rule.id, label: rule.title ?? rule.id, content: rule.content, enabled: true, builtIn: false }));
-}
-
-function shouldUseFixtureMemory(input: EvalRunExecutorInput): boolean {
-  return input.evalRunConfig ? input.evalRunConfig.memoryMode === 'fixture' : input.runMode === 'repro';
-}
-
-function shouldUseFixtureKnowledge(input: EvalRunExecutorInput): boolean {
-  return input.evalRunConfig ? input.evalRunConfig.knowledgeMode === 'fixture' : input.runMode === 'repro';
-}
-
-const HIGH_RISK_EVAL_TOOLS = [
-  'write_workspace_file',
-  'delete_workspace_file',
-  'move_workspace_entry',
-  'run_bash',
-  'sync_to_remote',
-  'update_project_memory',
-  'remember_project_memory',
-  'generate_project_image',
-  'edit_project_image',
-  'send_wechat_message',
-  'send_wechat_file',
-  'create_scheduled_task',
-];
-
-function resolveEvalToolMocks(input: EvalRunExecutorInput): Record<string, unknown> | undefined {
-  if (input.evalRunConfig?.highRiskToolMode === 'allow') return undefined;
-  return { ...(input.fixture.toolMocks ?? {}), ...(input.evalRunConfig?.toolMocks ?? {}) };
-}
-
-function applyToolDescriptionOverrides<T extends Record<string, unknown>>(tools: T, overrides: ToolDescriptionConfig[]): T {
-  for (const override of overrides) {
-    const tool = tools[override.toolId];
-    if (tool && typeof tool === 'object' && 'description' in tool && typeof (tool as { description?: unknown }).description === 'string') {
-      (tool as { description: string }).description = [
-        override.description.trim(),
-        override.outputDescription?.trim() ? `输出：${override.outputDescription.trim()}` : '',
-      ].filter(Boolean).join('\n');
-      const currentSchema = (tool as { schema?: unknown }).schema;
-      if (currentSchema instanceof z.ZodObject && override.parameterDescriptions) {
-        (tool as { schema?: z.AnyZodObject }).schema = applyParameterDescriptions(currentSchema, override.parameterDescriptions);
-      }
-    }
-  }
-  return tools;
-}
-
-function applyParameterDescriptions(schema: z.AnyZodObject, descriptions: Record<string, string>): z.AnyZodObject {
-  const shape = schema.shape;
-  const nextShape: Record<string, z.ZodTypeAny> = {};
-  for (const [key, value] of Object.entries(shape) as Array<[string, z.ZodTypeAny]>) {
-    const description = descriptions[key]?.trim();
-    nextShape[key] = description ? value.describe(description) : value;
-  }
-  return schema.extend(nextShape);
 }
 
 function formatResolvedEvalConfig(input: EvalRunExecutorInput): string {
@@ -1363,7 +1197,6 @@ function formatResolvedEvalConfig(input: EvalRunExecutorInput): string {
     `retrievalPolicy: ${config?.retrievalPolicy ? `${config.retrievalPolicy.id}@${config.retrievalPolicy.version}` : 'none'}`,
     `promptBlocks: ${(config?.promptBlockRefs ?? input.agentSpec.promptBlockRefs).join(',') || 'none'}`,
     `skillRefs: ${(config?.skillRefs ?? input.agentSpec.skillRefs).map((skill) => `${skill.skillId}${skill.version ? `@${skill.version}` : ''}${skill.contentHash ? `#${skill.contentHash}` : ''}`).join(',') || 'none'}`,
-    `toolDescriptionOverrides: ${(config?.toolDescriptionOverrides ?? []).map((override) => override.toolId).join(',') || 'none'}`,
     '',
     'systemAgent:',
     `- ${layer?.systemAgent.agentId ?? 'system'}: tools=${layer?.systemAgent.allowedTools.join(',') || 'default'}, prompts=${layer?.systemAgent.promptBlockRefs.join(',') || 'none'}`,
@@ -1565,89 +1398,17 @@ function inferEvalMimeType(filePath: string): string {
   return 'application/octet-stream';
 }
 
-type ModelServiceErrorDetails = {
-  status?: number;
-  code?: string;
-  message?: string;
-  providerMessage?: string;
-  responseBody?: string;
-};
-
-function userFacingModelServiceError(error: unknown, _model: string | undefined): string {
-  const details = modelServiceErrorDetails(error);
-
-  if (isModelNotFoundError(error)) {
-    return '模型调用失败：模型不存在或不可用。';
-  }
-
-  if (details.status === 401) {
-    return '模型调用失败：认证失败（401）。';
-  }
-
-  if (details.status === 403) {
-    return '模型调用失败：权限不足或账户无权访问该模型（403）。';
-  }
-
-  if (details.status === 429) {
-    return '模型调用失败：限流或额度不足（429）。';
-  }
-
-  if (details.status === 400) {
-    return '模型调用失败：请求参数无效或上下文过长（400）。';
-  }
-
-  if (details.status && details.status >= 500) {
-    return `模型调用失败：模型服务异常（${details.status}）。`;
-  }
-
-  if (isLikelyModelNetworkError(details.message)) {
-    return '模型调用失败：连接超时或网络不可达。';
-  }
-
-  return `模型调用失败：${details.providerMessage ?? details.message ?? '未知错误'}`;
-}
-
 function isModelNotFoundError(error: unknown): boolean {
-  const details = modelServiceErrorDetails(error);
-  return details.status === 404
-    || details.code === 'model_not_found'
-    || details.responseBody?.includes('model_not_found') === true;
-}
-
-function modelServiceErrorDetails(error: unknown): ModelServiceErrorDetails {
-  const err = isRecord(error) ? error : undefined;
-  const data = isRecord(err?.data) ? err.data : undefined;
-  const nestedError = isRecord(err?.error) ? err.error : isRecord(data?.error) ? data.error : undefined;
-  const response = isRecord(err?.response) ? err.response : undefined;
-
-  return {
-    status: numberValue(err?.statusCode) ?? numberValue(err?.status) ?? numberValue(response?.status) ?? statusFromMessage(error instanceof Error ? error.message : stringValue(error)),
-    code: stringValue(err?.code) ?? stringValue(nestedError?.code),
-    message: error instanceof Error ? error.message : stringValue(error),
-    providerMessage: stringValue(nestedError?.message),
-    responseBody: stringValue(err?.responseBody) ?? stringValue(err?.body),
-  };
-}
-
-function isLikelyModelNetworkError(message: string | undefined): boolean {
-  return Boolean(message && /(timeout|timed out|abort|fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network)/i.test(message));
-}
-
-function statusFromMessage(message: string | undefined): number | undefined {
-  const status = message?.match(/\b(400|401|403|404|429|5\d{2})\b/)?.[1];
-  return status ? Number(status) : undefined;
-}
-
-function numberValue(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value : undefined;
+  if (!error || typeof error !== 'object') return false;
+  const err = error as Record<string, unknown>;
+  if (err.statusCode === 404) return true;
+  if (typeof err.responseBody === 'string' && err.responseBody.includes('model_not_found')) return true;
+  const data = err.data as Record<string, unknown> | undefined;
+  if (data?.error && typeof data.error === 'object') {
+    const errObj = data.error as Record<string, unknown>;
+    if (errObj.code === 'model_not_found') return true;
+  }
+  return false;
 }
 
 export const __langGraphRunServiceTest = {

@@ -26,7 +26,6 @@ export function createWechatPoller(
   let running = false;
   let lastPollAt: string | null = null;
   let pollError: string | null = null;
-  let emptyPollCount = 0;
   let runningPromise: Promise<void> | null = null;
 
   async function pollLoop(): Promise<void> {
@@ -39,16 +38,8 @@ export function createWechatPoller(
         pollError = null;
 
         if (result.updates.length > 0) {
-          emptyPollCount = 0;
           console.info('[wechat-poller] updates received', {
             count: result.updates.length,
-            previousCursor: cursor ?? '',
-            nextCursor: result.cursor,
-          });
-        } else {
-          emptyPollCount += 1;
-          console.info('[wechat-poller] poll ok, no updates', {
-            emptyPollCount,
             previousCursor: cursor ?? '',
             nextCursor: result.cursor,
           });
@@ -59,21 +50,10 @@ export function createWechatPoller(
         }
 
         for (const update of result.updates) {
-          const messageId = update.messageId ?? update.updateId;
           try {
-            const { accepted } = await wechatStore.checkAndRecordInbound(messageId, update.fromUserId);
-            if (!accepted) {
-              console.warn('[wechat-poller] skipped inbound message', {
-                fromUserId: update.fromUserId,
-                messageId,
-                reason: 'not_connected_or_duplicate_or_unbound_user',
-              });
-              continue;
-            }
-
             console.info('[wechat-poller] dispatch message', {
               fromUserId: update.fromUserId,
-              messageId,
+              messageId: update.updateId,
               textLength: update.text.length,
               hasContextToken: Boolean(update.contextToken),
             });
@@ -82,7 +62,7 @@ export function createWechatPoller(
               fromDisplayName: update.fromDisplayName,
               text: update.text,
               contextToken: update.contextToken,
-              messageId,
+              messageId: update.updateId,
             });
           } catch (err) {
             console.error('[wechat-poller] msg handler error', err);
@@ -101,7 +81,6 @@ export function createWechatPoller(
       if (running) return;
       running = true;
       pollError = null;
-      emptyPollCount = 0;
       console.info('[wechat-poller] started');
       runningPromise = pollLoop();
     },

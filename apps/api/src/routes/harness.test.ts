@@ -64,107 +64,6 @@ describe('harness routes', () => {
     ]));
   });
 
-  it('creates, filters, updates, and deletes unreferenced runtime config flow drafts', async () => {
-    const createResponse = await app.request('/api/harness/runtime-config-flows', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        agentId: 'story-agent',
-        name: 'sitcom / story-agent / 本地配置流程',
-        tags: ['smoke', 'story-agent'],
-        nodeRefs: { agentConfig: { source: 'reused', name: '当前发布配置' } },
-      }),
-    });
-    expect(createResponse.status).toBe(201);
-    const flow = await createResponse.json();
-    expect(flow).toMatchObject({ productId: 'sitcom', agentId: 'story-agent', status: 'draft', releaseState: 'never_released', gateStatus: 'unknown' });
-
-    const filteredResponse = await app.request('/api/harness/runtime-config-flows?productId=sitcom&agentId=story-agent&query=%E6%9C%AC%E5%9C%B0&sort=createdAt');
-    expect(filteredResponse.status).toBe(200);
-    await expect(filteredResponse.json()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: flow.id, name: 'sitcom / story-agent / 本地配置流程' }),
-    ]));
-
-    const updateResponse = await app.request(`/api/harness/runtime-config-flows/${flow.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        status: 'candidate',
-        changes: [{ scope: 'agent', area: 'agent_prompt', agentId: 'story-agent', summary: '准备调整 story-agent 主体提示词。' }],
-      }),
-    });
-    expect(updateResponse.status).toBe(200);
-    await expect(updateResponse.json()).resolves.toMatchObject({ id: flow.id, status: 'candidate', changes: [expect.objectContaining({ area: 'agent_prompt' })] });
-
-    const archiveResponse = await app.request(`/api/harness/runtime-config-flows/${flow.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ status: 'archived' }),
-    });
-    expect(archiveResponse.status).toBe(200);
-    await expect(archiveResponse.json()).resolves.toMatchObject({ id: flow.id, status: 'archived', releaseState: 'archived', archivedAt: expect.any(String) });
-
-    const deleteArchivedResponse = await app.request(`/api/harness/runtime-config-flows/${flow.id}`, { method: 'DELETE' });
-    expect(deleteArchivedResponse.status).toBe(404);
-    await expect(deleteArchivedResponse.json()).resolves.toMatchObject({ error: expect.stringContaining('Only unreferenced runtime config flow drafts') });
-
-    const draftResponse = await app.request('/api/harness/runtime-config-flows', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ productId: 'sitcom', name: '未引用草稿' }),
-    });
-    expect(draftResponse.status).toBe(201);
-    const draft = await draftResponse.json();
-    const deleteResponse = await app.request(`/api/harness/runtime-config-flows/${draft.id}`, { method: 'DELETE' });
-    expect(deleteResponse.status).toBe(200);
-    await expect(deleteResponse.json()).resolves.toEqual({ deleted: true });
-  });
-
-  it('keeps workspace manifests read-only through Harness routes', async () => {
-    const listResponse = await app.request('/api/harness/workspace-manifests');
-    expect(listResponse.status).toBe(200);
-    await expect(listResponse.json()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ productId: 'sitcom', status: 'active' }),
-      expect.objectContaining({ productId: 'novel-adaptation', status: 'active' }),
-    ]));
-
-    const createResponse = await app.request('/api/harness/workspace-manifests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        templateVersion: 99,
-        status: 'active',
-        artifactTypes: { plan: { canonicalPath: '02 故事/新结构.md', requiredSections: [] } },
-      }),
-    });
-    expect(createResponse.status).toBe(404);
-  });
-
-  it('rejects hard delete for runtime config flows with candidate, eval, or release evidence', async () => {
-    const summary = await harnessStore.getSummary();
-    const spec = summary.agentSpecs.find((item) => item.productId === 'sitcom' && item.agentId === 'story-agent' && item.status === 'active');
-    expect(spec).toBeDefined();
-
-    const createResponse = await app.request('/api/harness/runtime-config-flows', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        agentId: 'story-agent',
-        name: 'sitcom / story-agent / 已引用配置流程',
-        candidateSpecId: spec?.id,
-      }),
-    });
-    expect(createResponse.status).toBe(201);
-    const flow = await createResponse.json();
-
-    const deleteResponse = await app.request(`/api/harness/runtime-config-flows/${flow.id}`, { method: 'DELETE' });
-    expect(deleteResponse.status).toBe(404);
-    await expect(deleteResponse.json()).resolves.toMatchObject({ error: expect.stringContaining('Only unreferenced runtime config flow drafts') });
-  });
-
   it('captures a full lightweight project snapshot before a run', async () => {
     const project = await store.createProject({ name: 'Harness Snapshot Writers', productId: 'sitcom' });
     await store.writeWorkspaceFile(project.id, '01 人物/老周.md', '# 老周\n\n怕担责但爱面子。');
@@ -418,59 +317,32 @@ describe('harness routes', () => {
     ]));
     expect(fixture.toolRetentionArtifacts.find((artifact: { toolName?: string }) => artifact.toolName === 'searchNotes')?.inputExcerpt).toBeUndefined();
     expect(fixture.toolRetentionArtifacts.find((artifact: { toolName?: string }) => artifact.toolName === 'writeWorkspaceFile')?.inputExcerpt).toBeUndefined();
-    expect(fixture.assertions).toEqual({});
-    expect(fixture.expectedChangedFiles).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: '02 改编方案/01 第一集/单集改编方案.md', content: expect.stringContaining('# 01 第一集单集改编方案') }),
-    ]));
-
-    const assertionConfigResponse = await app.request('/api/harness/assertion-configs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'novel-adaptation',
-        name: '改编方案结构断言',
-        status: 'candidate',
-        source: { type: 'run_artifact', id: run.id },
-        assertions: [
-          {
-            id: 'must-modify-plan',
-            kind: 'file_change',
-            enabled: true,
-            severity: 'blocking',
-            config: { mustModify: ['02 改编方案/01 第一集/单集改编方案.md'] },
-          },
-          {
-            id: 'plan-heading',
-            kind: 'markdown_section',
-            enabled: true,
-            severity: 'blocking',
-            config: { path: '02 改编方案/01 第一集/单集改编方案.md', requiredHeadings: ['01 第一集单集改编方案'] },
-          },
-          {
-            id: 'manifest-plan-path',
-            kind: 'manifest_compliance',
-            enabled: true,
-            severity: 'blocking',
-            config: { artifactType: 'plan' },
-          },
-          {
-            id: 'only-plan-path',
-            kind: 'path_constraint',
-            enabled: true,
-            severity: 'blocking',
-            config: { allowedPaths: ['02 改编方案/01 第一集/单集改编方案.md'], allowDeletes: false },
-          },
-        ],
-        tags: ['from-run-artifact'],
+    expect(fixture.assertions.files.mustCreateOrModify).toContain('02 改编方案/01 第一集/单集改编方案.md');
+    expect(fixture.assertions.files.mustModify).toContain('02 改编方案/01 第一集/单集改编方案.md');
+    expect(fixture.assertions.markdown).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: '02 改编方案/01 第一集/单集改编方案.md',
+        requiredHeadings: expect.arrayContaining(['01 第一集单集改编方案']),
       }),
+    ]));
+    expect(fixture.assertions.manifest).toEqual(expect.arrayContaining([
+      expect.objectContaining({ artifactType: 'plan', path: '02 改编方案/01 第一集/单集改编方案.md' }),
+    ]));
+    expect(fixture.assertions.workflow).toMatchObject({ mustPassReviewer: true, mustPassWorkflow: true });
+    expect(fixture.assertions.workflow.mustRunPhases).toEqual(expect.arrayContaining([
+      'adaptation-planner-agent:改编方案',
+      'reviewer-agent:方案审稿',
+    ]));
+    expect(fixture.assertions.diff).toMatchObject({
+      allowedPaths: ['02 改编方案/01 第一集/单集改编方案.md'],
+      allowDeletes: false,
     });
-    expect(assertionConfigResponse.status).toBe(201);
-    const artifactAssertionConfig = await assertionConfigResponse.json();
 
     const updatedFixtureResponse = await app.request(`/api/harness/eval-fixtures/${fixture.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        assertions: { ...fixture.assertions, files: { ...fixture.assertions.files, mustNotWrite: ['01 原著资料/**'] } },
         tags: ['confirmed'],
         toolRetentionPolicy: fixture.toolRetentionPolicy.map((policy: { toolCallId: string }) => ({ ...policy, retention: 'excerpt_hash' })),
         toolRetentionArtifacts: fixture.toolRetentionArtifacts.map((artifact: { toolCallId: string }) => ({ ...artifact, retention: 'excerpt_hash', inputExcerpt: 'manually reviewed excerpt' })),
@@ -478,7 +350,7 @@ describe('harness routes', () => {
     });
     expect(updatedFixtureResponse.status).toBe(200);
     const updatedFixture = await updatedFixtureResponse.json();
-    expect(updatedFixture.assertions).toEqual({});
+    expect(updatedFixture.assertions.files.mustNotWrite).toEqual(['01 原著资料/**']);
     expect(updatedFixture.tags).toEqual(['confirmed']);
     expect(updatedFixture.toolRetentionPolicy).toEqual(expect.arrayContaining([
       expect.objectContaining({ toolName: 'writeWorkspaceFile', retention: 'excerpt_hash' }),
@@ -501,6 +373,10 @@ describe('harness routes', () => {
       retention: 'full',
       matchedSensitiveRules: [],
     });
+    expect(fixture.expectedChangedFiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '02 改编方案/01 第一集/单集改编方案.md', content: expect.stringContaining('# 01 第一集单集改编方案') }),
+    ]));
+
     const specResponse = await app.request('/api/harness/agent-specs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -511,7 +387,7 @@ describe('harness routes', () => {
     const evalRunResponse = await app.request('/api/harness/eval-runs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fixtureId: updatedFixture.id, agentSpecId: spec.id, assertionConfigId: artifactAssertionConfig.id, runMode: 'repro' }),
+      body: JSON.stringify({ fixtureId: updatedFixture.id, agentSpecId: spec.id, runMode: 'repro' }),
     });
     const evalRun = await evalRunResponse.json();
     expect(evalRun.status).toBe('passed');
@@ -519,11 +395,14 @@ describe('harness routes', () => {
       expect.objectContaining({ path: '02 改编方案/01 第一集/单集改编方案.md', change: 'modified' }),
     ]));
     expect(evalRun.assertionResults).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'files.mustCreateOrModify:02 改编方案/01 第一集/单集改编方案.md', passed: true }),
       expect.objectContaining({ id: 'files.mustModify:02 改编方案/01 第一集/单集改编方案.md', passed: true }),
       expect.objectContaining({ id: 'markdown.requiredHeadings:02 改编方案/01 第一集/单集改编方案.md:01 第一集单集改编方案', passed: true }),
-      expect.objectContaining({ id: 'manifest.canonicalPath:plan:02 改编方案/全季改编方案.md', passed: true }),
+      expect.objectContaining({ id: 'manifest.canonicalPath:plan:02 改编方案/01 第一集/单集改编方案.md', passed: true }),
+      expect.objectContaining({ id: 'workflow.mustPassReviewer', passed: true }),
+      expect.objectContaining({ id: 'workflow.mustPassWorkflow', passed: true }),
+      expect.objectContaining({ id: 'workflow.mustRunPhases:adaptation-planner-agent:改编方案', passed: true }),
       expect.objectContaining({ id: 'diff.allowedPaths', passed: true }),
-      expect.objectContaining({ id: 'diff.allowDeletes', passed: true }),
     ]));
 
     const reviewResponse = await app.request(`/api/harness/eval-runs/${evalRun.id}/human-review`, {
@@ -534,8 +413,7 @@ describe('harness routes', () => {
         rubricVersion: 1,
         reviewer: 'default',
         decision: 'pass',
-        scoreStates: { causality: 'scored', character_consistency: 'scored', comedy_mechanism: 'scored', originality: 'scored', performability: 'scored' },
-        scores: { causality: 8, character_consistency: 8, comedy_mechanism: 8, originality: 7, performability: 8 },
+        scores: { causality: 4, character_consistency: 4, comedy_mechanism: 4, originality: 3, performability: 4 },
         annotations: [
           { path: '02 改编方案/01 第一集/单集改编方案.md', line: 12, assertionId: 'diff.allowedPaths', severity: 'issue', comment: '这里的升级链条仍然偏弱。' },
         ],
@@ -640,7 +518,7 @@ describe('harness routes', () => {
       checks: expect.arrayContaining([
         expect.objectContaining({ id: 'has_eval_run', passed: false }),
         expect.objectContaining({ id: 'has_passing_eval_run', passed: false }),
-        expect.objectContaining({ id: 'human_review_is_reference', passed: true }),
+        expect.objectContaining({ id: 'has_positive_human_review', passed: false }),
       ]),
       configChanges: expect.arrayContaining([
         expect.objectContaining({ field: 'promptBlockRefs', changed: true }),
@@ -732,8 +610,7 @@ describe('harness routes', () => {
         rubricVersion: 1,
         reviewer: 'default',
         decision: 'pass',
-        scoreStates: { causality: 'scored', character_consistency: 'scored', comedy_mechanism: 'scored', originality: 'scored', performability: 'scored' },
-        scores: { causality: 8, character_consistency: 8, comedy_mechanism: 8, originality: 8, performability: 8 },
+        scores: { causality: 4, character: 4, comedy: 4, originality: 4, performability: 4 },
         annotations: [{ path: '02 故事/01 第一集/单集大纲.md', severity: 'note', comment: '批量评分备注。' }],
       }),
     });
@@ -982,88 +859,6 @@ describe('harness routes', () => {
     });
   });
 
-  it('applies eval run config tool-deny policy inside LangGraph isolated evals', async () => {
-    const langGraphStore = createHarnessStore(path.join(root, 'harness-langgraph-tool-policy'), store, {
-      evalRunExecutor: createLangGraphEvalRunExecutor(store, {
-        createAgent: ({ tools }) => ({
-          id: 'test-agent',
-          name: 'Test Agent',
-          async stream() {
-            await tools.write_workspace_file.invoke({
-              path: '02 故事/01 第一集/单集大纲.md',
-              content: '# 单集大纲\n\n## 主角目标\n\n被 deny 后不应写入。\n',
-            });
-            return { fullStream: (async function* () { yield { type: 'text-delta' as const, payload: { text: 'attempted write' } }; })() };
-          },
-          async generate() {
-            return { text: 'unused' };
-          },
-        }),
-      }),
-    });
-    const langGraphApp = new Hono()
-      .route('/api', createRunsRoutes(createMockRunService(store), undefined, langGraphStore))
-      .route('/api', createHarnessRoutes(langGraphStore));
-    const project = await store.createProject({ name: 'Harness Eval Tool Policy', productId: 'sitcom' });
-    await store.writeWorkspaceFile(project.id, '02 故事/01 第一集/单集大纲.md', '# 旧大纲\n');
-    const snapshot = await langGraphStore.createRunInputSnapshot({
-      runId: 'eval-tool-policy-run',
-      projectId: project.id,
-      productId: 'sitcom',
-      prompt: '尝试写入大纲',
-    });
-    const fixtureResponse = await langGraphApp.request('/api/harness/eval-fixtures', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        snapshotId: snapshot.id,
-        target: 'story-agent-workflow',
-        inputMessages: [{ role: 'user', content: '尝试写入大纲' }],
-        assertions: { files: { mustModify: ['02 故事/01 第一集/单集大纲.md'] } },
-      }),
-    });
-    expect(fixtureResponse.status).toBe(201);
-    const fixture = await fixtureResponse.json();
-    const spec = (await langGraphStore.getSummary()).agentSpecs.find((item) => item.productId === 'sitcom' && item.agentId === 'story-agent' && item.status === 'active');
-    expect(spec).toBeDefined();
-
-    const evalRunConfigResponse = await langGraphApp.request('/api/harness/eval-run-configs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        name: 'Deny 高风险工具',
-        status: 'candidate',
-        source: { type: 'new' },
-        runMode: 'repro',
-        memoryMode: 'fixture',
-        knowledgeMode: 'fixture',
-        highRiskToolMode: 'deny',
-        tags: ['deny-tools'],
-      }),
-    });
-    expect(evalRunConfigResponse.status).toBe(201);
-    const evalRunConfig = await evalRunConfigResponse.json();
-
-    const evalRunResponse = await langGraphApp.request('/api/harness/eval-runs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fixtureId: fixture.id, agentSpecId: spec?.id, evalRunConfigId: evalRunConfig.id }),
-    });
-    expect(evalRunResponse.status).toBe(201);
-    const evalRun = await evalRunResponse.json();
-    expect(evalRun).toMatchObject({
-      evalRunConfigId: evalRunConfig.id,
-      runMode: 'repro',
-      executionMode: 'langgraph_isolated',
-      status: 'failed',
-      fileDiff: [],
-      assertionResults: expect.arrayContaining([
-        expect.objectContaining({ id: 'files.mustModify:02 故事/01 第一集/单集大纲.md', passed: false }),
-      ]),
-    });
-  });
-
   it('records eval executor errors without throwing the route', async () => {
     const executorStore = createHarnessStore(path.join(root, 'harness-executor-error'), store, {
       evalRunExecutor: async () => {
@@ -1110,7 +905,7 @@ describe('harness routes', () => {
     const executorStore = createHarnessStore(path.join(root, 'harness-assertions'), store, {
       evalRunExecutor: async ({ workspaceRoot }) => {
         const target = path.join(workspaceRoot, '02 故事', '01 第一集', '单集大纲.md');
-        await writeFile(target, '# 单集大纲\n\n## 主角目标\n\n老周要止住业主群误会。\n\n## 主要阻力\n\n每次解释都会引发新截图。\n\n## 升级链条\n\n解释、截图、误会逐步升级。\n', 'utf8');
+        await writeFile(target, '# 单集大纲\n\n## 主角目标\n\n老周要止住业主群误会。\n\n## 主要阻力\n\n每次解释都会引发新截图。\n', 'utf8');
         return { outputMessage: 'assertion executor wrote canonical story plan', toolEvents: [] };
       },
     });
@@ -1125,12 +920,21 @@ describe('harness routes', () => {
       body: JSON.stringify({ projectId: project.id, prompt: '写一个故事' }),
     });
     const { run } = await runResponse.json();
-    const manifestResponse = await executorApp.request('/api/harness/workspace-manifests');
-    expect(manifestResponse.status).toBe(200);
-    const manifests = await manifestResponse.json();
-    expect(manifests).toEqual(expect.arrayContaining([
-      expect.objectContaining({ productId: 'sitcom', status: 'active' }),
-    ]));
+    const manifestResponse = await executorApp.request('/api/harness/workspace-manifests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        productId: 'sitcom',
+        templateVersion: 1,
+        status: 'active',
+        requiredDirectories: ['01 基本设定', '02 故事', '03 剧本'],
+        artifactTypes: {
+          plan: { canonicalPath: '02 故事/01 第一集/单集大纲.md', requiredSections: ['主角目标', '主要阻力'] },
+        },
+        validationRules: ['reviewer_required_before_story_save'],
+      }),
+    });
+    expect(manifestResponse.status).toBe(201);
     const fixtureResponse = await executorApp.request('/api/harness/eval-fixtures', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1170,7 +974,6 @@ describe('harness routes', () => {
         expect.objectContaining({ id: 'manifest.canonicalPath:plan:02 故事/01 第一集/单集大纲.md', passed: true }),
         expect.objectContaining({ id: 'manifest.requiredSections:plan:02 故事/01 第一集/单集大纲.md:主角目标', passed: true }),
         expect.objectContaining({ id: 'manifest.requiredSections:plan:02 故事/01 第一集/单集大纲.md:主要阻力', passed: true }),
-        expect.objectContaining({ id: 'manifest.requiredSections:plan:02 故事/01 第一集/单集大纲.md:升级链条', passed: true }),
         expect.objectContaining({ id: 'manifest.requiredDirectories:02 故事', passed: true }),
         expect.objectContaining({ id: 'diff.allowedChanges:modified', passed: true }),
         expect.objectContaining({ id: 'diff.maxChangedFiles', passed: true }),
@@ -1678,257 +1481,5 @@ describe('harness routes', () => {
       toolPolicyRef: 'workspace-safe-write@1',
       modelPolicyRef: 'default-chat-model@1',
     });
-  });
-
-  it('uses reusable eval run, assertion, and review template configs without storing assertions on fixtures', async () => {
-    const project = await store.createProject({ name: 'Harness Runtime Config Nodes', productId: 'sitcom' });
-    await store.writeWorkspaceFile(project.id, '02 故事/01 第一集/单集大纲.md', '# 主角目标\n旧目标');
-    const run = await harnessStore.createRunInputSnapshot({
-      runId: 'runtime-config-node-run',
-      projectId: project.id,
-      productId: 'sitcom',
-      prompt: '补齐升级链条',
-    });
-
-    const fixtureResponse = await app.request('/api/harness/eval-fixtures', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        snapshotId: run.id,
-        target: 'story-agent-workflow',
-        inputMessages: [{ role: 'user', content: '补齐升级链条' }],
-        assertions: {},
-      }),
-    });
-    expect(fixtureResponse.status).toBe(201);
-    const fixture = await fixtureResponse.json();
-    expect(fixture.assertions).toEqual({});
-
-    const assertionResponse = await app.request('/api/harness/assertion-configs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        name: '单集故事结构断言',
-        status: 'candidate',
-        source: { type: 'new' },
-        assertions: [
-          {
-            id: 'requires-plan-heading',
-            kind: 'markdown_section',
-            enabled: true,
-            severity: 'blocking',
-            config: { path: '02 故事/01 第一集/单集大纲.md', requiredHeadings: ['主角目标'] },
-          },
-        ],
-        tags: ['runtime-config'],
-      }),
-    });
-    expect(assertionResponse.status).toBe(201);
-    const assertionConfig = await assertionResponse.json();
-    expect(assertionConfig.compiledAssertions).toMatchObject({
-      markdown: expect.arrayContaining([expect.objectContaining({ path: '02 故事/01 第一集/单集大纲.md' })]),
-    });
-
-    const evalRunConfigResponse = await app.request('/api/harness/eval-run-configs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        name: 'Repro 固定上下文',
-        status: 'candidate',
-        source: { type: 'new' },
-        runMode: 'repro',
-        memoryMode: 'fixture',
-        knowledgeMode: 'fixture',
-        highRiskToolMode: 'mock',
-        tags: ['repro'],
-      }),
-    });
-    expect(evalRunConfigResponse.status).toBe(201);
-    const evalRunConfig = await evalRunConfigResponse.json();
-
-    const rubricResponse = await app.request('/api/harness/human-review-rubrics', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        name: '情景剧人工审阅模板',
-        artifactType: 'story',
-        status: 'candidate',
-        source: { type: 'new' },
-        hardChecks: [],
-        humanScores: [{ id: 'quality', label: '质量', scale: 10, weight: 1, required: true }],
-        decisionRules: { requiresHumanDecision: true },
-      }),
-    });
-    expect(rubricResponse.status).toBe(201);
-    const rubric = await rubricResponse.json();
-
-    const summary = await harnessStore.getSummary();
-    const spec = summary.agentSpecs.find((item) => item.productId === 'sitcom' && item.agentId === 'story-agent' && item.status === 'active');
-    expect(spec).toBeDefined();
-
-    const evalRunResponse = await app.request('/api/harness/eval-runs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        fixtureId: fixture.id,
-        agentSpecId: spec?.id,
-        evalRunConfigId: evalRunConfig.id,
-        assertionConfigId: assertionConfig.id,
-        humanReviewRubricId: rubric.id,
-      }),
-    });
-    expect(evalRunResponse.status).toBe(201);
-    const evalRun = await evalRunResponse.json();
-    expect(evalRun).toMatchObject({
-      evalRunConfigId: evalRunConfig.id,
-      assertionConfigId: assertionConfig.id,
-      humanReviewRubricId: rubric.id,
-      runMode: 'repro',
-      status: 'passed',
-    });
-    expect(evalRun.assertionResults).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'markdown.requiredHeadings:02 故事/01 第一集/单集大纲.md:主角目标', passed: true }),
-    ]));
-
-    const flowSummaryResponse = await app.request('/api/harness');
-    const flowSummary = await flowSummaryResponse.json();
-    const flow = flowSummary.runtimeConfigFlows.find((item: { id: string }) => item.id === `flow_${spec?.id}`);
-    expect(flow).toMatchObject({
-      productId: 'sitcom',
-      agentId: 'story-agent',
-      gateStatus: 'passed',
-      evalCompletion: { total: 1, passed: 1, reviewed: 0, positiveReviewed: 0 },
-      nodeRefs: {
-        evalFixture: { id: fixture.id },
-        evalRunConfig: { id: evalRunConfig.id, name: 'Repro 固定上下文' },
-        assertionConfig: { id: assertionConfig.id, name: '单集故事结构断言' },
-        reviewTemplate: { id: rubric.id, name: '情景剧人工审阅模板' },
-      },
-    });
-
-    const flowListResponse = await app.request('/api/harness/runtime-config-flows?productId=sitcom&agentId=story-agent&sort=evalCompletion');
-    expect(flowListResponse.status).toBe(200);
-    const flowList = await flowListResponse.json();
-    expect(flowList.some((item: { id: string }) => item.id === `flow_${spec?.id}`)).toBe(true);
-  });
-
-  it('clones runtime config flow nodes and allows eval runs without assertion config', async () => {
-    const project = await store.createProject({ name: 'Harness Clone Nodes', productId: 'sitcom' });
-    await store.writeWorkspaceFile(project.id, '02 故事/01 第一集/单集大纲.md', '# 主角目标\n旧目标');
-    const snapshot = await harnessStore.createRunInputSnapshot({
-      runId: 'clone-node-run',
-      projectId: project.id,
-      productId: 'sitcom',
-      prompt: '补齐升级链条',
-    });
-
-    const fixtureResponse = await app.request('/api/harness/eval-fixtures', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ snapshotId: snapshot.id, name: '克隆案例', target: 'story-agent-workflow', inputMessages: [{ role: 'user', content: '补齐升级链条' }] }),
-    });
-    expect(fixtureResponse.status).toBe(201);
-    const fixture = await fixtureResponse.json();
-
-    const evalRunConfigResponse = await app.request('/api/harness/eval-run-configs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        name: '可复用 Repro',
-        status: 'candidate',
-        source: { type: 'new' },
-        runMode: 'repro',
-        memoryMode: 'fixture',
-        knowledgeMode: 'fixture',
-        highRiskToolMode: 'mock',
-        tags: ['clone'],
-      }),
-    });
-    expect(evalRunConfigResponse.status).toBe(201);
-    const evalRunConfig = await evalRunConfigResponse.json();
-
-    const assertionResponse = await app.request('/api/harness/assertion-configs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        name: '可复用断言',
-        status: 'candidate',
-        source: { type: 'new' },
-        assertions: [{ id: 'max-one-file', kind: 'diff_limit', enabled: true, severity: 'blocking', config: { maxChangedFiles: 1 } }],
-        tags: ['clone'],
-      }),
-    });
-    expect(assertionResponse.status).toBe(201);
-    const assertionConfig = await assertionResponse.json();
-
-    const summary = await harnessStore.getSummary();
-    const spec = summary.agentSpecs.find((item) => item.productId === 'sitcom' && item.agentId === 'story-agent' && item.status === 'active');
-    expect(spec).toBeDefined();
-
-    const flowResponse = await app.request('/api/harness/runtime-config-flows', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        productId: 'sitcom',
-        agentId: 'story-agent',
-        name: '完整流程',
-        nodeRefs: {
-          evalFixture: { source: 'reused', id: fixture.id, name: fixture.name },
-          agentConfig: { source: 'reused', id: spec?.id, version: spec?.version, name: spec?.name ?? spec?.agentId },
-          evalRunConfig: { source: 'reused', id: evalRunConfig.id, version: evalRunConfig.version, name: evalRunConfig.name },
-          assertionConfig: { source: 'reused', id: assertionConfig.id, version: assertionConfig.version, name: assertionConfig.name },
-        },
-        candidateSpecId: spec?.id,
-        changes: [],
-      }),
-    });
-    expect(flowResponse.status).toBe(201);
-    const flow = await flowResponse.json();
-
-    const clonedFlowResponse = await app.request(`/api/harness/runtime-config-flows/${flow.id}/clone`, { method: 'POST' });
-    expect(clonedFlowResponse.status).toBe(201);
-    const clonedFlow = await clonedFlowResponse.json();
-    expect(clonedFlow).toMatchObject({ name: '完整流程_Copy', status: 'draft', evalRunIds: [], releaseRecordIds: [] });
-    expect(clonedFlow.candidateSpecId).not.toBe(spec?.id);
-    expect(clonedFlow.nodeRefs.evalFixture).toMatchObject({ source: 'derived', name: '克隆案例_Copy' });
-    expect(clonedFlow.nodeRefs.evalFixture.id).not.toBe(fixture.id);
-    expect(clonedFlow.nodeRefs.agentConfig).toMatchObject({ source: 'derived', name: `${spec?.name ?? spec?.agentId}_Copy` });
-    expect(clonedFlow.nodeRefs.evalRunConfig).toMatchObject({ source: 'derived', name: '可复用 Repro_Copy' });
-    expect(clonedFlow.nodeRefs.evalRunConfig.id).not.toBe(evalRunConfig.id);
-    expect(clonedFlow.nodeRefs.assertionConfig).toMatchObject({ source: 'derived', name: '可复用断言_Copy' });
-    expect(clonedFlow.nodeRefs.assertionConfig.id).not.toBe(assertionConfig.id);
-
-    const clonedFixtureResponse = await app.request(`/api/harness/eval-fixtures/${fixture.id}/clone`, { method: 'POST' });
-    expect(clonedFixtureResponse.status, await clonedFixtureResponse.clone().text()).toBe(201);
-    const clonedFixture = await clonedFixtureResponse.json();
-    expect(clonedFixture.name).toBe('克隆案例_Copy');
-    expect(clonedFixture.id).not.toBe(fixture.id);
-    expect(clonedFixture.inputMessages).toEqual(fixture.inputMessages);
-
-    const clonedEvalRunConfigResponse = await app.request(`/api/harness/eval-run-configs/${evalRunConfig.id}/clone`, { method: 'POST' });
-    expect(clonedEvalRunConfigResponse.status).toBe(201);
-    const clonedEvalRunConfig = await clonedEvalRunConfigResponse.json();
-    expect(clonedEvalRunConfig).toMatchObject({ name: '可复用 Repro_Copy', version: 1, status: 'draft', source: { type: 'eval_run_config', id: evalRunConfig.id, version: evalRunConfig.version } });
-
-    const clonedAssertionConfigResponse = await app.request(`/api/harness/assertion-configs/${assertionConfig.id}/clone`, { method: 'POST' });
-    expect(clonedAssertionConfigResponse.status).toBe(201);
-    const clonedAssertionConfig = await clonedAssertionConfigResponse.json();
-    expect(clonedAssertionConfig).toMatchObject({ name: '可复用断言_Copy', version: 1, status: 'draft', source: { type: 'assertion_config', id: assertionConfig.id, version: assertionConfig.version } });
-
-    const noAssertionEvalRunResponse = await app.request('/api/harness/eval-runs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fixtureId: clonedFixture.id, agentSpecId: spec?.id, evalRunConfigId: clonedEvalRunConfig.id }),
-    });
-    expect(noAssertionEvalRunResponse.status).toBe(201);
-    const noAssertionEvalRun = await noAssertionEvalRunResponse.json();
-    expect(noAssertionEvalRun.assertionConfigId).toBeUndefined();
-    expect(noAssertionEvalRun.assertionResults.every((result: { passed: boolean }) => result.passed)).toBe(true);
-    expect(noAssertionEvalRun.status).toBe('passed');
   });
 });

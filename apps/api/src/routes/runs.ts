@@ -47,7 +47,6 @@ export function createRunsRoutes(
 
   routes.post('/runs', async (context) => {
     const requestId = `runs_req_${randomUUID()}`;
-    const requestStartedAt = Date.now();
     const traceId = traceIdFromRequest(context.req.raw);
     const body = await parseJson(context.req.raw);
     appendJsonLog('api-runs.jsonl', {
@@ -72,39 +71,16 @@ export function createRunsRoutes(
 
     try {
       const runId = `run_${randomUUID()}`;
-      const snapshotStartedAt = Date.now();
-      const shouldCaptureSnapshot = shouldCreateRunInputSnapshot();
-      if (harnessStore && !shouldCaptureSnapshot) {
-        appendJsonLog('api-runs.jsonl', {
-          scope: 'runs.route',
-          stage: 'snapshot.skipped',
-          requestId,
-          runId,
-          projectId: parsed.data.projectId,
-          reason: 'desktop_default_disabled',
-        });
-      }
-      const snapshot = harnessStore && shouldCaptureSnapshot
+      const snapshot = harnessStore
         ? await harnessStore.createRunInputSnapshot({
-          runId,
-          projectId: parsed.data.projectId,
-          sessionId: parsed.data.sessionId,
-          prompt: parsed.data.prompt,
-          referencedFiles: parsed.data.referencedFiles,
-          referencedSnippets: parsed.data.referencedSnippets,
-        })
+            runId,
+            projectId: parsed.data.projectId,
+            sessionId: parsed.data.sessionId,
+            prompt: parsed.data.prompt,
+            referencedFiles: parsed.data.referencedFiles,
+            referencedSnippets: parsed.data.referencedSnippets,
+          })
         : undefined;
-      if (snapshot) {
-        appendJsonLog('api-runs.jsonl', {
-          scope: 'runs.route',
-          stage: 'snapshot.created',
-          requestId,
-          runId,
-          snapshotId: snapshot.id,
-          durationMs: Date.now() - snapshotStartedAt,
-        });
-      }
-      const createRunStartedAt = Date.now();
       const result = await service.createRun({
         ...parsed.data,
         runId,
@@ -119,10 +95,6 @@ export function createRunsRoutes(
         runId: result.run.id,
         sessionId: result.run.sessionId ?? null,
         projectId: result.run.projectId,
-        durations: {
-          createRunMs: Date.now() - createRunStartedAt,
-          totalMs: Date.now() - requestStartedAt,
-        },
         response: result,
       });
       if (bus && result.events) {
@@ -181,12 +153,6 @@ export function createRunsRoutes(
   return routes;
 }
 
-function shouldCreateRunInputSnapshot(): boolean {
-  const configured = process.env.VIFORGE_RUN_INPUT_SNAPSHOTS;
-  if (configured === '1') return true;
-  if (configured === '0') return false;
-  return process.env.VIFORGE_DESKTOP !== '1';
-}
 function publishLegacyEvents(bus: RunBus, events: RunEvent[]): void {
   events.forEach((event, index) => {
     const emittedAt = new Date().toISOString();

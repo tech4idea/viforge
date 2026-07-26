@@ -2,17 +2,14 @@ import type {
   AigcHubModelListResponse,
   AigcHubModelMetadata,
   AgentLayerConfig,
-  AgentToolPolicy,
   AgentRun,
   AgentTraceEvent,
   AgentSpec,
-  AssertionConfig,
   AgentSpecReleaseAuditCategory,
   AgentSpecReleaseForceReason,
   AgentSpecReleaseGate,
   AgentSpecReleaseRecord,
   BehaviorRule,
-  BehaviorRuleConfig,
   BrowserConnectorStatus,
   ChatMessage,
   ChatMessageAttachment,
@@ -26,7 +23,6 @@ import type {
   HarnessSummary,
   HarnessVersionDiff,
   HumanReview,
-  HumanReviewRubric,
   ImageGenerationReferenceImage,
   ImageGenerationRequest,
   ImageGenerationResponse,
@@ -43,25 +39,18 @@ import type {
   ReleaseInfo,
   RetrievalPolicy,
   RuntimeConfig,
-  RuntimeConfigFlow,
   RuntimeMemoryRebuildResponse,
   RuntimeModelTestResponse,
   UpdateRuntimeConfigInput,
   EvalFixture,
   EvalRun,
-  EvalRunConfig,
   SkillSnapshot,
   RunEvent,
   StreamEvent,
   TheaterSkill,
-  ToolDescriptionConfig,
   WechatSetupSession,
   WechatStatus,
   ChatSessionModelConfig,
-  DocumentAnnotation,
-  DocumentAnnotationFile,
-  DocumentAnnotationStatus,
-  DocumentAnnotationSummary,
   WorkspaceManifest,
   WorkspaceEntry,
   WorkspaceFile,
@@ -117,10 +106,6 @@ export type {
   TheaterSkill,
   WechatSetupSession,
   WechatStatus,
-  DocumentAnnotation,
-  DocumentAnnotationFile,
-  DocumentAnnotationStatus,
-  DocumentAnnotationSummary,
   WorkspaceEntry,
   WorkspaceFile,
 } from '@viforge/shared';
@@ -153,12 +138,6 @@ export type ApiClient = {
   createAsset(projectId: string, input: CreateAssetInput): Promise<WorkspaceEntry>;
   moveEntry(projectId: string, sourcePath: string, targetPath: string): Promise<WorkspaceEntry>;
   deleteEntry(projectId: string, path: string): Promise<{ deleted: true }>;
-  listDocumentAnnotationSummaries(projectId: string): Promise<DocumentAnnotationSummary[]>;
-  readDocumentAnnotations(projectId: string, filePath: string): Promise<DocumentAnnotationFile>;
-  createDocumentAnnotation(projectId: string, input: CreateDocumentAnnotationInput): Promise<DocumentAnnotationFile>;
-  updateDocumentAnnotation(projectId: string, annotationId: string, input: UpdateDocumentAnnotationInput): Promise<DocumentAnnotationFile>;
-  deleteDocumentAnnotation(projectId: string, filePath: string, annotationId: string): Promise<DocumentAnnotationFile>;
-  clearDocumentAnnotations(projectId: string, filePath: string): Promise<DocumentAnnotationFile>;
   listChatSessions(projectId: string, options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   listTemporaryChatSessions(options?: { includeArchived?: boolean; kind?: ChatSession['kind'] }): Promise<ChatSession[]>;
   createChatSession(projectId: string, input?: { kind?: ChatSession['kind']; title?: string }): Promise<ChatSession>;
@@ -187,26 +166,8 @@ export type ApiClient = {
   getBehaviorRules(): Promise<BehaviorRule[]>;
   saveBehaviorRules(rules: BehaviorRule[]): Promise<BehaviorRule[]>;
   getHarnessSummary(): Promise<HarnessSummary>;
-  listRuntimeConfigFlows(input?: ListRuntimeConfigFlowsInput): Promise<RuntimeConfigFlow[]>;
-  createRuntimeConfigFlow(input: CreateRuntimeConfigFlowInput): Promise<RuntimeConfigFlow>;
-  cloneRuntimeConfigFlow(flowId: string, input?: CloneNamedRecordInput): Promise<RuntimeConfigFlow>;
-  updateRuntimeConfigFlow(flowId: string, input: UpdateRuntimeConfigFlowInput): Promise<RuntimeConfigFlow>;
-  deleteRuntimeConfigFlow(flowId: string): Promise<{ deleted: true }>;
-  createAssertionConfig(input: CreateAssertionConfigInput): Promise<AssertionConfig>;
-  cloneAssertionConfig(assertionConfigId: string, input?: CloneNamedRecordInput): Promise<AssertionConfig>;
-  createAssertionConfigVersion(assertionConfigId: string, input: CreateAssertionConfigVersionInput): Promise<AssertionConfig>;
-  createEvalRunConfig(input: CreateEvalRunConfigInput): Promise<EvalRunConfig>;
-  cloneEvalRunConfig(evalRunConfigId: string, input?: CloneNamedRecordInput): Promise<EvalRunConfig>;
-  createEvalRunConfigVersion(evalRunConfigId: string, input: CreateEvalRunConfigVersionInput): Promise<EvalRunConfig>;
-  createBehaviorRuleConfig(input: CreateBehaviorRuleConfigInput): Promise<BehaviorRuleConfig>;
-  createBehaviorRuleConfigVersion(ruleConfigId: string, input: CreateBehaviorRuleConfigVersionInput): Promise<BehaviorRuleConfig>;
-  createAgentToolPolicy(input: CreateAgentToolPolicyInput): Promise<AgentToolPolicy>;
-  createAgentToolPolicyVersion(policyId: string, input: CreateAgentToolPolicyVersionInput): Promise<AgentToolPolicy>;
-  createToolDescriptionConfig(input: CreateToolDescriptionConfigInput): Promise<ToolDescriptionConfig>;
-  createToolDescriptionConfigVersion(toolDescriptionConfigId: string, input: CreateToolDescriptionConfigVersionInput): Promise<ToolDescriptionConfig>;
   createAgentLayerConfig(input: CreateAgentLayerConfigInput): Promise<AgentLayerConfig>;
   createAgentSpec(input: CreateAgentSpecInput): Promise<AgentSpec>;
-  cloneAgentSpec(agentSpecId: string, input?: CloneNamedRecordInput): Promise<AgentSpec>;
   getAgentSpecReleaseGate(agentSpecId: string): Promise<AgentSpecReleaseGate>;
   listReleaseRecords(input?: ListReleaseRecordsInput): Promise<AgentSpecReleaseRecord[]>;
   updateAgentSpecStatus(agentSpecId: string, status: 'candidate' | 'active' | 'archived', options?: UpdateAgentSpecStatusOptions): Promise<AgentSpec>;
@@ -223,15 +184,13 @@ export type ApiClient = {
   createSkillSnapshotVersion(skillSnapshotId: string, input: CreateSkillSnapshotVersionInput): Promise<SkillSnapshot>;
   getSkillSnapshotDiff(skillSnapshotId: string, input?: GetVersionDiffInput): Promise<HarnessVersionDiff>;
   updateSkillSnapshotStatus(skillSnapshotId: string, input: UpdateVersionedRecordStatusInput): Promise<SkillSnapshot>;
+  createWorkspaceManifest(input: CreateWorkspaceManifestInput): Promise<WorkspaceManifest>;
   createEvalFixture(input: CreateEvalFixtureInput): Promise<EvalFixture>;
   createEvalFixtureFromRunArtifact(runId: string, input: CreateEvalFixtureFromRunArtifactInput): Promise<EvalFixture>;
-  cloneEvalFixture(fixtureId: string, input?: CloneNamedRecordInput): Promise<EvalFixture>;
   updateEvalFixture(fixtureId: string, input: UpdateEvalFixtureInput): Promise<EvalFixture>;
   createEvalRun(input: CreateEvalRunInput): Promise<EvalRun>;
   addHumanReview(evalRunId: string, input: CreateHumanReviewInput): Promise<EvalRun>;
   addBatchHumanReview(input: CreateBatchHumanReviewInput): Promise<EvalRun[]>;
-  createHumanReviewRubric(input: CreateHumanReviewRubricInput): Promise<HumanReviewRubric>;
-  createHumanReviewRubricVersion(rubricId: string, input: CreateHumanReviewRubricVersionInput): Promise<HumanReviewRubric>;
   getBrowserConnectorStatus(): Promise<BrowserConnectorStatus>;
   getWechatStatus(): Promise<WechatStatus>;
   createWechatSetupSession(): Promise<WechatSetupSession>;
@@ -291,12 +250,6 @@ export type StreamRunHandlers = {
   onError?: (error: Error) => void;
 };
 
-export type CreateDocumentAnnotationInput = Omit<DocumentAnnotation, 'id' | 'status' | 'createdAt' | 'updatedAt'>;
-
-export type UpdateDocumentAnnotationInput = Partial<Omit<DocumentAnnotation, 'id' | 'filePath' | 'createdAt' | 'updatedAt'>> & {
-  filePath: string;
-};
-
 export type CreateAssetInput = {
   path: string;
   contentBase64: string;
@@ -326,18 +279,6 @@ export type CreateAgentSpecInput = {
 
 export type CreateAgentLayerConfigInput = Omit<AgentLayerConfig, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number };
 
-export type CreateBehaviorRuleConfigInput = Omit<BehaviorRuleConfig, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
-
-export type CreateBehaviorRuleConfigVersionInput = Partial<Pick<BehaviorRuleConfig, 'title' | 'status' | 'scope' | 'agentId' | 'source' | 'content' | 'tags'>>;
-
-export type CreateAgentToolPolicyInput = Omit<AgentToolPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
-
-export type CreateAgentToolPolicyVersionInput = Partial<Pick<AgentToolPolicy, 'title' | 'status' | 'scope' | 'agentId' | 'source' | 'allowedToolIds' | 'deniedToolIds' | 'highRiskToolIds' | 'toolDescriptionRefs' | 'tags'>>;
-
-export type CreateToolDescriptionConfigInput = Omit<ToolDescriptionConfig, 'id' | 'version' | 'status' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number; status?: ToolDescriptionConfig['status'] };
-
-export type CreateToolDescriptionConfigVersionInput = Partial<Pick<ToolDescriptionConfig, 'title' | 'status' | 'scope' | 'agentId' | 'source' | 'description' | 'parameterDescriptions' | 'outputDescription' | 'tags'>>;
-
 export type CreateMemoryPolicyInput = Omit<MemoryPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number };
 
 export type CreateKnowledgeBaseEntryInput = Omit<KnowledgeBaseEntry, 'updatedAt'> & { updatedAt?: string };
@@ -345,34 +286,6 @@ export type CreateKnowledgeBaseEntryInput = Omit<KnowledgeBaseEntry, 'updatedAt'
 export type CreateRetrievalPolicyInput = Omit<RetrievalPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number };
 
 export type CreatePromptBlockInput = Omit<PromptBlock, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
-
-export type ListRuntimeConfigFlowsInput = {
-  productId?: string;
-  agentId?: string;
-  status?: RuntimeConfigFlow['status'];
-  releaseState?: RuntimeConfigFlow['releaseState'];
-  tag?: string;
-  query?: string;
-  sort?: 'updatedAt' | 'createdAt' | 'gateStatus' | 'evalCompletion';
-};
-
-export type CreateRuntimeConfigFlowInput = {
-  productId: string;
-  name: string;
-  status?: RuntimeConfigFlow['status'];
-  agentId?: string;
-  tags?: string[];
-  nodeRefs?: RuntimeConfigFlow['nodeRefs'];
-  candidateSpecId?: string;
-  activeSpecId?: string;
-  evalRunIds?: string[];
-  releaseRecordIds?: string[];
-  changes?: RuntimeConfigFlow['changes'];
-};
-
-export type UpdateRuntimeConfigFlowInput = Partial<Omit<CreateRuntimeConfigFlowInput, 'productId'>>;
-
-export type CloneNamedRecordInput = { name?: string };
 
 export type CreatePromptBlockVersionInput = Partial<Pick<PromptBlock, 'title' | 'scope' | 'content' | 'status'>>;
 
@@ -383,6 +296,8 @@ export type UpdateVersionedRecordStatusInput = { version: number; status: Prompt
 export type CreateSkillSnapshotInput = Omit<SkillSnapshot, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
 
 export type CreateSkillSnapshotVersionInput = Partial<Pick<SkillSnapshot, 'content' | 'status' | 'source'>>;
+
+export type CreateWorkspaceManifestInput = Omit<WorkspaceManifest, 'id' | 'createdAt' | 'updatedAt'>;
 
 export type CreateEvalFixtureInput = {
   snapshotId: string;
@@ -395,18 +310,6 @@ export type CreateEvalFixtureInput = {
 
 export type CreateEvalFixtureFromRunArtifactInput = Omit<CreateEvalFixtureInput, 'snapshotId'> & { snapshotId?: string };
 
-export type CreateAssertionConfigInput = Omit<AssertionConfig, 'id' | 'version' | 'createdAt' | 'updatedAt' | 'compiledAssertions'> & {
-  id?: string;
-  version?: number;
-  compiledAssertions?: Record<string, unknown>;
-};
-
-export type CreateAssertionConfigVersionInput = Partial<Pick<AssertionConfig, 'name' | 'status' | 'source' | 'assertions' | 'compiledAssertions' | 'tags'>>;
-
-export type CreateEvalRunConfigInput = Omit<EvalRunConfig, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
-
-export type CreateEvalRunConfigVersionInput = Partial<Omit<EvalRunConfig, 'id' | 'productId' | 'version' | 'createdAt' | 'updatedAt'>>;
-
 export type UpdateEvalFixtureInput = Partial<Pick<
   EvalFixture,
   'name' | 'target' | 'inputMessages' | 'referencedSnippets' | 'memoryFixture' | 'knowledgeFixture' | 'expectedChangedFiles' | 'expectedToolEvents' | 'toolRetentionPolicy' | 'sensitiveFieldRules' | 'toolRetentionArtifacts' | 'assertions' | 'tags' | 'toolMocks'
@@ -415,19 +318,12 @@ export type UpdateEvalFixtureInput = Partial<Pick<
 export type CreateEvalRunInput = {
   fixtureId: string;
   agentSpecId: string;
-  evalRunConfigId?: string;
-  assertionConfigId?: string;
-  humanReviewRubricId?: string;
   runMode?: EvalRun['runMode'];
 };
 
 export type CreateHumanReviewInput = Omit<HumanReview, 'evalRunId' | 'createdAt'>;
 
 export type CreateBatchHumanReviewInput = CreateHumanReviewInput & { evalRunIds: string[] };
-
-export type CreateHumanReviewRubricInput = Omit<HumanReviewRubric, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number };
-
-export type CreateHumanReviewRubricVersionInput = Partial<Pick<HumanReviewRubric, 'name' | 'artifactType' | 'status' | 'source' | 'hardChecks' | 'humanScores' | 'decisionRules'>>;
 
 export type UpdateAgentSpecStatusOptions = {
   force?: boolean;
@@ -577,28 +473,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<{ deleted: true }>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/files/${encodeWorkspacePath(path)}`, {
         method: 'DELETE',
       }),
-    listDocumentAnnotationSummaries: (projectId) =>
-      request<DocumentAnnotationSummary[]>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/annotations`),
-    readDocumentAnnotations: (projectId, filePath) =>
-      request<DocumentAnnotationFile>(fetcher, baseUrl, withQuery(`/api/projects/${encodePathSegment(projectId)}/annotations`, { filePath })),
-    createDocumentAnnotation: (projectId, input) =>
-      request<DocumentAnnotationFile>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/annotations`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    updateDocumentAnnotation: (projectId, annotationId, input) =>
-      request<DocumentAnnotationFile>(fetcher, baseUrl, `/api/projects/${encodePathSegment(projectId)}/annotations/${encodePathSegment(annotationId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(input),
-      }),
-    deleteDocumentAnnotation: (projectId, filePath, annotationId) =>
-      request<DocumentAnnotationFile>(fetcher, baseUrl, withQuery(`/api/projects/${encodePathSegment(projectId)}/annotations/${encodePathSegment(annotationId)}`, { filePath }), {
-        method: 'DELETE',
-      }),
-    clearDocumentAnnotations: (projectId, filePath) =>
-      request<DocumentAnnotationFile>(fetcher, baseUrl, withQuery(`/api/projects/${encodePathSegment(projectId)}/annotations`, { filePath }), {
-        method: 'DELETE',
-      }),
     listChatSessions: (projectId, options = {}) =>
       request<ChatSession[]>(
         fetcher,
@@ -741,86 +615,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         body: JSON.stringify({ rules }),
       }).then((res) => res.rules),
     getHarnessSummary: () => request<HarnessSummary>(fetcher, baseUrl, '/api/harness'),
-    listRuntimeConfigFlows: (input = {}) => request<RuntimeConfigFlow[]>(fetcher, baseUrl, withQuery('/api/harness/runtime-config-flows', input)),
-    createRuntimeConfigFlow: (input) =>
-      request<RuntimeConfigFlow>(fetcher, baseUrl, '/api/harness/runtime-config-flows', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    cloneRuntimeConfigFlow: (flowId, input = {}) =>
-      request<RuntimeConfigFlow>(fetcher, baseUrl, `/api/harness/runtime-config-flows/${encodePathSegment(flowId)}/clone`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    updateRuntimeConfigFlow: (flowId, input) =>
-      request<RuntimeConfigFlow>(fetcher, baseUrl, `/api/harness/runtime-config-flows/${encodePathSegment(flowId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(input),
-      }),
-    deleteRuntimeConfigFlow: (flowId) =>
-      request<{ deleted: true }>(fetcher, baseUrl, `/api/harness/runtime-config-flows/${encodePathSegment(flowId)}`, {
-        method: 'DELETE',
-      }),
-    createAssertionConfig: (input) =>
-      request<AssertionConfig>(fetcher, baseUrl, '/api/harness/assertion-configs', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    cloneAssertionConfig: (assertionConfigId, input = {}) =>
-      request<AssertionConfig>(fetcher, baseUrl, `/api/harness/assertion-configs/${encodePathSegment(assertionConfigId)}/clone`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createAssertionConfigVersion: (assertionConfigId, input) =>
-      request<AssertionConfig>(fetcher, baseUrl, `/api/harness/assertion-configs/${encodePathSegment(assertionConfigId)}/versions`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createEvalRunConfig: (input) =>
-      request<EvalRunConfig>(fetcher, baseUrl, '/api/harness/eval-run-configs', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    cloneEvalRunConfig: (evalRunConfigId, input = {}) =>
-      request<EvalRunConfig>(fetcher, baseUrl, `/api/harness/eval-run-configs/${encodePathSegment(evalRunConfigId)}/clone`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createEvalRunConfigVersion: (evalRunConfigId, input) =>
-      request<EvalRunConfig>(fetcher, baseUrl, `/api/harness/eval-run-configs/${encodePathSegment(evalRunConfigId)}/versions`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createBehaviorRuleConfig: (input) =>
-      request<BehaviorRuleConfig>(fetcher, baseUrl, '/api/harness/behavior-rule-configs', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createBehaviorRuleConfigVersion: (ruleConfigId, input) =>
-      request<BehaviorRuleConfig>(fetcher, baseUrl, `/api/harness/behavior-rule-configs/${encodePathSegment(ruleConfigId)}/versions`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createAgentToolPolicy: (input) =>
-      request<AgentToolPolicy>(fetcher, baseUrl, '/api/harness/agent-tool-policies', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createAgentToolPolicyVersion: (policyId, input) =>
-      request<AgentToolPolicy>(fetcher, baseUrl, `/api/harness/agent-tool-policies/${encodePathSegment(policyId)}/versions`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createToolDescriptionConfig: (input) =>
-      request<ToolDescriptionConfig>(fetcher, baseUrl, '/api/harness/tool-description-configs', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createToolDescriptionConfigVersion: (toolDescriptionConfigId, input) =>
-      request<ToolDescriptionConfig>(fetcher, baseUrl, `/api/harness/tool-description-configs/${encodePathSegment(toolDescriptionConfigId)}/versions`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
     createAgentLayerConfig: (input) =>
       request<AgentLayerConfig>(fetcher, baseUrl, '/api/harness/agent-layer-configs', {
         method: 'POST',
@@ -828,11 +622,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     createAgentSpec: (input) =>
       request<AgentSpec>(fetcher, baseUrl, '/api/harness/agent-specs', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    cloneAgentSpec: (agentSpecId, input = {}) =>
-      request<AgentSpec>(fetcher, baseUrl, `/api/harness/agent-specs/${encodePathSegment(agentSpecId)}/clone`, {
         method: 'POST',
         body: JSON.stringify(input),
       }),
@@ -913,6 +702,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         method: 'PATCH',
         body: JSON.stringify(input),
       }),
+    createWorkspaceManifest: (input) =>
+      request<WorkspaceManifest>(fetcher, baseUrl, '/api/harness/workspace-manifests', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
     createEvalFixture: (input) =>
       request<EvalFixture>(fetcher, baseUrl, '/api/harness/eval-fixtures', {
         method: 'POST',
@@ -920,11 +714,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     createEvalFixtureFromRunArtifact: (runId, input) =>
       request<EvalFixture>(fetcher, baseUrl, `/api/harness/run-artifacts/${encodePathSegment(runId)}/eval-fixtures`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    cloneEvalFixture: (fixtureId, input = {}) =>
-      request<EvalFixture>(fetcher, baseUrl, `/api/harness/eval-fixtures/${encodePathSegment(fixtureId)}/clone`, {
         method: 'POST',
         body: JSON.stringify(input),
       }),
@@ -945,16 +734,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     addBatchHumanReview: (input) =>
       request<EvalRun[]>(fetcher, baseUrl, '/api/harness/human-reviews/batch', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createHumanReviewRubric: (input) =>
-      request<HumanReviewRubric>(fetcher, baseUrl, '/api/harness/human-review-rubrics', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    createHumanReviewRubricVersion: (rubricId, input) =>
-      request<HumanReviewRubric>(fetcher, baseUrl, `/api/harness/human-review-rubrics/${encodePathSegment(rubricId)}/versions`, {
         method: 'POST',
         body: JSON.stringify(input),
       }),

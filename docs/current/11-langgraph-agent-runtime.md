@@ -13,10 +13,9 @@ API 侧核心依赖：
 - `@opentelemetry/exporter-trace-otlp-http`
 - `pg`
 
-模型调用走 AIGC Hub 的 OpenAI-compatible 文本接口，默认使用 `/v1/responses`；如上游网关不支持 Responses API，可在运行设置中切回 `/v1/chat/completions`。默认配置优先级：
+模型调用仍走 AIGC Hub 的 OpenAI-compatible `/v1/chat/completions` 接口。默认配置优先级：
 
 - `VIFORGE_AIGC_HUB_CHAT_MODEL` / `AIGC_HUB_CHAT_MODEL`
-- `VIFORGE_AIGC_HUB_CHAT_ENDPOINT`：`responses`（默认）或 `chat_completions`
 - `VIFORGE_LANGGRAPH_MODEL`
 - 默认 `ds/deepseek-v4-pro`
 
@@ -46,17 +45,13 @@ LangGraph run service 实现统一的 `RunService` 接口：
 1. `POST /api/runs` 创建 run。
 2. 后端发布 `run.start` 和 `thread.started`。
 3. 构造创作 prompt，包含用户输入、引用文件和引用聊天片段。
-4. 创建 LangGraph ReAct agent，并通过 LangChain `ChatOpenAI` 调用 AIGC Hub；`chatEndpoint=responses` 时设置 `useResponsesApi=true`。
+4. 创建 LangGraph ReAct agent，并通过 LangChain `ChatOpenAI` 调用 AIGC Hub。
 5. 暴露 viforge 业务级 workspace tools，而不是 raw shell：
    - `list_workspace_entries`
    - `read_workspace_file`
    - `write_workspace_file`
    - `delete_workspace_file`
    - `move_workspace_entry`
-   - `list_document_annotations`
-   - `read_document_annotations`
-   - `update_document_annotation_status`
-   - `clear_document_annotations`
    - `run_bash`
    - `sync_to_remote`
    - `read_global_file`
@@ -85,9 +80,8 @@ Agent 可用工具：
 - `browser_navigate`：在授权标签页打开 URL。
 - `browser_snapshot`：读取 Playwriter 的页面可访问性快照，获取文字、链接、控件和 aria-ref。
 - `browser_evaluate`：执行简短 Playwright JavaScript，作用域包含 `page`、`context`、`state`、`require`。
-- `browser_upload_file`：把项目工作区中的文件写入临时文件后，通过 Playwriter 上传到授权浏览器页面的 `input[type=file]`。
 
-安全边界：登录、提交、购买、删除、发布、授权、付款、文件上传、保存草稿或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 `playwriter serve`。agent 不能假装已访问网页。
+安全边界：登录、提交、购买、删除、发布、授权、付款或修改远端数据前，agent 必须先向用户说明动作并等待确认。Playwriter 未连接时，agent 应明确提示用户安装/启用 Playwriter 扩展并授权标签页；非桌面部署还需要启动 `playwriter serve`。agent 不能假装已访问网页。
 
 普通 Web/API 本地启用步骤如下；agent 也可以在用户需要网页访问但环境未就绪时调用 `browser_use_install` 返回同类指引：
 
@@ -123,9 +117,6 @@ playwriter serve --host 127.0.0.1
 每次 run 开始后，后端调用 `createAgentRegistry()` 创建 specialist registry：
 
 - `brainstorm-agent`
-- `blog-writing-agent`
-- `research-agent`
-- `publisher-agent`
 - `character-agent`
 - `continuity-agent`
 - `story-agent`
@@ -159,7 +150,7 @@ delegate_to_specialist_agent
 
 ```json
 {
-  "agentId": "brainstorm-agent | blog-writing-agent | research-agent | publisher-agent | character-agent | continuity-agent | story-agent | source-analyst-agent | adaptation-planner-agent | screenwriter-agent | outline-agent | knowledge-search-agent | knowledge-organizer-agent | reviewer-agent",
+  "agentId": "brainstorm-agent | character-agent | continuity-agent | story-agent | source-analyst-agent | adaptation-planner-agent | screenwriter-agent | reviewer-agent",
   "task": "交给 specialist 的具体子任务",
   "context": "主 agent 已读取或判断出的上下文"
 }
@@ -242,9 +233,3 @@ specialist 阶段会额外发布：
 - 让 reviewer 返回结构化 `passed / rejected / targetAgentId / reasons`。
 - 主 agent 根据 reviewer 结果自主决定是否再委派返工。
 - 为复杂委派结果增加结构化摘要，避免上下文无限增长。
-
-### Markdown 批注工具
-
-Markdown 批注由同目录隐藏 JSON 文件持久化，但 Agent 不直接猜测或扫描隐藏路径。系统提示词固定注入 annotation 工具使用原则：用户要求根据批注、评论或修改意见处理 Markdown 文档时，先调用 `list_document_annotations` / `read_document_annotations`。`line range` 只作参考，定位时优先使用 `selectedText`、`beforeText`、`afterText`。
-
-`update_document_annotation_status` 和 `clear_document_annotations` 只有在用户明确要求清除批注或标记完成时才能调用。Agent 根据批注完成文档修改后不能自动删除、清空或标记 `resolved`。
