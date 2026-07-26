@@ -4,18 +4,13 @@ import path from 'node:path';
 
 import type {
   AgentLayerConfig,
-  AgentToolPolicy,
   AgentSpecReleaseAuditCategory,
   AgentSpecReleaseForceReason,
   AgentSpecReleaseGate,
   AgentSpecReleaseRecord,
   AgentSpec,
-  AssertionConfig,
-  AssertionDefinition,
-  BehaviorRuleConfig,
   EvalFixture,
   EvalRun,
-  EvalRunConfig,
   EvalAssertionResult,
   HarnessSummary,
   HarnessVersionDiff,
@@ -28,12 +23,10 @@ import type {
   ReferencedChatSnippet,
   ReferencedFile,
   RetrievalPolicy,
-  RuntimeConfigFlow,
   RunArtifact,
   RunInputSnapshot,
   RunInputSnapshotFile,
   SkillSnapshot,
-  ToolDescriptionConfig,
   WorkspaceManifest,
 } from '@viforge/shared';
 import { PRODUCT_PROFILES, resolveProductProfile, type ProductProfile } from '@viforge/shared';
@@ -43,12 +36,8 @@ import type { WorkspaceStore } from '../storage/workspaceStore';
 import { readProductSkillPrompt, readProductSystemAgentPrompt } from '../productProfilePrompts';
 
 type HarnessState = {
-  runtimeConfigFlows: RuntimeConfigFlow[];
   agentLayerConfigs: AgentLayerConfig[];
   agentSpecs: AgentSpec[];
-  behaviorRuleConfigs: BehaviorRuleConfig[];
-  agentToolPolicies: AgentToolPolicy[];
-  toolDescriptionConfigs: ToolDescriptionConfig[];
   memoryPolicies: MemoryPolicy[];
   knowledgeBaseEntries: KnowledgeBaseEntry[];
   retrievalPolicies: RetrievalPolicy[];
@@ -58,8 +47,6 @@ type HarnessState = {
   runArtifacts: RunArtifact[];
   snapshots: RunInputSnapshot[];
   evalFixtures: EvalFixture[];
-  assertionConfigs: AssertionConfig[];
-  evalRunConfigs: EvalRunConfig[];
   evalRuns: EvalRun[];
   humanReviewRubrics: HumanReviewRubric[];
   releaseRecords: AgentSpecReleaseRecord[];
@@ -94,66 +81,7 @@ export type UpdateEvalFixtureInput = Partial<Pick<EvalFixture,
 export type CreateEvalRunInput = {
   fixtureId: string;
   agentSpecId: string;
-  evalRunConfigId?: string;
-  assertionConfigId?: string;
-  humanReviewRubricId?: string;
   runMode?: EvalRun['runMode'];
-};
-
-export type CloneRuntimeConfigFlowInput = {
-  name?: string;
-};
-
-export type CloneVersionedRecordInput = {
-  name?: string;
-};
-
-export type CreateAssertionConfigInput = Omit<AssertionConfig, 'id' | 'version' | 'createdAt' | 'updatedAt' | 'compiledAssertions'> & {
-  id?: string;
-  version?: number;
-  compiledAssertions?: Record<string, unknown>;
-};
-
-export type CreateEvalRunConfigInput = Omit<EvalRunConfig, 'id' | 'version' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-  version?: number;
-};
-
-export type CreateHumanReviewRubricInput = Omit<HumanReviewRubric, 'id' | 'version' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-  version?: number;
-};
-
-export type CreateRuntimeConfigFlowInput = {
-  productId: string;
-  name: string;
-  status?: RuntimeConfigFlow['status'];
-  agentId?: string;
-  tags?: string[];
-  nodeRefs?: RuntimeConfigFlow['nodeRefs'];
-  candidateSpecId?: string;
-  activeSpecId?: string;
-  evalRunIds?: string[];
-  releaseRecordIds?: string[];
-  changes?: RuntimeConfigFlow['changes'];
-};
-
-export type UpdateRuntimeConfigFlowInput = Partial<Omit<CreateRuntimeConfigFlowInput, 'productId'>>;
-
-export type CreateToolDescriptionConfigInput = Omit<ToolDescriptionConfig, 'id' | 'version' | 'status' | 'contentHash' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-  version?: number;
-  status?: ToolDescriptionConfig['status'];
-};
-
-export type CreateBehaviorRuleConfigInput = Omit<BehaviorRuleConfig, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-  version?: number;
-};
-
-export type CreateAgentToolPolicyInput = Omit<AgentToolPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-  version?: number;
 };
 
 export type CreateHumanReviewInput = Omit<HumanReview, 'evalRunId' | 'createdAt'>;
@@ -176,7 +104,6 @@ export type EvalRunExecutorInput = {
   workspaceRoot: string;
   fixture: EvalFixture;
   agentSpec: AgentSpec;
-  evalRunConfig?: EvalRunConfig;
   model?: string;
   modelParams?: RunArtifact['modelParams'];
   resolvedAgentConfig: EvalRun['resolvedAgentConfig'];
@@ -199,7 +126,6 @@ type PendingEvalRunExecution = {
   runWorkspaceRoot: string;
   fixture: EvalFixture;
   agentSpec: AgentSpec;
-  evalRunConfig?: EvalRunConfig;
   model?: string;
   modelParams?: RunArtifact['modelParams'];
   beforeManifest: RunInputSnapshotFile[];
@@ -225,17 +151,10 @@ export type RecordRunArtifactEventInput = {
 
 export type HarnessStore = {
   getSummary(): Promise<HarnessSummary>;
-  listRuntimeConfigFlows(filter?: ListRuntimeConfigFlowsFilter): Promise<RuntimeConfigFlow[]>;
-  createRuntimeConfigFlow(input: CreateRuntimeConfigFlowInput): Promise<RuntimeConfigFlow>;
-  cloneRuntimeConfigFlow(flowId: string, input?: CloneRuntimeConfigFlowInput): Promise<RuntimeConfigFlow>;
-  updateRuntimeConfigFlow(flowId: string, input: UpdateRuntimeConfigFlowInput): Promise<RuntimeConfigFlow>;
-  deleteRuntimeConfigFlow(flowId: string): Promise<{ deleted: true }>;
-  getActiveResolvedAgentConfig(productId?: string): Promise<EvalRun['resolvedAgentConfig'] | undefined>;
   listAgentLayerConfigs(): Promise<AgentLayerConfig[]>;
   createAgentLayerConfig(input: Omit<AgentLayerConfig, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number }): Promise<AgentLayerConfig>;
   listAgentSpecs(): Promise<AgentSpec[]>;
   createAgentSpec(input: Omit<AgentSpec, 'id' | 'version' | 'createdAt' | 'updatedAt' | 'activatedAt'> & { version?: number }): Promise<AgentSpec>;
-  cloneAgentSpec(agentSpecId: string, input?: CloneVersionedRecordInput): Promise<AgentSpec>;
   getAgentSpecReleaseGate(agentSpecId: string): Promise<AgentSpecReleaseGate>;
   listMemoryPolicies(): Promise<MemoryPolicy[]>;
   createMemoryPolicy(input: Omit<MemoryPolicy, 'id' | 'version' | 'createdAt' | 'updatedAt'> & { version?: number }): Promise<MemoryPolicy>;
@@ -248,16 +167,6 @@ export type HarnessStore = {
   createPromptBlockVersion(promptBlockId: string, input: Partial<Pick<PromptBlock, 'title' | 'scope' | 'content' | 'status'>>): Promise<PromptBlock>;
   getPromptBlockDiff(promptBlockId: string, fromVersion?: number, toVersion?: number): Promise<HarnessVersionDiff>;
   updatePromptBlockStatus(promptBlockId: string, version: number, status: PromptBlock['status']): Promise<PromptBlock>;
-  listBehaviorRuleConfigs(): Promise<BehaviorRuleConfig[]>;
-  createBehaviorRuleConfig(input: CreateBehaviorRuleConfigInput): Promise<BehaviorRuleConfig>;
-  createBehaviorRuleConfigVersion(ruleConfigId: string, input: Partial<Pick<BehaviorRuleConfig, 'title' | 'status' | 'scope' | 'agentId' | 'source' | 'content' | 'tags'>>): Promise<BehaviorRuleConfig>;
-  listAgentToolPolicies(): Promise<AgentToolPolicy[]>;
-  createAgentToolPolicy(input: CreateAgentToolPolicyInput): Promise<AgentToolPolicy>;
-  createAgentToolPolicyVersion(policyId: string, input: Partial<Pick<AgentToolPolicy, 'title' | 'status' | 'scope' | 'agentId' | 'source' | 'allowedToolIds' | 'deniedToolIds' | 'highRiskToolIds' | 'toolDescriptionRefs' | 'tags'>>): Promise<AgentToolPolicy>;
-  listToolDescriptionConfigs(): Promise<ToolDescriptionConfig[]>;
-  createToolDescriptionConfig(input: CreateToolDescriptionConfigInput): Promise<ToolDescriptionConfig>;
-  createToolDescriptionConfigVersion(toolDescriptionConfigId: string, input: Partial<Pick<ToolDescriptionConfig, 'title' | 'status' | 'scope' | 'agentId' | 'source' | 'description' | 'parameterDescriptions' | 'outputDescription' | 'tags'>>): Promise<ToolDescriptionConfig>;
-  getToolDescriptionConfigDiff(toolDescriptionConfigId: string, fromVersion?: number, toVersion?: number): Promise<HarnessVersionDiff>;
   listSkillSnapshots(): Promise<SkillSnapshot[]>;
   createSkillSnapshot(input: Omit<SkillSnapshot, 'id' | 'version' | 'contentHash' | 'createdAt' | 'updatedAt'> & { id?: string; version?: number }): Promise<SkillSnapshot>;
   createSkillSnapshotVersion(skillSnapshotId: string, input: Partial<Pick<SkillSnapshot, 'content' | 'status' | 'source'>>): Promise<SkillSnapshot>;
@@ -274,16 +183,7 @@ export type HarnessStore = {
   listEvalFixtures(): Promise<EvalFixture[]>;
   createEvalFixtureFromSnapshot(input: CreateEvalFixtureFromSnapshotInput): Promise<EvalFixture>;
   createEvalFixtureFromRunArtifact(runId: string, input: Omit<CreateEvalFixtureFromSnapshotInput, 'snapshotId'> & { snapshotId?: string }): Promise<EvalFixture>;
-  cloneEvalFixture(fixtureId: string, input?: CloneVersionedRecordInput): Promise<EvalFixture>;
   updateEvalFixture(fixtureId: string, input: UpdateEvalFixtureInput): Promise<EvalFixture>;
-  listAssertionConfigs(): Promise<AssertionConfig[]>;
-  createAssertionConfig(input: CreateAssertionConfigInput): Promise<AssertionConfig>;
-  cloneAssertionConfig(assertionConfigId: string, input?: CloneVersionedRecordInput): Promise<AssertionConfig>;
-  createAssertionConfigVersion(assertionConfigId: string, input: Partial<Pick<AssertionConfig, 'name' | 'status' | 'source' | 'assertions' | 'compiledAssertions' | 'tags'>>): Promise<AssertionConfig>;
-  listEvalRunConfigs(): Promise<EvalRunConfig[]>;
-  createEvalRunConfig(input: CreateEvalRunConfigInput): Promise<EvalRunConfig>;
-  cloneEvalRunConfig(evalRunConfigId: string, input?: CloneVersionedRecordInput): Promise<EvalRunConfig>;
-  createEvalRunConfigVersion(evalRunConfigId: string, input: Partial<Omit<EvalRunConfig, 'id' | 'productId' | 'version' | 'createdAt' | 'updatedAt'>>): Promise<EvalRunConfig>;
   listEvalRuns(): Promise<EvalRun[]>;
   createEvalRun(input: CreateEvalRunInput): Promise<EvalRun>;
   completeEvalRun(evalRunId: string, outputMessage?: string): Promise<EvalRun>;
@@ -294,18 +194,6 @@ export type HarnessStore = {
   rollbackAgentSpec(agentSpecId: string, options?: { forceReason?: AgentSpecReleaseForceReason; auditCategory?: AgentSpecReleaseAuditCategory; reviewer?: string; notes?: string; sourceReleaseRecordId?: string }): Promise<AgentSpec>;
   listReleaseRecords(filter?: ListReleaseRecordsFilter): Promise<AgentSpecReleaseRecord[]>;
   listHumanReviewRubrics(): Promise<HumanReviewRubric[]>;
-  createHumanReviewRubric(input: CreateHumanReviewRubricInput): Promise<HumanReviewRubric>;
-  createHumanReviewRubricVersion(rubricId: string, input: Partial<Pick<HumanReviewRubric, 'name' | 'artifactType' | 'status' | 'source' | 'hardChecks' | 'humanScores' | 'decisionRules'>>): Promise<HumanReviewRubric>;
-};
-
-export type ListRuntimeConfigFlowsFilter = {
-  productId?: string;
-  agentId?: string;
-  status?: RuntimeConfigFlow['status'];
-  releaseState?: RuntimeConfigFlow['releaseState'];
-  tag?: string;
-  query?: string;
-  sort?: 'updatedAt' | 'createdAt' | 'gateStatus' | 'evalCompletion';
 };
 
 const STATE_FILE = 'harness.json';
@@ -340,9 +228,9 @@ export function createHarnessStore(
     await ensureRoot();
     try {
       const parsed = JSON.parse(await readFile(statePath, 'utf8')) as Partial<HarnessState>;
-      return seedProductProfileBaselines(normalizeState(parsed));
+      return seedProductProfileBaselines(await normalizeState(parsed));
     } catch (error) {
-      if (isNotFoundError(error)) return seedProductProfileBaselines(normalizeState({}));
+      if (isNotFoundError(error)) return seedProductProfileBaselines(await normalizeState({}));
       throw error;
     }
   }
@@ -398,7 +286,6 @@ export function createHarnessStore(
             workspaceRoot: input.runWorkspaceRoot,
             fixture: input.fixture,
             agentSpec: input.agentSpec,
-            evalRunConfig: input.evalRunConfig,
             model: input.model,
             modelParams: input.modelParams,
             resolvedAgentConfig: input.resolvedAgentConfig,
@@ -415,16 +302,11 @@ export function createHarnessStore(
       const fileDiff = diffFileManifests(input.beforeManifest, afterManifest);
       const changedFiles = await captureEvalRunChangedFiles(input.runWorkspaceRoot, fileDiff);
       const state = await readState();
-      const evalRun = state.evalRuns.find((item) => item.id === input.evalRunId);
-      const assertionConfig = evalRun?.assertionConfigId
-        ? state.assertionConfigs.find((config) => config.id === evalRun.assertionConfigId)
-        : undefined;
-      const effectiveAssertions = assertionConfig?.compiledAssertions ?? input.fixture.assertions;
       const assertionResults = await evaluateAssertions(
         input.runWorkspaceRoot,
         input.beforeManifest,
         afterManifest,
-        effectiveAssertions,
+        input.fixture.assertions,
         toolEvents,
         input.fixture.productId,
         state.workspaceManifests,
@@ -462,197 +344,7 @@ export function createHarnessStore(
 
   return {
     async getSummary() {
-      return buildHarnessSummary(await readState());
-    },
-
-    async listRuntimeConfigFlows(filter = {}) {
-      const state = await readState();
-      return filterRuntimeConfigFlows(deriveRuntimeConfigFlows(state), filter);
-    },
-
-    async createRuntimeConfigFlow(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const flow: RuntimeConfigFlow = {
-          id: `runtime_config_flow_${randomUUID()}`,
-          productId: input.productId,
-          name: input.name,
-          status: input.status ?? 'draft',
-          agentId: input.agentId,
-          tags: input.tags ?? [],
-          releaseState: 'never_released',
-          nodeRefs: input.nodeRefs ?? {},
-          candidateSpecId: input.candidateSpecId,
-          activeSpecId: input.activeSpecId,
-          evalRunIds: input.evalRunIds ?? [],
-          releaseRecordIds: input.releaseRecordIds ?? [],
-          gateStatus: 'unknown',
-          evalCompletion: { total: 0, passed: 0, reviewed: 0, positiveReviewed: 0 },
-          changes: input.changes ?? [],
-          createdAt: now,
-          updatedAt: now,
-          archivedAt: null,
-        };
-        assertValidRuntimeConfigFlow(flow, state);
-        state.runtimeConfigFlows.push(refreshRuntimeConfigFlowEvidence(flow, state, now));
-        return state.runtimeConfigFlows.at(-1) as RuntimeConfigFlow;
-      });
-    },
-
-    async cloneRuntimeConfigFlow(flowId, input = {}) {
-      return updateState(async (state) => {
-        const source = state.runtimeConfigFlows.find((item) => item.id === flowId);
-        if (!source) throw new Error('Runtime config flow not found');
-        const now = new Date().toISOString();
-        const nextNodeRefs = cloneJson(source.nodeRefs);
-
-        const sourceFixtureId = source.nodeRefs.evalFixture?.id;
-        if (sourceFixtureId) {
-          const sourceFixture = state.evalFixtures.find((item) => item.id === sourceFixtureId);
-          if (sourceFixture) {
-            const nextFixtureId = `eval_fixture_${randomUUID()}`;
-            const fixtureRoot = path.join(FIXTURES_DIR, nextFixtureId, 'workspace');
-            const targetRoot = path.join(harnessRoot, fixtureRoot);
-            await rm(targetRoot, { recursive: true, force: true });
-            await mkdir(path.dirname(targetRoot), { recursive: true });
-            await cp(path.join(harnessRoot, sourceFixture.workspaceSnapshotRoot), targetRoot, { recursive: true, force: true });
-            const fixture: EvalFixture = {
-              ...cloneJson(sourceFixture),
-              id: nextFixtureId,
-              name: copyName(sourceFixture.name ?? sourceFixture.target),
-              workspaceSnapshotRoot: normalizePath(fixtureRoot),
-              createdAt: now,
-              updatedAt: now,
-            };
-            state.evalFixtures.push(fixture);
-            nextNodeRefs.evalFixture = { source: 'derived', id: fixture.id, name: fixture.name ?? fixture.target };
-          }
-        }
-
-        const sourceSpecId = source.nodeRefs.agentConfig?.id ?? source.candidateSpecId;
-        let clonedSpecId = source.candidateSpecId;
-        if (sourceSpecId) {
-          const sourceSpec = state.agentSpecs.find((item) => item.id === sourceSpecId);
-          if (sourceSpec) {
-            const latestVersion = Math.max(0, ...state.agentSpecs
-              .filter((spec) => spec.productId === sourceSpec.productId && spec.agentId === sourceSpec.agentId)
-              .map((spec) => spec.version));
-            const spec: AgentSpec = {
-              ...cloneJson(sourceSpec),
-              id: `agent_spec_${randomUUID()}`,
-              name: copyName(sourceSpec.name ?? sourceSpec.agentId),
-              version: latestVersion + 1,
-              status: 'draft',
-              activatedAt: null,
-              createdAt: now,
-              updatedAt: now,
-            };
-            state.agentSpecs.push(spec);
-            clonedSpecId = spec.id;
-            nextNodeRefs.agentConfig = { source: 'derived', id: spec.id, version: spec.version, name: spec.name ?? spec.agentId };
-          }
-        }
-
-        const sourceEvalRunConfigId = source.nodeRefs.evalRunConfig?.id;
-        if (sourceEvalRunConfigId) {
-          const sourceConfig = state.evalRunConfigs.find((config) => config.id === sourceEvalRunConfigId);
-          if (sourceConfig) {
-            const config: EvalRunConfig = {
-              ...cloneJson(sourceConfig),
-              id: `eval_run_config_${randomUUID()}`,
-              name: copyName(sourceConfig.name),
-              version: 1,
-              status: 'draft',
-              source: { type: 'eval_run_config', id: sourceConfig.id, version: sourceConfig.version },
-              createdAt: now,
-              updatedAt: now,
-            };
-            state.evalRunConfigs.push(config);
-            nextNodeRefs.evalRunConfig = { source: 'derived', id: config.id, version: config.version, name: config.name };
-          }
-        }
-
-        const sourceAssertionConfigId = source.nodeRefs.assertionConfig?.id;
-        if (sourceAssertionConfigId) {
-          const sourceConfig = state.assertionConfigs.find((config) => config.id === sourceAssertionConfigId);
-          if (sourceConfig) {
-            const config: AssertionConfig = {
-              ...cloneJson(sourceConfig),
-              id: `assertion_config_${randomUUID()}`,
-              name: copyName(sourceConfig.name),
-              version: 1,
-              status: 'draft',
-              source: { type: 'assertion_config', id: sourceConfig.id, version: sourceConfig.version },
-              createdAt: now,
-              updatedAt: now,
-            };
-            state.assertionConfigs.push(config);
-            nextNodeRefs.assertionConfig = { source: 'derived', id: config.id, version: config.version, name: config.name };
-          }
-        }
-
-        const flow: RuntimeConfigFlow = {
-          id: `runtime_config_flow_${randomUUID()}`,
-          productId: source.productId,
-          name: input.name?.trim() || copyName(source.name),
-          status: 'draft',
-          agentId: source.agentId,
-          tags: source.tags,
-          releaseState: 'never_released',
-          nodeRefs: nextNodeRefs,
-          candidateSpecId: clonedSpecId,
-          activeSpecId: source.activeSpecId,
-          evalRunIds: [],
-          releaseRecordIds: [],
-          gateStatus: 'unknown',
-          evalCompletion: { total: 0, passed: 0, reviewed: 0, positiveReviewed: 0 },
-          changes: cloneJson(source.changes),
-          createdAt: now,
-          updatedAt: now,
-          archivedAt: null,
-        };
-        assertValidRuntimeConfigFlow(flow, state);
-        state.runtimeConfigFlows.push(refreshRuntimeConfigFlowEvidence(flow, state, now));
-        return state.runtimeConfigFlows.at(-1) as RuntimeConfigFlow;
-      });
-    },
-
-    async updateRuntimeConfigFlow(flowId, input) {
-      return updateState((state) => {
-        const flow = state.runtimeConfigFlows.find((item) => item.id === flowId);
-        if (!flow) throw new Error('Runtime config flow not found');
-        const now = new Date().toISOString();
-        const next: RuntimeConfigFlow = {
-          ...flow,
-          ...input,
-          nodeRefs: { ...flow.nodeRefs, ...(input.nodeRefs ?? {}) },
-          tags: input.tags ?? flow.tags,
-          evalRunIds: input.evalRunIds ?? flow.evalRunIds,
-          releaseRecordIds: input.releaseRecordIds ?? flow.releaseRecordIds,
-          changes: input.changes ?? flow.changes,
-          updatedAt: now,
-          archivedAt: input.status === 'archived' ? now : flow.archivedAt,
-        };
-        assertValidRuntimeConfigFlow(next, state);
-        Object.assign(flow, refreshRuntimeConfigFlowEvidence(next, state, now));
-        return flow;
-      });
-    },
-
-    async deleteRuntimeConfigFlow(flowId) {
-      return updateState((state) => {
-        const flow = state.runtimeConfigFlows.find((item) => item.id === flowId);
-        if (!flow) throw new Error('Runtime config flow not found');
-        if (flow.status !== 'draft' || flow.candidateSpecId || flow.activeSpecId || flow.evalRunIds.length > 0 || flow.releaseRecordIds.length > 0) {
-          throw new Error('Only unreferenced runtime config flow drafts can be deleted');
-        }
-        state.runtimeConfigFlows = state.runtimeConfigFlows.filter((item) => item.id !== flowId);
-        return { deleted: true as const };
-      });
-    },
-
-    async getActiveResolvedAgentConfig(productId) {
-      return resolveActiveAgentConfig(await readState(), productId);
+      return readState();
     },
 
     async listAgentLayerConfigs() {
@@ -715,29 +407,6 @@ export function createHarnessStore(
       });
     },
 
-    async cloneAgentSpec(agentSpecId, input = {}) {
-      return updateState((state) => {
-        const source = state.agentSpecs.find((item) => item.id === agentSpecId);
-        if (!source) throw new Error('Agent spec not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.agentSpecs
-          .filter((spec) => spec.productId === source.productId && spec.agentId === source.agentId)
-          .map((spec) => spec.version));
-        const spec: AgentSpec = {
-          ...cloneJson(source),
-          id: `agent_spec_${randomUUID()}`,
-          name: input.name?.trim() || copyName(source.name ?? source.agentId),
-          version: latestVersion + 1,
-          status: 'draft',
-          activatedAt: null,
-          createdAt: now,
-          updatedAt: now,
-        };
-        state.agentSpecs.push(spec);
-        return spec;
-      });
-    },
-
     async updateAgentSpecStatus(agentSpecId, status, statusOptions = {}) {
       return updateState((state) => {
         const spec = state.agentSpecs.find((item) => item.id === agentSpecId);
@@ -754,14 +423,6 @@ export function createHarnessStore(
             }
           }
           spec.activatedAt = now;
-          if (spec.layerConfigRef) {
-            for (const item of state.agentSpecs) {
-              if (item.productId === spec.productId && item.agentId !== spec.agentId && item.status === 'active') {
-                item.layerConfigRef = spec.layerConfigRef;
-                item.updatedAt = now;
-              }
-            }
-          }
           state.releaseRecords.push({
             id: `agent_release_${randomUUID()}`,
             agentSpecId: spec.id,
@@ -978,167 +639,6 @@ export function createHarnessStore(
         block.updatedAt = now;
         return block;
       });
-    },
-
-    async listBehaviorRuleConfigs() {
-      return (await readState()).behaviorRuleConfigs;
-    },
-
-    async createBehaviorRuleConfig(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const id = input.id || `behavior_rule_${randomUUID()}`;
-        const latestVersion = Math.max(0, ...state.behaviorRuleConfigs
-          .filter((rule) => rule.id === id)
-          .map((rule) => rule.version));
-        const rule = normalizeBehaviorRuleConfig({
-          ...input,
-          id,
-          version: input.version ?? latestVersion + 1,
-          contentHash: sha256(input.content),
-          tags: input.tags ?? [],
-          createdAt: now,
-          updatedAt: now,
-        });
-        assertValidBehaviorRuleConfig(rule);
-        state.behaviorRuleConfigs.push(rule);
-        return rule;
-      });
-    },
-
-    async createBehaviorRuleConfigVersion(ruleConfigId, input) {
-      return updateState((state) => {
-        const previous = state.behaviorRuleConfigs.find((rule) => rule.id === ruleConfigId);
-        if (!previous) throw new Error('Behavior rule config not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.behaviorRuleConfigs
-          .filter((rule) => rule.id === previous.id)
-          .map((rule) => rule.version));
-        const content = input.content ?? previous.content;
-        const rule = normalizeBehaviorRuleConfig({
-          ...previous,
-          ...input,
-          source: input.source ?? { type: 'runtime_config', id: previous.id, version: previous.version },
-          content,
-          version: latestVersion + 1,
-          contentHash: sha256(content),
-          createdAt: now,
-          updatedAt: now,
-        });
-        assertValidBehaviorRuleConfig(rule);
-        state.behaviorRuleConfigs.push(rule);
-        return rule;
-      });
-    },
-
-    async listAgentToolPolicies() {
-      return (await readState()).agentToolPolicies;
-    },
-
-    async createAgentToolPolicy(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const id = input.id || `tool_policy_${randomUUID()}`;
-        const latestVersion = Math.max(0, ...state.agentToolPolicies
-          .filter((policy) => policy.id === id)
-          .map((policy) => policy.version));
-        const policy = normalizeAgentToolPolicy({
-          ...input,
-          id,
-          version: input.version ?? latestVersion + 1,
-          tags: input.tags ?? [],
-          createdAt: now,
-          updatedAt: now,
-        });
-        assertValidAgentToolPolicy(policy);
-        state.agentToolPolicies.push(policy);
-        return policy;
-      });
-    },
-
-    async createAgentToolPolicyVersion(policyId, input) {
-      return updateState((state) => {
-        const previous = state.agentToolPolicies.find((policy) => policy.id === policyId);
-        if (!previous) throw new Error('Agent tool policy not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.agentToolPolicies
-          .filter((policy) => policy.id === previous.id)
-          .map((policy) => policy.version));
-        const policy = normalizeAgentToolPolicy({
-          ...previous,
-          ...input,
-          source: input.source ?? { type: 'runtime_config', id: previous.id, version: previous.version },
-          version: latestVersion + 1,
-          createdAt: now,
-          updatedAt: now,
-        });
-        assertValidAgentToolPolicy(policy);
-        state.agentToolPolicies.push(policy);
-        return policy;
-      });
-    },
-
-    async listToolDescriptionConfigs() {
-      return (await readState()).toolDescriptionConfigs;
-    },
-
-    async createToolDescriptionConfig(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const id = input.id || `tool_description_${randomUUID()}`;
-        const latestVersion = Math.max(0, ...state.toolDescriptionConfigs
-          .filter((config) => config.id === id)
-          .map((config) => config.version ?? 0));
-        const config = normalizeToolDescriptionConfig({
-          ...input,
-          id,
-          version: input.version ?? latestVersion + 1,
-          status: input.status ?? 'candidate',
-          contentHash: hashToolDescription(input),
-          tags: input.tags ?? [],
-          createdAt: now,
-          updatedAt: now,
-        });
-        assertValidToolDescriptionConfig(config);
-        state.toolDescriptionConfigs.push(config);
-        return config;
-      });
-    },
-
-    async createToolDescriptionConfigVersion(toolDescriptionConfigId, input) {
-      return updateState((state) => {
-        const previous = state.toolDescriptionConfigs.find((config) => config.id === toolDescriptionConfigId);
-        if (!previous) throw new Error('Tool description config not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.toolDescriptionConfigs
-          .filter((config) => config.id === previous.id)
-          .map((config) => config.version ?? 0));
-        const config = normalizeToolDescriptionConfig({
-          ...previous,
-          ...input,
-          source: input.source ?? { type: 'tool_description', id: previous.id, version: previous.version },
-          version: latestVersion + 1,
-          contentHash: hashToolDescription({ ...previous, ...input }),
-          createdAt: now,
-          updatedAt: now,
-        });
-        assertValidToolDescriptionConfig(config);
-        state.toolDescriptionConfigs.push(config);
-        return config;
-      });
-    },
-
-    async getToolDescriptionConfigDiff(toolDescriptionConfigId, fromVersion, toVersion) {
-      const state = await readState();
-      const versions = state.toolDescriptionConfigs
-        .filter((config): config is ToolDescriptionConfig & { id: string; version: number; contentHash: string } => (
-          config.id === toolDescriptionConfigId
-          && typeof config.version === 'number'
-          && typeof config.contentHash === 'string'
-        ))
-        .sort((a, b) => a.version - b.version);
-      const selected = selectVersionPair(versions, fromVersion, toVersion, 'Tool description config not found');
-      return buildVersionDiff('tool_description', selected.previous.id ?? toolDescriptionConfigId, selected.previous, selected.next, toolDescriptionText(selected.previous), toolDescriptionText(selected.next));
     },
 
     async listSkillSnapshots() {
@@ -1451,7 +951,7 @@ export function createHarnessStore(
         sensitiveFieldRules,
         toolRetentionArtifacts: buildToolRetentionArtifacts(artifact, toolRetentionPolicy),
         toolMocks: input.toolMocks ?? {},
-        assertions: input.assertions ?? {},
+        assertions: input.assertions ?? suggestAssertionsFromArtifact(artifact),
         tags: input.tags ?? ['from-run-artifact'],
         createdAt: now,
         updatedAt: now,
@@ -1494,175 +994,6 @@ export function createHarnessStore(
       });
     },
 
-    async cloneEvalFixture(fixtureId, input = {}) {
-      return updateState(async (state) => {
-        const source = state.evalFixtures.find((item) => item.id === fixtureId);
-        if (!source) throw new Error('Eval fixture not found');
-        const now = new Date().toISOString();
-        const sourceRoot = path.join(harnessRoot, source.workspaceSnapshotRoot);
-        const nextFixtureId = `eval_fixture_${randomUUID()}`;
-        const fixtureRoot = path.join(FIXTURES_DIR, nextFixtureId, 'workspace');
-        const targetRoot = path.join(harnessRoot, fixtureRoot);
-        await rm(targetRoot, { recursive: true, force: true });
-        await mkdir(path.dirname(targetRoot), { recursive: true });
-        await cp(sourceRoot, targetRoot, { recursive: true, force: true });
-        const fixture: EvalFixture = {
-          ...cloneJson(source),
-          id: nextFixtureId,
-          name: input.name?.trim() || copyName(source.name ?? source.target),
-          workspaceSnapshotRoot: normalizePath(fixtureRoot),
-          createdAt: now,
-          updatedAt: now,
-        };
-        state.evalFixtures.push(fixture);
-        return fixture;
-      });
-    },
-
-    async listAssertionConfigs() {
-      return (await readState()).assertionConfigs;
-    },
-
-    async createAssertionConfig(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const id = input.id || `assertion_config_${randomUUID()}`;
-        const latestVersion = Math.max(0, ...state.assertionConfigs
-          .filter((config) => config.productId === input.productId && config.id === id)
-          .map((config) => config.version));
-        const compiledAssertions = input.compiledAssertions ?? compileAssertionDefinitions(input.assertions);
-        assertValidAssertionConfig({ ...input, id, version: input.version ?? latestVersion + 1, compiledAssertions, createdAt: now, updatedAt: now });
-        const config: AssertionConfig = {
-          ...input,
-          id,
-          version: input.version ?? latestVersion + 1,
-          compiledAssertions,
-          tags: input.tags ?? [],
-          createdAt: now,
-          updatedAt: now,
-        };
-        state.assertionConfigs.push(config);
-        return config;
-      });
-    },
-
-    async cloneAssertionConfig(assertionConfigId, input = {}) {
-      return updateState((state) => {
-        const source = state.assertionConfigs.find((config) => config.id === assertionConfigId);
-        if (!source) throw new Error('Assertion config not found');
-        const now = new Date().toISOString();
-        const config: AssertionConfig = {
-          ...cloneJson(source),
-          id: `assertion_config_${randomUUID()}`,
-          name: input.name?.trim() || copyName(source.name),
-          version: 1,
-          status: 'draft',
-          source: { type: 'assertion_config', id: source.id, version: source.version },
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidAssertionConfig(config);
-        state.assertionConfigs.push(config);
-        return config;
-      });
-    },
-
-    async createAssertionConfigVersion(assertionConfigId, input) {
-      return updateState((state) => {
-        const previous = state.assertionConfigs.find((config) => config.id === assertionConfigId);
-        if (!previous) throw new Error('Assertion config not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.assertionConfigs
-          .filter((config) => config.productId === previous.productId && config.id === previous.id)
-          .map((config) => config.version));
-        const assertions = input.assertions ?? previous.assertions;
-        const compiledAssertions = input.compiledAssertions ?? compileAssertionDefinitions(assertions);
-        const config: AssertionConfig = {
-          ...previous,
-          name: input.name ?? previous.name,
-          status: input.status ?? 'draft',
-          source: input.source ?? { type: 'assertion_config', id: previous.id, version: previous.version },
-          assertions,
-          compiledAssertions,
-          tags: input.tags ?? previous.tags,
-          version: latestVersion + 1,
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidAssertionConfig(config);
-        state.assertionConfigs.push(config);
-        return config;
-      });
-    },
-
-    async listEvalRunConfigs() {
-      return (await readState()).evalRunConfigs;
-    },
-
-    async createEvalRunConfig(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const id = input.id || `eval_run_config_${randomUUID()}`;
-        const latestVersion = Math.max(0, ...state.evalRunConfigs
-          .filter((config) => config.productId === input.productId && config.id === id)
-          .map((config) => config.version));
-        const config: EvalRunConfig = {
-          ...input,
-          id,
-          version: input.version ?? latestVersion + 1,
-          tags: input.tags ?? [],
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidEvalRunConfig(config);
-        state.evalRunConfigs.push(config);
-        return config;
-      });
-    },
-
-    async cloneEvalRunConfig(evalRunConfigId, input = {}) {
-      return updateState((state) => {
-        const source = state.evalRunConfigs.find((config) => config.id === evalRunConfigId);
-        if (!source) throw new Error('Eval run config not found');
-        const now = new Date().toISOString();
-        const config: EvalRunConfig = {
-          ...cloneJson(source),
-          id: `eval_run_config_${randomUUID()}`,
-          name: input.name?.trim() || copyName(source.name),
-          version: 1,
-          status: 'draft',
-          source: { type: 'eval_run_config', id: source.id, version: source.version },
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidEvalRunConfig(config);
-        state.evalRunConfigs.push(config);
-        return config;
-      });
-    },
-
-    async createEvalRunConfigVersion(evalRunConfigId, input) {
-      return updateState((state) => {
-        const previous = state.evalRunConfigs.find((config) => config.id === evalRunConfigId);
-        if (!previous) throw new Error('Eval run config not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.evalRunConfigs
-          .filter((config) => config.productId === previous.productId && config.id === previous.id)
-          .map((config) => config.version));
-        const config: EvalRunConfig = {
-          ...previous,
-          ...input,
-          source: input.source ?? { type: 'eval_run_config', id: previous.id, version: previous.version },
-          version: latestVersion + 1,
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidEvalRunConfig(config);
-        state.evalRunConfigs.push(config);
-        return config;
-      });
-    },
-
     async listEvalRuns() {
       return (await readState()).evalRuns;
     },
@@ -1674,38 +1005,22 @@ export function createHarnessStore(
         if (!fixture) throw new Error('Eval fixture not found');
         const agentSpec = state.agentSpecs.find((item) => item.id === input.agentSpecId);
         if (!agentSpec) throw new Error('Agent spec not found');
-        const evalRunConfig = input.evalRunConfigId
-          ? state.evalRunConfigs.find((config) => config.id === input.evalRunConfigId)
-          : undefined;
-        if (input.evalRunConfigId && !evalRunConfig) throw new Error('Eval run config not found');
-        const assertionConfig = input.assertionConfigId
-          ? state.assertionConfigs.find((config) => config.id === input.assertionConfigId)
-          : undefined;
-        if (input.assertionConfigId && !assertionConfig) throw new Error('Assertion config not found');
-        if (input.humanReviewRubricId && !state.humanReviewRubrics.some((rubric) => rubric.id === input.humanReviewRubricId)) throw new Error('Human review rubric not found');
         const now = new Date().toISOString();
         const evalRunId = `eval_run_${randomUUID()}`;
         const runWorkspaceRoot = path.join(harnessRoot, EVAL_RUNS_DIR, evalRunId, 'workspace');
         await mkdir(path.dirname(runWorkspaceRoot), { recursive: true });
         await cp(path.join(harnessRoot, fixture.workspaceSnapshotRoot), runWorkspaceRoot, { recursive: true });
         const beforeManifest = await buildFileManifest(runWorkspaceRoot);
-        const effectiveAssertions = assertionConfig?.compiledAssertions ?? fixture.assertions;
-        const beforeTextSnapshot = await collectAssertionTextSnapshot(runWorkspaceRoot, effectiveAssertions);
+        const beforeTextSnapshot = await collectAssertionTextSnapshot(runWorkspaceRoot, fixture.assertions);
         const resolvedAgentConfig = await resolveAgentConfig(state, agentSpec, workspaceStore);
         const sourceArtifact = fixture.sourceRunId ? state.runArtifacts.find((item) => item.runId === fixture.sourceRunId) : undefined;
-        const model = evalRunConfig?.modelOverride ?? sourceArtifact?.modelParams?.model ?? sourceArtifact?.model;
-        const modelParams = evalRunConfig?.modelOverride
-          ? { model: evalRunConfig.modelOverride, maxSteps: 25, source: 'run_input' as const }
-          : sourceArtifact?.modelParams ?? (model ? { model, maxSteps: 25, source: 'run_input' as const } : undefined);
-        const runMode = evalRunConfig?.runMode ?? input.runMode ?? 'repro';
+        const model = sourceArtifact?.modelParams?.model ?? sourceArtifact?.model;
+        const modelParams = sourceArtifact?.modelParams ?? (model ? { model, maxSteps: 25, source: 'run_input' as const } : undefined);
         const evalRun: EvalRun = {
           id: evalRunId,
           fixtureId: fixture.id,
           agentSpecId: agentSpec.id,
-          evalRunConfigId: evalRunConfig?.id,
-          assertionConfigId: assertionConfig?.id,
-          humanReviewRubricId: input.humanReviewRubricId,
-          runMode,
+          runMode: input.runMode ?? 'repro',
           executionMode: options.evalRunExecutor ? 'custom_executor' : 'fixture_replay',
           status: 'running',
           model,
@@ -1725,13 +1040,12 @@ export function createHarnessStore(
           runWorkspaceRoot,
           fixture: structuredClone(fixture),
           agentSpec: structuredClone(agentSpec),
-          evalRunConfig: evalRunConfig ? structuredClone(evalRunConfig) : undefined,
           model,
           modelParams,
           beforeManifest,
           beforeTextSnapshot,
           resolvedAgentConfig,
-          runMode,
+          runMode: input.runMode ?? 'repro',
         };
         return evalRun;
       });
@@ -1762,8 +1076,6 @@ export function createHarnessStore(
       return updateState((state) => {
         const evalRun = state.evalRuns.find((item) => item.id === evalRunId);
         if (!evalRun) throw new Error('Eval run not found');
-        const rubric = findHumanReviewRubric(state, input.rubricId, input.rubricVersion);
-        assertValidHumanReviewInput(rubric, input);
         evalRun.humanReview = {
           ...input,
           evalRunId,
@@ -1776,8 +1088,6 @@ export function createHarnessStore(
     async addBatchHumanReview(input) {
       return updateState((state) => {
         const now = new Date().toISOString();
-        const rubric = findHumanReviewRubric(state, input.rubricId, input.rubricVersion);
-        assertValidHumanReviewInput(rubric, input);
         const updated: EvalRun[] = [];
         for (const evalRunId of input.evalRunIds) {
           const evalRun = state.evalRuns.find((item) => item.id === evalRunId);
@@ -1787,7 +1097,6 @@ export function createHarnessStore(
             rubricVersion: input.rubricVersion,
             reviewer: input.reviewer,
             decision: input.decision,
-            scoreStates: input.scoreStates,
             scores: input.scores,
             subScores: input.subScores,
             annotations: input.annotations,
@@ -1817,53 +1126,6 @@ export function createHarnessStore(
       const state = await readState();
       if (state.humanReviewRubrics.length > 0) return state.humanReviewRubrics;
       return [defaultStoryRubric()];
-    },
-
-    async createHumanReviewRubric(input) {
-      return updateState((state) => {
-        const now = new Date().toISOString();
-        const id = input.id || `human_review_rubric_${randomUUID()}`;
-        const latestVersion = Math.max(0, ...state.humanReviewRubrics
-          .filter((rubric) => rubric.productId === input.productId && rubric.id === id)
-          .map((rubric) => rubric.version));
-        const rubric: HumanReviewRubric = {
-          ...input,
-          id,
-          version: input.version ?? latestVersion + 1,
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidHumanReviewRubric(rubric);
-        state.humanReviewRubrics.push(rubric);
-        return rubric;
-      });
-    },
-
-    async createHumanReviewRubricVersion(rubricId, input) {
-      return updateState((state) => {
-        const previous = state.humanReviewRubrics.find((rubric) => rubric.id === rubricId);
-        if (!previous) throw new Error('Human review rubric not found');
-        const now = new Date().toISOString();
-        const latestVersion = Math.max(0, ...state.humanReviewRubrics
-          .filter((rubric) => rubric.productId === previous.productId && rubric.id === previous.id)
-          .map((rubric) => rubric.version));
-        const rubric: HumanReviewRubric = {
-          ...previous,
-          name: input.name ?? previous.name,
-          artifactType: input.artifactType ?? previous.artifactType,
-          status: input.status ?? 'draft',
-          source: input.source ?? { type: 'human_review_rubric', id: previous.id, version: previous.version },
-          hardChecks: input.hardChecks ?? previous.hardChecks,
-          humanScores: input.humanScores ?? previous.humanScores,
-          decisionRules: input.decisionRules ?? previous.decisionRules,
-          version: latestVersion + 1,
-          createdAt: now,
-          updatedAt: now,
-        };
-        assertValidHumanReviewRubric(rubric);
-        state.humanReviewRubrics.push(rubric);
-        return rubric;
-      });
     },
   };
 }
@@ -2221,11 +1483,6 @@ async function ensureBaselineLayerConfig(state: HarnessState, productId: string,
     if (existing.id === `seed_${productId}_layer_config`) {
       const systemRefs = [`seed_${productId}_system_orchestration@1`, `seed_${productId}_workspace_output_policy@1`];
       existing.systemAgent.promptBlockRefs = uniqueStrings([...existing.systemAgent.promptBlockRefs, ...systemRefs]);
-      existing.behaviorRuleRefs = uniqueStrings([...(existing.behaviorRuleRefs ?? []), `seed_${productId}_image_tool_confirmation@1`]);
-      existing.toolPolicyRefs = uniqueStrings([...(existing.toolPolicyRefs ?? []), `seed_${productId}_default_tool_policy@1`]);
-      if (!existing.toolPolicyRef || existing.toolPolicyRef === 'workspace-safe-write@1') {
-        existing.toolPolicyRef = `seed_${productId}_default_tool_policy@1`;
-      }
       existing.specialists = existing.specialists.map((specialist) => ({
         ...specialist,
         promptBlockRefs: uniqueStrings([
@@ -2235,8 +1492,6 @@ async function ensureBaselineLayerConfig(state: HarnessState, productId: string,
       }));
       existing.updatedAt = now;
     }
-    ensureBaselineBehaviorRuleConfig(state, productId, now);
-    ensureBaselineAgentToolPolicy(state, productId, now);
     return existing;
   }
 
@@ -2247,13 +1502,9 @@ async function ensureBaselineLayerConfig(state: HarnessState, productId: string,
     productId,
     version: 1,
     status: 'active',
-    behaviorRuleRefs: [`seed_${productId}_image_tool_confirmation@1`],
-    toolPolicyRefs: [`seed_${productId}_default_tool_policy@1`],
     systemAgent: {
       agentId: 'system',
       promptBlockRefs: [`seed_${productId}_system_orchestration@1`, `seed_${productId}_workspace_output_policy@1`],
-      behaviorRuleRefs: [],
-      toolPolicyRefs: [],
       allowedTools: ['read_workspace_file', 'write_workspace_file', 'delegate_to_specialist_agent', 'recall_project_memory', 'retrieve_knowledge_cards'],
       instructionOverride: systemInstructions,
     },
@@ -2261,65 +1512,18 @@ async function ensureBaselineLayerConfig(state: HarnessState, productId: string,
       agentId,
       skillRef: `${agentId}@1`,
       promptBlockRefs: baselinePromptBlockRefs(productId, agentId).filter((ref) => !ref.includes('_system_orchestration') && !ref.includes('_workspace_output_policy')),
-      behaviorRuleRefs: [],
-      toolPolicyRefs: [],
       defaultEnabled: true,
       instructionOverride: await readProductSkillPrompt(profile, agentId).catch(() => undefined),
     }))),
     memoryPolicyRef: `${memoryPolicy.id}@${memoryPolicy.version}`,
     retrievalPolicyRef: `${retrievalPolicy.id}@${retrievalPolicy.version}`,
-    toolPolicyRef: `seed_${productId}_default_tool_policy@1`,
+    toolPolicyRef: 'workspace-safe-write@1',
     modelPolicyRef: 'default-chat-model@1',
     createdAt: now,
     updatedAt: now,
   };
   state.agentLayerConfigs.push(layerConfig);
-  ensureBaselineBehaviorRuleConfig(state, productId, now);
-  ensureBaselineAgentToolPolicy(state, productId, now);
   return layerConfig;
-}
-
-function ensureBaselineBehaviorRuleConfig(state: HarnessState, productId: string, now: string): BehaviorRuleConfig {
-  const existing = state.behaviorRuleConfigs.find((rule) => rule.id === `seed_${productId}_image_tool_confirmation` && rule.status === 'active');
-  if (existing) return existing;
-  const content = '调用 generate_project_image 或 edit_project_image 之前，必须先在回复中向用户展示完整的提示词（prompt）、图片比例、生成数量、预计保存路径；编辑时还需说明基于哪张原图和修改要点。展示后等待用户确认再执行，不要在用户未确认时自行调用。';
-  const rule: BehaviorRuleConfig = {
-    id: `seed_${productId}_image_tool_confirmation`,
-    productId,
-    title: '图片工具确认协议',
-    version: 1,
-    status: 'active',
-    scope: 'product',
-    content,
-    contentHash: sha256(content),
-    tags: ['baseline', 'image'],
-    createdAt: now,
-    updatedAt: now,
-  };
-  state.behaviorRuleConfigs.push(rule);
-  return rule;
-}
-
-function ensureBaselineAgentToolPolicy(state: HarnessState, productId: string, now: string): AgentToolPolicy {
-  const existing = state.agentToolPolicies.find((policy) => policy.id === `seed_${productId}_default_tool_policy` && policy.status === 'active');
-  if (existing) return existing;
-  const policy: AgentToolPolicy = {
-    id: `seed_${productId}_default_tool_policy`,
-    productId,
-    title: '默认工具使用策略',
-    version: 1,
-    status: 'active',
-    scope: 'product',
-    allowedToolIds: [],
-    deniedToolIds: [],
-    highRiskToolIds: ['run_bash', 'sync_to_remote', 'send_wechat_message', 'send_wechat_file', 'create_scheduled_task'],
-    toolDescriptionRefs: [],
-    tags: ['baseline'],
-    createdAt: now,
-    updatedAt: now,
-  };
-  state.agentToolPolicies.push(policy);
-  return policy;
 }
 
 function normalizeState(state: Partial<HarnessState>): HarnessState {
@@ -2329,12 +1533,8 @@ function normalizeState(state: Partial<HarnessState>): HarnessState {
     toolIoSummaries: Array.isArray(artifact.toolIoSummaries) ? artifact.toolIoSummaries : [],
   })) : [];
   return {
-    runtimeConfigFlows: Array.isArray(state.runtimeConfigFlows) ? state.runtimeConfigFlows : [],
     agentLayerConfigs: Array.isArray(state.agentLayerConfigs) ? state.agentLayerConfigs : [],
     agentSpecs: Array.isArray(state.agentSpecs) ? state.agentSpecs : [],
-    behaviorRuleConfigs: Array.isArray(state.behaviorRuleConfigs) ? state.behaviorRuleConfigs : [],
-    agentToolPolicies: Array.isArray(state.agentToolPolicies) ? state.agentToolPolicies : [],
-    toolDescriptionConfigs: Array.isArray(state.toolDescriptionConfigs) ? state.toolDescriptionConfigs : [],
     memoryPolicies: Array.isArray(state.memoryPolicies) ? state.memoryPolicies : [],
     knowledgeBaseEntries: Array.isArray(state.knowledgeBaseEntries) ? state.knowledgeBaseEntries : [],
     retrievalPolicies: Array.isArray(state.retrievalPolicies) ? state.retrievalPolicies : [],
@@ -2344,431 +1544,10 @@ function normalizeState(state: Partial<HarnessState>): HarnessState {
     runArtifacts,
     snapshots: Array.isArray(state.snapshots) ? state.snapshots : [],
     evalFixtures: Array.isArray(state.evalFixtures) ? state.evalFixtures : [],
-    assertionConfigs: Array.isArray(state.assertionConfigs) ? state.assertionConfigs : [],
-    evalRunConfigs: Array.isArray(state.evalRunConfigs) ? state.evalRunConfigs : [],
     evalRuns: Array.isArray(state.evalRuns) ? state.evalRuns : [],
     humanReviewRubrics: Array.isArray(state.humanReviewRubrics) ? state.humanReviewRubrics : [],
     releaseRecords: Array.isArray(state.releaseRecords) ? state.releaseRecords : [],
   };
-}
-
-function buildHarnessSummary(state: HarnessState): HarnessSummary {
-  return {
-    ...state,
-    runtimeConfigFlows: deriveRuntimeConfigFlows(state),
-  };
-}
-
-function deriveRuntimeConfigFlows(state: HarnessState): RuntimeConfigFlow[] {
-  const explicitFlows = state.runtimeConfigFlows.map((flow) => refreshRuntimeConfigFlowEvidence(flow, state, flow.updatedAt));
-  const derivedBySpec = state.agentSpecs.map((spec) => runtimeConfigFlowFromSpec(state, spec));
-  const knownIds = new Set(explicitFlows.map((flow) => flow.id));
-  return [...explicitFlows, ...derivedBySpec.filter((flow) => !knownIds.has(flow.id))]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-}
-
-function runtimeConfigFlowFromSpec(state: HarnessState, spec: AgentSpec): RuntimeConfigFlow {
-  const evalRuns = state.evalRuns.filter((run) => run.agentSpecId === spec.id);
-  const releaseRecords = state.releaseRecords.filter((record) => record.agentSpecId === spec.id || record.targetSpecId === spec.id);
-  const passedRuns = evalRuns.filter((run) => run.status === 'passed').length;
-  const reviewedRuns = evalRuns.filter((run) => run.humanReview).length;
-  const gateStatus: RuntimeConfigFlow['gateStatus'] = evalRuns.length === 0
-    ? 'unknown'
-    : passedRuns > 0
-      ? 'passed'
-      : 'blocked';
-  const latestFixture = latestByUpdatedAt(evalRuns
-    .map((run) => state.evalFixtures.find((fixture) => fixture.id === run.fixtureId))
-    .filter((fixture): fixture is EvalFixture => Boolean(fixture)));
-  const latestEvalRunConfig = latestByUpdatedAt(evalRuns
-    .map((run) => run.evalRunConfigId ? state.evalRunConfigs.find((config) => config.id === run.evalRunConfigId) : undefined)
-    .filter((config): config is EvalRunConfig => Boolean(config)));
-  const latestAssertionConfig = latestByUpdatedAt(evalRuns
-    .map((run) => run.assertionConfigId ? state.assertionConfigs.find((config) => config.id === run.assertionConfigId) : undefined)
-    .filter((config): config is AssertionConfig => Boolean(config)));
-  const latestRubric = latestByUpdatedAt(evalRuns
-    .map((run) => run.humanReviewRubricId ? state.humanReviewRubrics.find((rubric) => rubric.id === run.humanReviewRubricId) : run.humanReview?.rubricId ? state.humanReviewRubrics.find((rubric) => rubric.id === run.humanReview?.rubricId) : undefined)
-    .filter((rubric): rubric is HumanReviewRubric => Boolean(rubric)));
-  const releaseState: RuntimeConfigFlow['releaseState'] = spec.status === 'archived'
-    ? 'archived'
-    : releaseRecords.some((record) => record.action === 'rollback')
-      ? 'rolled_back'
-      : releaseRecords.length > 0 || spec.status === 'active'
-        ? 'released'
-        : 'never_released';
-  return {
-    id: `flow_${spec.id}`,
-    productId: spec.productId,
-    name: spec.name || spec.changelog || `${spec.productId} / ${spec.agentId} / v${spec.version}`,
-    status: spec.status,
-    agentId: spec.agentId,
-    tags: [spec.productId, spec.agentId, spec.status],
-    releaseState,
-    nodeRefs: {
-      evalFixture: latestFixture ? { source: 'reused', id: latestFixture.id, name: latestFixture.name } : undefined,
-      agentConfig: { source: spec.id.startsWith('seed_') ? 'reused' : 'derived', id: spec.id, version: spec.version, name: spec.name },
-      evalRunConfig: latestEvalRunConfig ? { source: latestEvalRunConfig.source?.type === 'new' ? 'new' : 'reused', id: latestEvalRunConfig.id, version: latestEvalRunConfig.version, name: latestEvalRunConfig.name } : undefined,
-      assertionConfig: latestAssertionConfig ? { source: latestAssertionConfig.source?.type === 'new' ? 'new' : 'reused', id: latestAssertionConfig.id, version: latestAssertionConfig.version, name: latestAssertionConfig.name } : undefined,
-      reviewTemplate: latestRubric ? { source: latestRubric.source?.type === 'new' ? 'new' : 'reused', id: latestRubric.id, version: latestRubric.version, name: latestRubric.name ?? latestRubric.artifactType } : undefined,
-    },
-    candidateSpecId: spec.status === 'draft' || spec.status === 'candidate' ? spec.id : undefined,
-    activeSpecId: spec.status === 'active' ? spec.id : undefined,
-    evalRunIds: evalRuns.map((run) => run.id),
-    releaseRecordIds: releaseRecords.map((record) => record.id),
-    gateStatus,
-    evalCompletion: {
-      total: evalRuns.length,
-      passed: passedRuns,
-      reviewed: reviewedRuns,
-      positiveReviewed: reviewedRuns,
-    },
-    changes: summarizeRuntimeConfigFlowChanges(state, spec),
-    createdAt: spec.createdAt,
-    updatedAt: latestString([spec.updatedAt, ...evalRuns.map((run) => run.endedAt ?? run.startedAt), ...releaseRecords.map((record) => record.createdAt)]),
-    archivedAt: spec.status === 'archived' ? spec.updatedAt : null,
-  };
-}
-
-function summarizeRuntimeConfigFlowChanges(state: HarnessState, spec: AgentSpec): RuntimeConfigFlow['changes'] {
-  const activeSpec = state.agentSpecs.find((item) => item.productId === spec.productId && item.agentId === spec.agentId && item.status === 'active' && item.id !== spec.id);
-  return summarizeConfigChanges(spec, activeSpec)
-    .filter((change) => change.changed)
-    .map((change) => ({
-      scope: change.field === 'layerConfigRef' || change.field.endsWith('PolicyRef') ? 'product' : 'agent',
-      area: change.field === 'layerConfigRef'
-        ? 'behavior_rule'
-        : change.field === 'modelPolicyRef' || change.field === 'memoryPolicyRef' || change.field === 'retrievalPolicyRef' || change.field === 'toolPolicyRef'
-          ? 'policy'
-          : 'agent_prompt',
-      targetId: change.field,
-      agentId: spec.agentId,
-      summary: change.message,
-    }));
-}
-
-function latestByUpdatedAt<T extends { updatedAt: string }>(items: T[]): T | undefined {
-  return [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-}
-
-function latestString(values: Array<string | undefined>): string {
-  return values.filter((value): value is string => Boolean(value)).sort().at(-1) ?? new Date(0).toISOString();
-}
-
-function filterRuntimeConfigFlows(flows: RuntimeConfigFlow[], filter: ListRuntimeConfigFlowsFilter): RuntimeConfigFlow[] {
-  const query = filter.query?.trim().toLowerCase();
-  const filtered = flows
-    .filter((flow) => filter.productId === undefined || flow.productId === filter.productId)
-    .filter((flow) => filter.agentId === undefined || flow.agentId === filter.agentId)
-    .filter((flow) => filter.status === undefined || flow.status === filter.status)
-    .filter((flow) => filter.releaseState === undefined || flow.releaseState === filter.releaseState)
-    .filter((flow) => filter.tag === undefined || flow.tags.includes(filter.tag))
-    .filter((flow) => query === undefined || [flow.name, flow.productId, flow.agentId, ...flow.tags].filter(Boolean).join(' ').toLowerCase().includes(query));
-  const sort = filter.sort ?? 'updatedAt';
-  return filtered.sort((left, right) => {
-    if (sort === 'createdAt') return right.createdAt.localeCompare(left.createdAt);
-    if (sort === 'gateStatus') return gateSortValue(right.gateStatus) - gateSortValue(left.gateStatus) || right.updatedAt.localeCompare(left.updatedAt);
-    if (sort === 'evalCompletion') return evalCompletionRatio(right) - evalCompletionRatio(left) || right.updatedAt.localeCompare(left.updatedAt);
-    return right.updatedAt.localeCompare(left.updatedAt);
-  });
-}
-
-function gateSortValue(status: RuntimeConfigFlow['gateStatus']): number {
-  if (status === 'passed') return 2;
-  if (status === 'blocked') return 1;
-  return 0;
-}
-
-function evalCompletionRatio(flow: RuntimeConfigFlow): number {
-  if (flow.evalCompletion.total === 0) return 0;
-  return (flow.evalCompletion.passed + flow.evalCompletion.reviewed) / (flow.evalCompletion.total * 2);
-}
-
-function assertValidRuntimeConfigFlow(flow: RuntimeConfigFlow, state: HarnessState): void {
-  if (!flow.name.trim()) throw new Error('Runtime config flow name is required');
-  if (flow.candidateSpecId && !state.agentSpecs.some((spec) => spec.id === flow.candidateSpecId)) throw new Error('Runtime config flow candidate spec not found');
-  if (flow.activeSpecId && !state.agentSpecs.some((spec) => spec.id === flow.activeSpecId)) throw new Error('Runtime config flow active spec not found');
-  for (const evalRunId of flow.evalRunIds) {
-    if (!state.evalRuns.some((run) => run.id === evalRunId)) throw new Error(`Runtime config flow eval run not found: ${evalRunId}`);
-  }
-  for (const releaseRecordId of flow.releaseRecordIds) {
-    if (!state.releaseRecords.some((record) => record.id === releaseRecordId)) throw new Error(`Runtime config flow release record not found: ${releaseRecordId}`);
-  }
-}
-
-function assertValidBehaviorRuleConfig(rule: BehaviorRuleConfig): void {
-  if (!rule.id.trim()) throw new Error('Behavior rule config id is required');
-  if (!rule.productId.trim()) throw new Error('Behavior rule config productId is required');
-  if (!rule.title.trim()) throw new Error('Behavior rule config title is required');
-  if (!rule.content.trim()) throw new Error('Behavior rule config content is required');
-  if (rule.scope !== 'system' && rule.scope !== 'product' && rule.scope !== 'agent') throw new Error('Behavior rule scope is invalid');
-  if (rule.scope === 'agent' && !rule.agentId?.trim()) throw new Error('Agent-scoped behavior rule requires agentId');
-}
-
-function normalizeBehaviorRuleConfig(rule: BehaviorRuleConfig): BehaviorRuleConfig {
-  return {
-    ...rule,
-    id: rule.id.trim(),
-    productId: rule.productId.trim(),
-    title: rule.title.trim(),
-    scope: rule.scope ?? 'product',
-    agentId: rule.agentId?.trim() || undefined,
-    content: rule.content.trim(),
-    tags: uniqueStrings(rule.tags ?? []),
-  };
-}
-
-function assertValidAgentToolPolicy(policy: AgentToolPolicy): void {
-  if (!policy.id.trim()) throw new Error('Agent tool policy id is required');
-  if (!policy.productId.trim()) throw new Error('Agent tool policy productId is required');
-  if (!policy.title.trim()) throw new Error('Agent tool policy title is required');
-  if (policy.scope !== 'system' && policy.scope !== 'product' && policy.scope !== 'agent') throw new Error('Agent tool policy scope is invalid');
-  if (policy.scope === 'agent' && !policy.agentId?.trim()) throw new Error('Agent-scoped tool policy requires agentId');
-}
-
-function normalizeAgentToolPolicy(policy: AgentToolPolicy): AgentToolPolicy {
-  return {
-    ...policy,
-    id: policy.id.trim(),
-    productId: policy.productId.trim(),
-    title: policy.title.trim(),
-    scope: policy.scope ?? 'product',
-    agentId: policy.agentId?.trim() || undefined,
-    allowedToolIds: uniqueStrings(policy.allowedToolIds ?? []),
-    deniedToolIds: uniqueStrings(policy.deniedToolIds ?? []),
-    highRiskToolIds: uniqueStrings(policy.highRiskToolIds ?? []),
-    toolDescriptionRefs: uniqueStrings(policy.toolDescriptionRefs ?? []),
-    tags: uniqueStrings(policy.tags ?? []),
-  };
-}
-
-function assertValidToolDescriptionConfig(config: ToolDescriptionConfig): void {
-  if (!config.id?.trim()) throw new Error('Tool description config id is required');
-  if (!config.productId?.trim()) throw new Error('Tool description config productId is required');
-  if (!config.toolId.trim()) throw new Error('Tool description toolId is required');
-  if (!config.description.trim()) throw new Error('Tool description is required');
-  if (config.scope && config.scope !== 'system' && config.scope !== 'product' && config.scope !== 'agent') {
-    throw new Error('Tool description scope is invalid');
-  }
-  if (config.scope === 'agent' && !config.agentId?.trim()) throw new Error('Agent-scoped tool description requires agentId');
-}
-
-function normalizeToolDescriptionConfig(config: ToolDescriptionConfig): ToolDescriptionConfig {
-  const parameterDescriptions = Object.fromEntries(
-    Object.entries(config.parameterDescriptions ?? {})
-      .map(([key, value]) => [key.trim(), value.trim()] as const)
-      .filter(([key, value]) => key.length > 0 && value.length > 0),
-  );
-  return {
-    ...config,
-    id: config.id?.trim(),
-    productId: config.productId?.trim(),
-    title: config.title?.trim() || `${config.toolId.trim()} 工具说明`,
-    toolId: config.toolId.trim(),
-    agentId: config.agentId?.trim() || undefined,
-    description: config.description.trim(),
-    outputDescription: config.outputDescription?.trim() || undefined,
-    parameterDescriptions,
-    scope: config.scope ?? 'product',
-    tags: config.tags ?? [],
-  };
-}
-
-function hashToolDescription(config: Pick<ToolDescriptionConfig, 'toolId' | 'description' | 'parameterDescriptions' | 'outputDescription'>): string {
-  return sha256(toolDescriptionText(config));
-}
-
-function toolDescriptionText(config: Pick<ToolDescriptionConfig, 'toolId' | 'description' | 'parameterDescriptions' | 'outputDescription'>): string {
-  return [
-    `toolId: ${config.toolId}`,
-    `description: ${config.description}`,
-    `parameters: ${JSON.stringify(Object.fromEntries(Object.entries(config.parameterDescriptions ?? {}).sort(([left], [right]) => left.localeCompare(right))))}`,
-    `output: ${config.outputDescription ?? ''}`,
-  ].join('\n');
-}
-
-function refreshRuntimeConfigFlowEvidence(flow: RuntimeConfigFlow, state: HarnessState, now = new Date().toISOString()): RuntimeConfigFlow {
-  const evalRuns = flow.evalRunIds
-    .map((evalRunId) => state.evalRuns.find((run) => run.id === evalRunId))
-    .filter((run): run is EvalRun => Boolean(run));
-  const releaseRecords = flow.releaseRecordIds
-    .map((releaseRecordId) => state.releaseRecords.find((record) => record.id === releaseRecordId))
-    .filter((record): record is AgentSpecReleaseRecord => Boolean(record));
-  const passedRuns = evalRuns.filter((run) => run.status === 'passed').length;
-  const reviewedRuns = evalRuns.filter((run) => run.humanReview).length;
-  const releaseState: RuntimeConfigFlow['releaseState'] = flow.status === 'archived'
-    ? 'archived'
-    : releaseRecords.some((record) => record.action === 'rollback')
-      ? 'rolled_back'
-      : releaseRecords.length > 0 || (flow.activeSpecId && state.agentSpecs.some((spec) => spec.id === flow.activeSpecId && spec.status === 'active'))
-        ? 'released'
-        : 'never_released';
-  return {
-    ...flow,
-    releaseState,
-    gateStatus: evalRuns.length === 0 ? 'unknown' : passedRuns > 0 ? 'passed' : 'blocked',
-    evalCompletion: {
-      total: evalRuns.length,
-      passed: passedRuns,
-      reviewed: reviewedRuns,
-      positiveReviewed: reviewedRuns,
-    },
-    updatedAt: latestString([flow.updatedAt, ...evalRuns.map((run) => run.endedAt ?? run.startedAt), ...releaseRecords.map((record) => record.createdAt), now]),
-    archivedAt: flow.status === 'archived' ? flow.archivedAt ?? now : flow.archivedAt ?? null,
-  };
-}
-
-function assertValidAssertionConfig(config: AssertionConfig): void {
-  if (!config.name.trim()) throw new Error('Assertion config name is required');
-  if (config.assertions.filter((assertion) => assertion.enabled).length === 0) throw new Error('Assertion config requires at least one enabled assertion');
-  for (const assertion of config.assertions) {
-    if (!assertion.id.trim()) throw new Error('Assertion id is required');
-    if (!isRecord(assertion.config)) throw new Error(`Assertion ${assertion.id} config must be an object`);
-    if (assertion.enabled && !isExecutableAssertionDefinition(assertion)) {
-      throw new Error(`Assertion ${assertion.id} does not contain executable ${assertion.kind} fields`);
-    }
-  }
-}
-
-function isExecutableAssertionDefinition(assertion: AssertionDefinition): boolean {
-  const config = assertion.config;
-  if (assertion.kind === 'file_change') {
-    return ['mustCreateOrModify', 'mustCreate', 'mustModify', 'mustDelete', 'mustNotModify', 'mustNotWrite']
-      .some((key) => arrayOfStrings(config[key]).length > 0);
-  }
-  if (assertion.kind === 'path_constraint') {
-    return arrayOfStrings(config.allowedPaths).length > 0 || typeof config.allowDeletes === 'boolean';
-  }
-  if (assertion.kind === 'markdown_section') {
-    const hasPath = typeof config.path === 'string' && config.path.trim().length > 0;
-    const hasChecks = ['requiredHeadings', 'requiredText', 'forbiddenText', 'allowedSections']
-      .some((key) => arrayOfStrings(config[key]).length > 0);
-    return hasPath && hasChecks;
-  }
-  if (assertion.kind === 'tool_event') {
-    return ['mustCall', 'mustNotCall', 'mustCallInOrder'].some((key) => arrayOfStrings(config[key]).length > 0);
-  }
-  if (assertion.kind === 'diff_limit') {
-    return ['maxChangedFiles', 'maxCreatedFiles', 'maxModifiedFiles', 'maxDeletedFiles']
-      .some((key) => typeof config[key] === 'number' && Number.isFinite(config[key]));
-  }
-  if (assertion.kind === 'manifest_compliance') {
-    return typeof config.artifactType === 'string' && config.artifactType.trim().length > 0;
-  }
-  return false;
-}
-
-function assertValidEvalRunConfig(config: EvalRunConfig): void {
-  if (!config.name.trim()) throw new Error('Eval run config name is required');
-  if (config.runMode === 'repro' && (config.memoryMode === 'live' || config.knowledgeMode === 'live')) {
-    throw new Error('Repro eval run config must use fixture or mocked memory/knowledge');
-  }
-  if (config.runMode === 'live' && config.memoryMode !== 'live' && config.knowledgeMode !== 'live') {
-    throw new Error('Live eval run config must explicitly use live memory or knowledge');
-  }
-}
-
-function assertValidHumanReviewRubric(rubric: HumanReviewRubric): void {
-  if ((rubric.name ?? '').trim().length === 0) throw new Error('Human review rubric name is required');
-  if (rubric.humanScores.length === 0) throw new Error('Human review rubric requires at least one scoring item');
-  const invalidScore = rubric.humanScores.find((score) => !score.id.trim() || !score.label.trim() || score.scale !== 10 || (score.weight ?? 1) <= 0);
-  if (invalidScore) throw new Error('Human review scores require id, label, scale=10 and positive weight');
-  if (!rubric.decisionRules.requiresHumanDecision) throw new Error('Human review rubric must require a human decision');
-}
-
-function findHumanReviewRubric(state: HarnessState, rubricId: string, rubricVersion: number): HumanReviewRubric {
-  const rubric = state.humanReviewRubrics.find((item) => item.id === rubricId && item.version === rubricVersion)
-    ?? (defaultStoryRubric().id === rubricId && defaultStoryRubric().version === rubricVersion ? defaultStoryRubric() : undefined);
-  if (!rubric) throw new Error('Human review rubric not found');
-  return rubric;
-}
-
-function assertValidHumanReviewInput(rubric: HumanReviewRubric, review: CreateHumanReviewInput): void {
-  for (const score of rubric.humanScores) {
-    const state = review.scoreStates?.[score.id];
-    if (state !== 'scored' && state !== 'not_applicable') continue;
-    if (state === 'not_applicable') continue;
-    const value = review.scores[score.id];
-    if (!Number.isInteger(value) || value < 1 || value > 10) {
-      throw new Error(`Human review score for ${score.id} must be an integer from 1 to 10`);
-    }
-  }
-}
-
-function compileAssertionDefinitions(assertions: AssertionConfig['assertions']): Record<string, unknown> {
-  const compiled: Record<string, unknown> = {};
-  for (const assertion of assertions) {
-    if (!assertion.enabled) continue;
-    mergeCompiledAssertion(compiled, assertion);
-  }
-  return compiled;
-}
-
-function mergeCompiledAssertion(target: Record<string, unknown>, assertion: AssertionConfig['assertions'][number]): void {
-  const config = assertion.config;
-  if (assertion.kind === 'file_change') {
-    const files = ensureAssertionRecord(target, 'files');
-    appendAssertionStrings(files, 'mustCreateOrModify', config.mustCreateOrModify);
-    appendAssertionStrings(files, 'mustCreate', config.mustCreate);
-    appendAssertionStrings(files, 'mustModify', config.mustModify);
-    appendAssertionStrings(files, 'mustDelete', config.mustDelete);
-    appendAssertionStrings(files, 'mustNotModify', config.mustNotModify);
-    appendAssertionStrings(files, 'mustNotWrite', config.mustNotWrite);
-  } else if (assertion.kind === 'path_constraint') {
-    const diff = ensureAssertionRecord(target, 'diff');
-    appendAssertionStrings(diff, 'allowedPaths', config.allowedPaths);
-    if (typeof config.allowDeletes === 'boolean') diff.allowDeletes = config.allowDeletes;
-  } else if (assertion.kind === 'markdown_section') {
-    const markdown = Array.isArray(target.markdown) ? target.markdown.filter(isRecord) : [];
-    const pathValue = typeof config.path === 'string' ? config.path.trim() : '';
-    if (pathValue) {
-      markdown.push({
-        path: pathValue,
-        requiredHeadings: arrayOfStrings(config.requiredHeadings),
-        requiredText: arrayOfStrings(config.requiredText),
-        forbiddenText: arrayOfStrings(config.forbiddenText),
-      });
-      target.markdown = markdown;
-    }
-    const sections = arrayOfStrings(config.allowedSections);
-    if (pathValue && sections.length > 0) {
-      const diff = ensureAssertionRecord(target, 'diff');
-      const allowedMarkdownSections = Array.isArray(diff.allowedMarkdownSections) ? diff.allowedMarkdownSections.filter(isRecord) : [];
-      allowedMarkdownSections.push({ path: pathValue, sections, forbidSectionDelete: config.forbidSectionDelete !== false });
-      diff.allowedMarkdownSections = allowedMarkdownSections;
-    }
-  } else if (assertion.kind === 'tool_event') {
-    const toolEvents = ensureAssertionRecord(target, 'toolEvents');
-    appendAssertionStrings(toolEvents, 'mustCall', config.mustCall);
-    appendAssertionStrings(toolEvents, 'mustNotCall', config.mustNotCall);
-    appendAssertionStrings(toolEvents, 'mustCallInOrder', config.mustCallInOrder);
-  } else if (assertion.kind === 'diff_limit') {
-    const diff = ensureAssertionRecord(target, 'diff');
-    for (const key of ['maxChangedFiles', 'maxCreatedFiles', 'maxModifiedFiles', 'maxDeletedFiles'] as const) {
-      if (typeof config[key] === 'number') diff[key] = config[key];
-    }
-  } else if (assertion.kind === 'manifest_compliance') {
-    const manifest = Array.isArray(target.manifest) ? target.manifest.filter(isRecord) : [];
-    manifest.push({
-      artifactType: typeof config.artifactType === 'string' ? config.artifactType : 'artifact',
-      path: typeof config.path === 'string' ? config.path : undefined,
-      requiredSections: arrayOfStrings(config.requiredSections),
-      requiredText: arrayOfStrings(config.requiredText),
-    });
-    target.manifest = manifest;
-  }
-}
-
-function ensureAssertionRecord(target: Record<string, unknown>, key: string): Record<string, unknown> {
-  const existing = target[key];
-  if (isRecord(existing)) return existing;
-  const next: Record<string, unknown> = {};
-  target[key] = next;
-  return next;
-}
-
-function appendAssertionStrings(target: Record<string, unknown>, key: string, value: unknown): void {
-  const next = uniqueStrings([...arrayOfStrings(target[key]), ...arrayOfStrings(value)]);
-  if (next.length > 0) target[key] = next;
 }
 
 function compareVersionAndUpdatedAt<T extends { version: number; updatedAt?: string }>(left: T, right: T): number {
@@ -2785,7 +1564,10 @@ function uniqueStrings(values: string[]): string[] {
 
 function evaluateReleaseGate(state: HarnessState, spec: AgentSpec): AgentSpecReleaseGate {
   const evalRuns = state.evalRuns.filter((run) => run.agentSpecId === spec.id);
-  const passingRuns = evalRuns.filter((run) => run.status === 'passed');
+  const passingReviewedRuns = evalRuns.filter((run) => {
+    const decision = run.humanReview?.decision;
+    return run.status === 'passed' && (decision === 'pass' || decision === 'improved');
+  });
   const activeSpec = state.agentSpecs.find((item) => item.productId === spec.productId && item.agentId === spec.agentId && item.status === 'active' && item.id !== spec.id);
   const configChanges = summarizeConfigChanges(spec, activeSpec);
   const checks = [
@@ -2800,22 +1582,22 @@ function evaluateReleaseGate(state: HarnessState, spec: AgentSpec): AgentSpecRel
       message: evalRuns.some((run) => run.status === 'passed') ? undefined : 'No EvalRun has passed program assertions.',
     },
     {
-      id: 'human_review_is_reference',
-      passed: true,
-      message: 'Human review scores are stored as reference evidence and do not block activation.',
+      id: 'has_positive_human_review',
+      passed: passingReviewedRuns.length > 0,
+      message: passingReviewedRuns.length > 0 ? undefined : 'No passed EvalRun has pass/improved human review.',
     },
   ];
-  if (passingRuns.length === 0) {
+  if (passingReviewedRuns.length === 0) {
     return {
       agentSpecId: spec.id,
       passed: false,
-      reason: 'AgentSpec must have at least one passed EvalRun before activation. Human review scores are reference evidence only.',
+      reason: 'AgentSpec must have at least one passed EvalRun with pass/improved human review before activation. Use force only for explicit emergency override.',
       evalRunIds: evalRuns.map((run) => run.id),
       checks,
       configChanges,
     };
   }
-  return { agentSpecId: spec.id, passed: true, reason: 'ok', evalRunIds: passingRuns.map((run) => run.id), checks, configChanges };
+  return { agentSpecId: spec.id, passed: true, reason: 'ok', evalRunIds: passingReviewedRuns.map((run) => run.id), checks, configChanges };
 }
 
 function summarizeConfigChanges(spec: AgentSpec, activeSpec: AgentSpec | undefined): AgentSpecReleaseGate['configChanges'] {
@@ -4040,28 +2822,18 @@ async function resolveAgentConfig(state: HarnessState, agentSpec: AgentSpec, wor
   const memoryRef = agentSpec.memoryPolicyRef ?? layerConfig?.memoryPolicyRef;
   const retrievalRef = agentSpec.retrievalPolicyRef ?? layerConfig?.retrievalPolicyRef;
 
-  const promptBlockRefs = [...new Set([...(layerConfig?.systemAgent.promptBlockRefs ?? []), ...(layerConfig?.promptBlockRefs ?? []), ...agentSpec.promptBlockRefs])];
-  const behaviorRuleRefs = resolveAgentBehaviorRuleRefs(layerConfig, agentSpec);
-  const toolPolicyRefs = resolveAgentToolPolicyRefs(layerConfig, agentSpec);
-  const toolPolicies = resolveAgentToolPolicies(state, toolPolicyRefs, agentSpec.productId, agentSpec.agentId);
-  const toolDescriptionRefs = resolveAgentToolDescriptionRefs(layerConfig, agentSpec, toolPolicies);
+  const promptBlockRefs = [...new Set([...(layerConfig?.systemAgent.promptBlockRefs ?? []), ...agentSpec.promptBlockRefs])];
   const skillRefs = agentSpec.skillRefs;
   return {
     agentSpec,
     layerConfig,
     memoryPolicy: memoryRef ? findVersionedRecord(state.memoryPolicies, memoryRef) : undefined,
     retrievalPolicy: retrievalRef ? findVersionedRecord(state.retrievalPolicies, retrievalRef) : undefined,
-    behaviorRules: resolveBehaviorRuleConfigs(state, behaviorRuleRefs, agentSpec.productId, agentSpec.agentId),
-    toolPolicies,
     promptBlockRefs,
-    behaviorRuleRefs,
-    toolPolicyRefs,
-    toolDescriptionRefs,
     skillRefs,
     promptBlocks: await resolvePromptBlocks(state, promptBlockRefs, layerConfig, agentSpec),
     skills: await resolveSkillSnapshots(state, skillRefs, layerConfig, workspaceStore),
     toolPolicyRef: agentSpec.toolPolicyRef ?? layerConfig?.toolPolicyRef,
-    toolDescriptionOverrides: resolveToolDescriptions(state, toolDescriptionRefs, layerConfig, agentSpec.agentId),
     modelPolicyRef: agentSpec.modelPolicyRef ?? layerConfig?.modelPolicyRef,
     workspaceManifest: resolveWorkspaceManifest(state.workspaceManifests, agentSpec.productId),
   };
@@ -4069,122 +2841,54 @@ async function resolveAgentConfig(state: HarnessState, agentSpec: AgentSpec, wor
 
 function resolveActiveAgentConfig(state: HarnessState, productId?: string): EvalRun['resolvedAgentConfig'] | undefined {
   if (!productId) return undefined;
-  const systemSpec = state.agentSpecs
-    .filter((spec) => spec.productId === productId && spec.agentId === 'system' && spec.status === 'active')
+  const agentSpec = state.agentSpecs
+    .filter((spec) => spec.productId === productId && spec.status === 'active')
     .sort((left, right) => right.version - left.version)[0];
-  const layerConfig = systemSpec?.layerConfigRef
-    ? state.agentLayerConfigs.find((config) => config.id === systemSpec.layerConfigRef || `${config.id}@${config.version}` === systemSpec.layerConfigRef)
-    : state.agentLayerConfigs
+  if (agentSpec) {
+    const layerConfig = agentSpec.layerConfigRef
+      ? state.agentLayerConfigs.find((config) => config.id === agentSpec.layerConfigRef || `${config.id}@${config.version}` === agentSpec.layerConfigRef)
+      : state.agentLayerConfigs
+        .filter((config) => config.productId === agentSpec.productId && config.status === 'active')
+        .sort((left, right) => right.version - left.version)[0];
+    const memoryRef = agentSpec.memoryPolicyRef ?? layerConfig?.memoryPolicyRef;
+    const retrievalRef = agentSpec.retrievalPolicyRef ?? layerConfig?.retrievalPolicyRef;
+    return {
+      agentSpec,
+      layerConfig,
+      memoryPolicy: memoryRef ? findVersionedRecord(state.memoryPolicies, memoryRef) : undefined,
+      retrievalPolicy: retrievalRef ? findVersionedRecord(state.retrievalPolicies, retrievalRef) : undefined,
+      promptBlockRefs: [...new Set([...(layerConfig?.systemAgent.promptBlockRefs ?? []), ...agentSpec.promptBlockRefs])],
+      skillRefs: agentSpec.skillRefs,
+      toolPolicyRef: agentSpec.toolPolicyRef ?? layerConfig?.toolPolicyRef,
+      modelPolicyRef: agentSpec.modelPolicyRef ?? layerConfig?.modelPolicyRef,
+      workspaceManifest: resolveWorkspaceManifest(state.workspaceManifests, agentSpec.productId),
+    };
+  }
+
+  const layerConfig = state.agentLayerConfigs
     .filter((config) => config.productId === productId && config.status === 'active')
     .sort((left, right) => right.version - left.version)[0];
-  const memoryRef = systemSpec?.memoryPolicyRef ?? layerConfig?.memoryPolicyRef;
-  const retrievalRef = systemSpec?.retrievalPolicyRef ?? layerConfig?.retrievalPolicyRef;
-  const behaviorRuleRefs = resolveAgentBehaviorRuleRefs(layerConfig);
-  const toolPolicyRefs = resolveAgentToolPolicyRefs(layerConfig);
-  const toolPolicies = resolveAgentToolPolicies(state, toolPolicyRefs, productId, undefined, true);
-  const toolDescriptionRefs = resolveAgentToolDescriptionRefs(layerConfig, undefined, toolPolicies);
+  const memoryRef = layerConfig?.memoryPolicyRef;
+  const retrievalRef = layerConfig?.retrievalPolicyRef;
   if (!layerConfig && !memoryRef && !retrievalRef) return undefined;
 
   return {
-    agentSpec: systemSpec,
     layerConfig,
     memoryPolicy: memoryRef ? findVersionedRecord(state.memoryPolicies, memoryRef) : undefined,
     retrievalPolicy: retrievalRef ? findVersionedRecord(state.retrievalPolicies, retrievalRef) : undefined,
-    behaviorRules: resolveBehaviorRuleConfigs(state, behaviorRuleRefs, productId, undefined, true),
-    toolPolicies,
-    promptBlockRefs: [...new Set([...(layerConfig?.systemAgent.promptBlockRefs ?? []), ...(layerConfig?.promptBlockRefs ?? [])])],
-    behaviorRuleRefs,
-    toolPolicyRefs,
-    toolDescriptionRefs,
+    promptBlockRefs: layerConfig?.systemAgent.promptBlockRefs ?? [],
     skillRefs: [],
-    toolPolicyRef: systemSpec?.toolPolicyRef ?? layerConfig?.toolPolicyRef,
-    toolDescriptionOverrides: resolveToolDescriptions(state, toolDescriptionRefs, layerConfig, undefined, true),
-    modelPolicyRef: systemSpec?.modelPolicyRef ?? layerConfig?.modelPolicyRef,
+    toolPolicyRef: layerConfig?.toolPolicyRef,
+    modelPolicyRef: layerConfig?.modelPolicyRef,
     workspaceManifest: resolveWorkspaceManifest(state.workspaceManifests, productId),
   };
-}
-
-function resolveAgentBehaviorRuleRefs(layerConfig: AgentLayerConfig | undefined, agentSpec?: AgentSpec): string[] {
-  const specialist = agentSpec ? layerConfig?.specialists.find((item) => item.agentId === agentSpec.agentId) : undefined;
-  return uniqueStrings([
-    ...(layerConfig?.behaviorRuleRefs ?? []),
-    ...(layerConfig?.systemAgent.behaviorRuleRefs ?? []),
-    ...(specialist?.behaviorRuleRefs ?? []),
-    ...(agentSpec?.behaviorRuleRefs ?? []),
-  ]);
-}
-
-function resolveAgentToolPolicyRefs(layerConfig: AgentLayerConfig | undefined, agentSpec?: AgentSpec): string[] {
-  const specialist = agentSpec ? layerConfig?.specialists.find((item) => item.agentId === agentSpec.agentId) : undefined;
-  return uniqueStrings([
-    ...(layerConfig?.toolPolicyRefs ?? []),
-    ...(layerConfig?.toolPolicyRef ? [layerConfig.toolPolicyRef] : []),
-    ...(layerConfig?.systemAgent.toolPolicyRefs ?? []),
-    ...(specialist?.toolPolicyRefs ?? []),
-    ...(agentSpec?.toolPolicyRefs ?? []),
-    ...(agentSpec?.toolPolicyRef ? [agentSpec.toolPolicyRef] : []),
-  ]);
-}
-
-function resolveAgentToolDescriptionRefs(layerConfig: AgentLayerConfig | undefined, agentSpec?: AgentSpec, toolPolicies: AgentToolPolicy[] = []): string[] {
-  const specialist = agentSpec ? layerConfig?.specialists.find((item) => item.agentId === agentSpec.agentId) : undefined;
-  return uniqueStrings([
-    ...(layerConfig?.toolDescriptionRefs ?? []),
-    ...(layerConfig?.systemAgent.toolDescriptionRefs ?? []),
-    ...(specialist?.toolDescriptionRefs ?? []),
-    ...(agentSpec?.toolDescriptionRefs ?? []),
-    ...toolPolicies.flatMap((policy) => policy.toolDescriptionRefs),
-  ]);
-}
-
-function resolveBehaviorRuleConfigs(state: HarnessState, refs: string[], productId: string, agentId?: string, includeAllAgentScoped = false): BehaviorRuleConfig[] {
-  const explicit = refs.map((ref) => findVersionedRecord(state.behaviorRuleConfigs, ref)).filter((rule): rule is BehaviorRuleConfig => Boolean(rule));
-  const activeScoped = state.behaviorRuleConfigs.filter((rule) => rule.productId === productId && rule.status === 'active' && (rule.scope !== 'agent' || rule.agentId === agentId || includeAllAgentScoped));
-  return uniqueRecordsByVersionedId([...explicit, ...activeScoped]);
-}
-
-function resolveAgentToolPolicies(state: HarnessState, refs: string[], productId: string, agentId?: string, includeAllAgentScoped = false): AgentToolPolicy[] {
-  const explicit = refs.map((ref) => findVersionedRecord(state.agentToolPolicies, ref)).filter((policy): policy is AgentToolPolicy => Boolean(policy));
-  const activeScoped = state.agentToolPolicies.filter((policy) => policy.productId === productId && policy.status === 'active' && (policy.scope !== 'agent' || policy.agentId === agentId || includeAllAgentScoped));
-  return uniqueRecordsByVersionedId([...explicit, ...activeScoped]);
-}
-
-function resolveToolDescriptions(state: HarnessState, refs: string[], layerConfig: AgentLayerConfig | undefined, agentId?: string, includeAllAgentScoped = false): ToolDescriptionConfig[] {
-  const explicitRefs = uniqueStrings(refs);
-  const explicit = explicitRefs
-    .map((ref) => findToolDescriptionRecord(state.toolDescriptionConfigs, ref))
-    .filter((item): item is ToolDescriptionConfig => Boolean(item));
-  const active = layerConfig?.productId
-    ? state.toolDescriptionConfigs.filter((item) => item.productId === layerConfig.productId && item.status === 'active' && (item.scope !== 'agent' || item.agentId === agentId || includeAllAgentScoped))
-    : [];
-  return uniqueToolDescriptions([...(layerConfig?.toolDescriptionOverrides ?? []), ...active, ...explicit]);
-}
-
-function uniqueRecordsByVersionedId<T extends { id: string; version: number }>(records: T[]): T[] {
-  const map = new Map<string, T>();
-  for (const record of records) map.set(`${record.id}@${record.version}`, record);
-  return [...map.values()];
-}
-
-function findToolDescriptionRecord(records: ToolDescriptionConfig[], ref: string): ToolDescriptionConfig | undefined {
-  const [id, versionText] = ref.split('@');
-  const version = versionText ? Number(versionText) : undefined;
-  const candidates = records.filter((record) => record.id === id || record.id === ref || record.toolId === id || record.toolId === ref);
-  if (version !== undefined) return candidates.find((record) => record.version === version) ?? candidates[0];
-  return candidates.sort((left, right) => (right.version ?? 0) - (left.version ?? 0))[0];
-}
-
-function uniqueToolDescriptions(records: ToolDescriptionConfig[]): ToolDescriptionConfig[] {
-  const map = new Map<string, ToolDescriptionConfig>();
-  for (const record of records) map.set(record.toolId, record);
-  return [...map.values()];
 }
 
 async function resolvePromptBlocks(state: HarnessState, refs: string[], layerConfig: AgentLayerConfig | undefined, agentSpec: AgentSpec): Promise<NonNullable<EvalRun['resolvedAgentConfig']>['promptBlocks']> {
   return refs.map((ref) => {
     const block = findVersionedRecord(state.promptBlocks, ref);
     if (block) return { ref, content: block.content, contentHash: block.contentHash, source: 'prompt_block' as const };
-    const source = agentSpec.promptBlockRefs.includes(ref) ? 'agent_spec' : (layerConfig?.systemAgent.promptBlockRefs.includes(ref) || layerConfig?.promptBlockRefs?.includes(ref)) ? 'layer_config' : 'missing';
+    const source = agentSpec.promptBlockRefs.includes(ref) ? 'agent_spec' : layerConfig?.systemAgent.promptBlockRefs.includes(ref) ? 'layer_config' : 'missing';
     const content = resolvePromptBlockContent(ref, layerConfig);
     return { ref, content, contentHash: content ? sha256(content) : undefined, source };
   });
@@ -4195,9 +2899,6 @@ function resolvePromptBlockContent(ref: string, layerConfig: AgentLayerConfig | 
   const blocks: string[] = [];
   if (layerConfig.systemAgent.promptBlockRefs.includes(ref) && layerConfig.systemAgent.instructionOverride?.trim()) {
     blocks.push(layerConfig.systemAgent.instructionOverride.trim());
-  }
-  if (layerConfig.promptBlockRefs?.includes(ref)) {
-    blocks.push('');
   }
   for (const specialist of layerConfig.specialists) {
     if (specialist.promptBlockRefs.includes(ref) && specialist.instructionOverride?.trim()) {
@@ -4241,8 +2942,7 @@ function sha256(content: string): string {
 function findVersionedRecord<T extends { id: string; version: number }>(records: T[], ref: string): T | undefined {
   const [id, versionText] = ref.split('@');
   const version = versionText ? Number(versionText) : undefined;
-  if (version !== undefined) return records.find((record) => record.id === id && record.version === version) ?? records.find((record) => record.id === ref);
-  return records.filter((record) => record.id === id).sort((left, right) => right.version - left.version)[0]
+  return records.find((record) => record.id === id && (version === undefined || record.version === version))
     ?? records.find((record) => record.id === ref);
 }
 
@@ -4304,16 +3004,16 @@ function defaultStoryRubric(): HumanReviewRubric {
       { id: 'writes_canonical_path', label: '写入正式路径', source: 'program' },
     ],
     humanScores: [
-      { id: 'causality', label: '因果推进', scale: 10 },
-      { id: 'character_consistency', label: '人物一致性', scale: 10 },
-      { id: 'comedy_mechanism', label: '喜剧机制', scale: 10 },
+      { id: 'causality', label: '因果推进', scale: 5 },
+      { id: 'character_consistency', label: '人物一致性', scale: 5 },
+      { id: 'comedy_mechanism', label: '喜剧机制', scale: 5 },
       {
         id: 'originality',
         label: '创意度',
-        scale: 10,
+        scale: 5,
         subScores: ['premise_freshness', 'mechanism_freshness', 'character_angle_freshness', 'situational_fit', 'setup_payoff_quality'],
       },
-      { id: 'performability', label: '可表演性', scale: 10 },
+      { id: 'performability', label: '可表演性', scale: 5 },
     ],
     decisionRules: {
       minimumAverageScore: 3.5,
@@ -4394,15 +3094,6 @@ function yamlScalar(value: string): string {
 
 function normalizePath(filePath: string): string {
   return path.normalize(filePath).replaceAll(path.sep, '/');
-}
-
-function copyName(name: string): string {
-  const trimmed = name.trim();
-  return trimmed.endsWith('_Copy') ? `${trimmed}_${Date.now()}` : `${trimmed}_Copy`;
-}
-
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function inferMimeType(filePath: string): string {

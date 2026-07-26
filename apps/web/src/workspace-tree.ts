@@ -73,9 +73,6 @@ export function buildCollapsedDirectoryPaths(entries: WorkspaceEntry[], revealPa
 
 export function filterVisibleWorkspaceEntries(entries: WorkspaceEntry[], collapsedDirectoryPaths: string[]): WorkspaceEntry[] {
   return entries.filter((entry) => {
-    if (isHiddenWorkspacePath(entry.path)) {
-      return false;
-    }
     const parts = entry.path.split('/').filter(Boolean);
     for (let index = 1; index < parts.length; index += 1) {
       const ancestor = parts.slice(0, index).join('/');
@@ -92,11 +89,6 @@ export function filterVisibleGlobalWorkspaceEntries(entries: WorkspaceEntry[], c
     entries.filter((entry) => !isHiddenGlobalPath(entry.path)),
     collapsedDirectoryPaths,
   );
-}
-
-export function isHiddenWorkspacePath(entryPath: string): boolean {
-  const name = entryPath.split('/').pop() ?? entryPath;
-  return /^\..+\.(?:md|markdown)\.annotations\.json$/i.test(name);
 }
 
 function isHiddenGlobalPath(entryPath: string): boolean {

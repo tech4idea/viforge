@@ -45,7 +45,7 @@ describe('shared contracts', () => {
       expect(profile.defaultProjectName).toEqual(expect.any(String));
       expect(profile.workspaceSections.global.title).toBeTruthy();
       expect(profile.workspaceSections.project.title).toBeTruthy();
-      expect(profile.defaultAgentSkillNames).toEqual(expect.arrayContaining(['reviewer-agent']));
+      expect(profile.defaultAgentSkillNames).toEqual(expect.arrayContaining(['brainstorm-agent', 'reviewer-agent']));
       expect(profile.agentLabels['reviewer-agent']).toBeTruthy();
       expect(profile.artifactPaths.script).toBeTruthy();
       expect(createDefaultWorkspaceFilesForProfile(profile, '长夜')).toContainEqual(

@@ -24,11 +24,6 @@ This repository is the current `viforge` implementation for sitcom creation work
 - `docs/current/19-desktop-release-guide.md`: desktop build and release guide.
 - `docs/current/20-private-binary-bundle-github-actions.md`: private binary bundle and GitHub Actions packaging plan.
 - `docs/current/21-project-architecture-diagram.html`: project architecture diagram.
-- `docs/current/22-project-architecture-wireframe.md`: project architecture wireframe draft.
-- `docs/current/23-agent-harness-functional-boundary.md`: Agent Harness current functional boundary.
-- `docs/current/24-markdown-annotation-design.md`: Markdown annotation design.
-- `docs/current/25-agent-harness-runtime-config-prd.md`: Agent Harness runtime config PRD.
-- `docs/current/26-agent-harness-runtime-config-interaction.html`: Agent Harness runtime config interaction draft.
 
 ## Project Shape
 

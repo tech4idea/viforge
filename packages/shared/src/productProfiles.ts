@@ -10,9 +10,8 @@ import {
 import novelAdaptationProfileConfig from './product-profiles/novel-adaptation/profile.json';
 import sitcomProfileConfig from './product-profiles/sitcom/profile.json';
 import studyProfileConfig from './product-profiles/study/profile.json';
-import blogWriteProfileConfig from './product-profiles/blog-write/profile.json';
 
-export type ProductProfileId = 'novel-adaptation' | 'sitcom' | 'study' | 'blog-write';
+export type ProductProfileId = 'novel-adaptation' | 'sitcom' | 'study';
 
 export type ProductProfile = {
   id: ProductProfileId;
@@ -253,81 +252,16 @@ export const studyProfile: ProductProfile = {
   projectFiles: studyProjectFiles,
 };
 
-
-const blogWriteGlobalDirectories = [
-  'Agent 配置',
-  '知识库',
-  '知识库/写作方法',
-  '模板库',
-];
-
-const blogWriteProjectDirectories = [
-  '素材',
-  '配图',
-  '发布',
-];
-
-const blogWriteGlobalFiles: TemplateFile[] = [
-  {
-    path: 'Agent 配置/config.toml',
-    content: '# viforge agent runtime\n[viforge]\nmax_revision_rounds = 3\n',
-  },
-  { path: '知识库/写作方法/移动端文章写作原则.md', content: '# 移动端文章写作原则\n\n## 原则\n\n- 一屏只承载一个重点\n- 段落短，转场清楚\n- 小标题服务于阅读路径\n- 加粗和引用保持克制\n' },
-  { path: '模板库/正文模板.md', content: '# 文章标题\n\n## 核心观点\n\n## 开头\n\n## 正文\n\n## 结尾\n' },
-  { path: '模板库/发布检查清单模板.md', content: '# 发布检查清单模板\n\n## 内容\n\n- [ ] 标题准确且不标题党\n- [ ] 事实、数据和引用已核查\n\n## 排版\n\n- [ ] 段落适合移动端阅读\n- [ ] 图片清晰且位置合理\n\n## 平台\n\n- [ ] 草稿保存成功\n- [ ] 预览页检查通过\n' },
-];
-
-const blogWriteGlobalTree: WorkspaceTreeNode[] = [
-  {
-    name: 'Agent 配置',
-    path: 'Agent 配置',
-    type: 'directory',
-    children: [
-      { name: 'config.toml', path: 'Agent 配置/config.toml', type: 'file' },
-    ],
-  },
-  {
-    name: '知识库',
-    path: '知识库',
-    type: 'directory',
-    children: [
-      directoryNode('知识库/写作方法', '写作方法', ['移动端文章写作原则.md']),
-    ],
-  },
-  { name: '模板库', path: '模板库', type: 'directory', children: ['正文模板.md', '发布检查清单模板.md'].map((name) => ({ name, path: `模板库/${name}`, type: 'file' })) },
-];
-
-const blogWriteProjectFiles: TemplateFile[] = [
-  {
-    path: '正文.md',
-    content: '# {{topic}}\n\n## 核心观点\n\n\n## 标题备选\n\n- \n\n## 大纲\n\n\n## 正文\n\n\n## 待核查\n\n- \n\n## 修改记录\n\n| 时间 | 修改点 | 原因 |\n| --- | --- | --- |\n',
-  },
-  { path: '发布/微信公众号发布SOP.md', content: '# 微信公众号发布SOP\n\n## 登录与准备\n\n- 用户先确认已登录微信公众号后台。\n- Agent 操作浏览器前必须说明将执行的动作并等待确认。\n\n## 草稿生成\n\n1. 新建或打开草稿。\n2. 填写标题、正文、摘要和封面。\n3. 上传图片前确认 selector 指向 input[type=file]。\n4. 保存草稿后记录页面状态。\n\n## 禁止动作\n\n- 不点击群发、发布、提交审核等最终动作。\n' },
-  { path: '发布/知乎发布SOP.md', content: '# 知乎发布SOP\n\n## 登录与准备\n\n- 用户先确认已登录知乎。\n- Agent 操作浏览器前必须说明将执行的动作并等待确认。\n\n## 草稿生成\n\n1. 打开文章编辑入口。\n2. 填写标题、正文、话题和图片。\n3. 保存草稿并记录可重新打开的页面状态。\n\n## 禁止动作\n\n- 不点击最终发布。\n' },
-  { path: '发布/发布记录.md', content: '# 发布记录\n\n| 时间 | 平台 | 动作 | 结果 | 备注 |\n| --- | --- | --- | --- | --- |\n' },
-  { path: '发布/发布检查清单.md', content: '# 发布检查清单\n\n## 内容\n\n- [ ] 标题准确、有吸引力且不标题党。\n- [ ] 开头在 3 段内说明问题或给出钩子。\n- [ ] 事实、数据和引用已核查。\n\n## 结构与视觉\n\n- [ ] 小标题层级清楚。\n- [ ] 段落长度适合移动端阅读。\n- [ ] 图片清晰、比例合适、与上下文相关。\n- [ ] 没有整篇居中、字号异常、图标误用或空白过多。\n\n## 平台\n\n- [ ] 草稿保存成功。\n- [ ] 预览页检查通过。\n- [ ] 最终发布由用户决定。\n' },
-];
-
-export const blogWriteProfile: ProductProfile = {
-  ...(blogWriteProfileConfig as ProductProfileConfig),
-  globalDirectories: blogWriteGlobalDirectories,
-  globalFiles: blogWriteGlobalFiles,
-  globalTree: blogWriteGlobalTree,
-  projectDirectories: blogWriteProjectDirectories,
-  projectFiles: blogWriteProjectFiles,
-};
-
 export const PRODUCT_PROFILES = {
   'novel-adaptation': novelAdaptationProfile,
   sitcom: sitcomProfile,
   study: studyProfile,
-  'blog-write': blogWriteProfile,
 } satisfies Record<ProductProfileId, ProductProfile>;
 
 export const DEFAULT_PRODUCT_PROFILE_ID: ProductProfileId = 'novel-adaptation';
 
 export function resolveProductProfile(productId?: string | null): ProductProfile {
-  if (productId === 'sitcom' || productId === 'novel-adaptation' || productId === 'study' || productId === 'blog-write') {
+  if (productId === 'sitcom' || productId === 'novel-adaptation' || productId === 'study') {
     return PRODUCT_PROFILES[productId];
   }
   return PRODUCT_PROFILES[DEFAULT_PRODUCT_PROFILE_ID];

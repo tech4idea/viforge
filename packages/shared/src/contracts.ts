@@ -37,42 +37,6 @@ export type ReferencedChatSnippet = {
   createdAt: string;
 };
 
-export type DocumentAnnotationStatus = 'open' | 'stale' | 'resolved';
-
-export type DocumentAnnotation = {
-  id: string;
-  filePath: string;
-  selectedText: string;
-  startLine: number;
-  endLine: number;
-  startOffset: number;
-  endOffset: number;
-  beforeText: string;
-  afterText: string;
-  fileContentHash: string;
-  comment: string;
-  status: DocumentAnnotationStatus;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type DocumentAnnotationFile = {
-  version: 1;
-  filePath: string;
-  updatedAt: string;
-  annotations: DocumentAnnotation[];
-};
-
-export type DocumentAnnotationSummary = {
-  filePath: string;
-  annotationPath: string;
-  count: number;
-  openCount: number;
-  staleCount: number;
-  resolvedCount: number;
-  updatedAt: string;
-};
-
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled';
 
 export type RunSource = 'web' | 'schedule' | 'qq' | 'wechat' | 'eval';
@@ -235,8 +199,6 @@ export type RuntimeMemoryConfig = {
   statusMessage: string;
   lastReindexedAt?: string;
 };
-export type RuntimeChatEndpoint = 'responses' | 'chat_completions';
-
 export type RuntimeModelProviderConfig = {
   baseUrl: string;
   apiKeyConfigured: boolean;
@@ -244,7 +206,6 @@ export type RuntimeModelProviderConfig = {
   chatApiKeyConfigured?: boolean;
   chatUsesGlobalConfig?: boolean;
   chatModel?: string;
-  chatEndpoint?: RuntimeChatEndpoint;
   imageBaseUrl?: string;
   imageApiKeyConfigured?: boolean;
   imageUsesGlobalConfig?: boolean;
@@ -326,7 +287,6 @@ export type UpdateRuntimeConfigInput = {
     chatBaseUrl?: string;
     chatApiKey?: string;
     chatModel?: string;
-    chatEndpoint?: RuntimeChatEndpoint;
     imageBaseUrl?: string;
     imageApiKey?: string;
     imageModel?: string;
@@ -544,85 +504,14 @@ export type ProjectGitStatus = {
 
 export type HarnessRecordStatus = 'draft' | 'candidate' | 'active' | 'archived';
 
-export type HarnessConfigScope = 'system' | 'product' | 'agent';
-
-export type HarnessConfigSourceRef = {
-  type: 'new' | 'runtime_config' | 'eval_fixture' | 'assertion_config' | 'eval_run_config' | 'human_review_rubric' | 'tool_description' | 'run_artifact' | 'snapshot';
-  id?: string;
-  version?: number;
-};
-
-export type ToolDescriptionConfig = {
-  id?: string;
-  productId?: string;
-  title?: string;
-  version?: number;
-  status?: HarnessRecordStatus;
-  scope?: HarnessConfigScope;
-  agentId?: string;
-  source?: HarnessConfigSourceRef;
-  toolId: string;
-  description: string;
-  parameterDescriptions?: Record<string, string>;
-  outputDescription?: string;
-  contentHash?: string;
-  tags?: string[];
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type BehaviorRuleConfig = {
-  id: string;
-  productId: string;
-  title: string;
-  version: number;
-  status: HarnessRecordStatus;
-  scope: HarnessConfigScope;
-  agentId?: string;
-  source?: HarnessConfigSourceRef;
-  content: string;
-  contentHash: string;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type AgentToolPolicy = {
-  id: string;
-  productId: string;
-  title: string;
-  version: number;
-  status: HarnessRecordStatus;
-  scope: HarnessConfigScope;
-  agentId?: string;
-  source?: HarnessConfigSourceRef;
-  allowedToolIds: string[];
-  deniedToolIds: string[];
-  highRiskToolIds: string[];
-  toolDescriptionRefs: string[];
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type AgentLayerConfig = {
   id: string;
   productId: string;
   version: number;
   status: HarnessRecordStatus;
-  promptBlockRefs?: string[];
-  behaviorRuleRefs?: string[];
-  toolPolicyRefs?: string[];
-  toolDescriptionRefs?: string[];
-  /** @deprecated Tool descriptions are independent records referenced by toolDescriptionRefs or AgentToolPolicy.toolDescriptionRefs. */
-  toolDescriptionOverrides?: ToolDescriptionConfig[];
   systemAgent: {
     agentId: string;
     promptBlockRefs: string[];
-    behaviorRuleRefs?: string[];
-    toolPolicyRefs?: string[];
-    toolDescriptionRefs?: string[];
-    /** @deprecated Use AgentToolPolicy records instead. */
     allowedTools: string[];
     instructionOverride?: string;
   };
@@ -630,17 +519,12 @@ export type AgentLayerConfig = {
     agentId: string;
     skillRef?: string;
     promptBlockRefs: string[];
-    behaviorRuleRefs?: string[];
-    toolPolicyRefs?: string[];
-    toolDescriptionRefs?: string[];
     defaultEnabled: boolean;
-    /** @deprecated Use AgentToolPolicy records instead. */
     allowedTools?: string[];
     instructionOverride?: string;
   }>;
   memoryPolicyRef?: string;
   retrievalPolicyRef?: string;
-  /** @deprecated Use toolPolicyRefs and AgentToolPolicy records instead. */
   toolPolicyRef?: string;
   modelPolicyRef?: string;
   createdAt: string;
@@ -735,7 +619,7 @@ export type HarnessTextDiffLine = {
 };
 
 export type HarnessVersionDiff = {
-  recordType: 'prompt_block' | 'skill_snapshot' | 'tool_description';
+  recordType: 'prompt_block' | 'skill_snapshot';
   id: string;
   previousVersion: number;
   nextVersion: number;
@@ -771,9 +655,6 @@ export type AgentSpec = {
   memoryPolicyRef?: string;
   retrievalPolicyRef?: string;
   toolPolicyRef?: string;
-  behaviorRuleRefs?: string[];
-  toolPolicyRefs?: string[];
-  toolDescriptionRefs?: string[];
   modelPolicyRef?: string;
   changelog?: string;
   createdAt: string;
@@ -871,96 +752,6 @@ export type EvalFixture = {
   updatedAt: string;
 };
 
-export type AssertionSeverity = 'blocking' | 'warning' | 'info';
-
-export type AssertionDefinition = {
-  id: string;
-  kind: 'file_change' | 'path_constraint' | 'markdown_section' | 'tool_event' | 'diff_limit' | 'manifest_compliance';
-  enabled: boolean;
-  severity: AssertionSeverity;
-  description?: string;
-  config: Record<string, unknown>;
-};
-
-export type AssertionConfig = {
-  id: string;
-  productId: string;
-  name: string;
-  version: number;
-  status: HarnessRecordStatus;
-  source?: HarnessConfigSourceRef;
-  assertions: AssertionDefinition[];
-  compiledAssertions: Record<string, unknown>;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type EvalRunConfig = {
-  id: string;
-  productId: string;
-  name: string;
-  version: number;
-  status: HarnessRecordStatus;
-  source?: HarnessConfigSourceRef;
-  runMode: 'live' | 'repro';
-  modelOverride?: string;
-  memoryMode: 'fixture' | 'live' | 'mocked';
-  knowledgeMode: 'fixture' | 'live' | 'mocked';
-  highRiskToolMode: 'mock' | 'allow' | 'deny';
-  toolMocks?: Record<string, unknown>;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type RuntimeConfigFlowNodeRef = {
-  source: 'new' | 'reused' | 'derived';
-  id?: string;
-  version?: number;
-  name?: string;
-};
-
-export type RuntimeConfigFlowChange = {
-  scope: HarnessConfigScope;
-  area: 'agent_prompt' | 'behavior_rule' | 'tool_description' | 'policy' | 'eval_fixture' | 'eval_run_config' | 'assertion_config' | 'review_template';
-  targetId?: string;
-  agentId?: string;
-  summary: string;
-};
-
-export type RuntimeConfigFlow = {
-  id: string;
-  productId: string;
-  name: string;
-  status: HarnessRecordStatus;
-  agentId?: string;
-  tags: string[];
-  releaseState: 'never_released' | 'released' | 'rolled_back' | 'archived';
-  nodeRefs: {
-    evalFixture?: RuntimeConfigFlowNodeRef;
-    agentConfig?: RuntimeConfigFlowNodeRef;
-    evalRunConfig?: RuntimeConfigFlowNodeRef;
-    assertionConfig?: RuntimeConfigFlowNodeRef;
-    reviewTemplate?: RuntimeConfigFlowNodeRef;
-  };
-  candidateSpecId?: string;
-  activeSpecId?: string;
-  evalRunIds: string[];
-  releaseRecordIds: string[];
-  gateStatus: 'unknown' | 'passed' | 'blocked';
-  evalCompletion: {
-    total: number;
-    passed: number;
-    reviewed: number;
-    positiveReviewed: number;
-  };
-  changes: RuntimeConfigFlowChange[];
-  createdAt: string;
-  updatedAt: string;
-  archivedAt?: string | null;
-};
-
 export type RunArtifact = {
   runId: string;
   projectId: string;
@@ -1005,9 +796,6 @@ export type EvalRun = {
   id: string;
   fixtureId: string;
   agentSpecId: string;
-  evalRunConfigId?: string;
-  assertionConfigId?: string;
-  humanReviewRubricId?: string;
   runMode: 'live' | 'repro';
   executionMode?: 'fixture_replay' | 'custom_executor' | 'langgraph_isolated';
   status: 'pending' | 'running' | 'passed' | 'failed' | 'error';
@@ -1027,17 +815,11 @@ export type EvalRun = {
     layerConfig?: AgentLayerConfig;
     memoryPolicy?: MemoryPolicy;
     retrievalPolicy?: RetrievalPolicy;
-    behaviorRules?: BehaviorRuleConfig[];
-    toolPolicies?: AgentToolPolicy[];
-    promptBlockRefs?: string[];
-    skillRefs?: AgentSpec['skillRefs'];
+  promptBlockRefs?: string[];
+  skillRefs?: AgentSpec['skillRefs'];
     promptBlocks?: Array<{ ref: string; content?: string; contentHash?: string; source: 'prompt_block' | 'agent_spec' | 'layer_config' | 'missing' }>;
     skills?: Array<{ ref: string; skillId: string; content?: string; contentHash?: string; source: 'skill_snapshot' | 'agent_config' | 'product_profile' | 'agent_spec_hash' | 'missing' }>;
-    toolPolicyRef?: string;
-    behaviorRuleRefs?: string[];
-    toolPolicyRefs?: string[];
-    toolDescriptionRefs?: string[];
-    toolDescriptionOverrides?: ToolDescriptionConfig[];
+  toolPolicyRef?: string;
     modelPolicyRef?: string;
     workspaceManifest?: WorkspaceManifest;
   };
@@ -1047,20 +829,14 @@ export type EvalRun = {
 export type HumanReviewRubric = {
   id: string;
   productId: string;
-  name?: string;
   artifactType: string;
   version: number;
   status: HarnessRecordStatus;
-  source?: HarnessConfigSourceRef;
   hardChecks: Array<{ id: string; label: string; source: 'program' | 'human' }>;
   humanScores: Array<{
     id: string;
     label: string;
     scale: number;
-    weight?: number;
-    required?: boolean;
-    description?: string;
-    notePrompt?: string;
     anchors?: Record<string, string>;
     subScores?: string[];
   }>;
@@ -1079,7 +855,6 @@ export type HumanReview = {
   rubricVersion: number;
   reviewer: string;
   decision: 'pass' | 'fail' | 'improved' | 'regressed' | 'needs_regression_case';
-  scoreStates?: Record<string, 'scored' | 'not_applicable'>;
   scores: Record<string, number>;
   subScores?: Record<string, Record<string, number>>;
   annotations?: Array<{
@@ -1142,12 +917,8 @@ export type AgentSpecReleaseRecord = {
 };
 
 export type HarnessSummary = {
-  runtimeConfigFlows: RuntimeConfigFlow[];
   agentLayerConfigs: AgentLayerConfig[];
   agentSpecs: AgentSpec[];
-  behaviorRuleConfigs: BehaviorRuleConfig[];
-  agentToolPolicies: AgentToolPolicy[];
-  toolDescriptionConfigs: ToolDescriptionConfig[];
   memoryPolicies: MemoryPolicy[];
   knowledgeBaseEntries: KnowledgeBaseEntry[];
   retrievalPolicies: RetrievalPolicy[];
@@ -1157,8 +928,6 @@ export type HarnessSummary = {
   runArtifacts: RunArtifact[];
   snapshots: RunInputSnapshot[];
   evalFixtures: EvalFixture[];
-  assertionConfigs: AssertionConfig[];
-  evalRunConfigs: EvalRunConfig[];
   evalRuns: EvalRun[];
   humanReviewRubrics: HumanReviewRubric[];
   releaseRecords: AgentSpecReleaseRecord[];

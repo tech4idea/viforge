@@ -21,9 +21,6 @@ import {
   type ChatMessage,
   type ChatMessageAttachment,
   type ChatSession,
-  type DocumentAnnotation,
-  type DocumentAnnotationFile,
-  type DocumentAnnotationSummary,
   type GeminiImageAspectRatio,
   type BrowserConnectorStatus,
   type GeminiImageThinkingLevel,
@@ -43,21 +40,12 @@ import {
 } from './api';
 import { AssistantStreamBody, streamEventsFromRunEvents } from './assistant-stream';
 import { buildReferenceSuggestions, getActiveReferenceQuery, insertReference, type FileReference, type ReferenceSuggestion } from './chat-references';
-import {
-  createAnnotationDraftFromOffsets,
-  createAnnotationDraftFromSelectedText,
-  hashDocumentContent,
-  locateAnnotations,
-  type CreateDocumentAnnotationDraft,
-  type LocatedDocumentAnnotation,
-} from './document-annotations';
 import { renderEditorViewer } from './viewer-components';
 import {
   WORKSPACE_SECTIONS,
   buildCollapsedDirectoryPaths,
   filterVisibleGlobalWorkspaceEntries,
   filterVisibleWorkspaceEntries,
-  isHiddenWorkspacePath,
   toggleCollapsedPath,
 } from './workspace-tree';
 import { ACTIVE_PRODUCT_PROFILE, SELECTABLE_PRODUCT_PROFILES } from './product-profile';
@@ -109,8 +97,6 @@ const PDF_FILE_PATTERN = /\.pdf$/i;
 const HTML_FILE_PATTERN = /\.html?$/i;
 const SIDEBAR_CONTEXT_MENU_WIDTH = 168;
 const SIDEBAR_CONTEXT_MENU_MAX_HEIGHT = 260;
-const ANNOTATION_COMPOSER_WIDTH = 360;
-const ANNOTATION_COMPOSER_HEIGHT = 170;
 const VIEWPORT_EDGE_GAP = 8;
 const WORKSPACE_PANEL_MIN_WIDTH = 180;
 const WORKSPACE_PANEL_MAX_WIDTH = 420;
@@ -268,25 +254,9 @@ type SelectedTextContextMenu = {
   y: number;
   text: string;
 } & (
-  | { source: 'file'; sourcePath: string; selectionDraft?: CreateDocumentAnnotationDraft; annotationDraft?: CreateDocumentAnnotationDraft }
+  | { source: 'file'; sourcePath: string }
   | { source: 'chat'; messageId: string; role: ChatMessage['role']; label: string; createdAt: string }
 );
-
-type AnnotationComposerDraft = {
-  x: number;
-  y: number;
-  text: string;
-  sourcePath: string;
-  annotationDraft: CreateDocumentAnnotationDraft;
-  value: string;
-};
-
-type FileTextSelectionSnapshot = {
-  text: string;
-  sourcePath: string;
-  selectionDraft?: CreateDocumentAnnotationDraft;
-  annotationDraft?: CreateDocumentAnnotationDraft;
-};
 
 type CreateEntryDraft = {
   workspaceScope: WorkspaceScope;
@@ -316,8 +286,6 @@ function App() {
   const folderUploadRef = useRef<HTMLInputElement | null>(null);
   const imageReferenceInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const annotationComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const lastFileTextSelectionRef = useRef<FileTextSelectionSnapshot | null>(null);
   const chatThreadRef = useRef<HTMLElement | null>(null);
   const autoScrollRef = useRef(true);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
@@ -496,7 +464,6 @@ function App() {
   const [sidebarContextMenu, setSidebarContextMenu] = useState<SidebarContextMenu | null>(null);
   const [chatSessionContextMenu, setChatSessionContextMenu] = useState<ChatSessionContextMenu | null>(null);
   const [selectedTextContextMenu, setSelectedTextContextMenu] = useState<SelectedTextContextMenu | null>(null);
-  const [annotationComposerDraft, setAnnotationComposerDraft] = useState<AnnotationComposerDraft | null>(null);
   const [createEntryDraft, setCreateEntryDraft] = useState<CreateEntryDraft | null>(null);
   const [renameEntryDraft, setRenameEntryDraft] = useState<RenameEntryDraft | null>(null);
   const createEntryFocusKey = createEntryDraft
@@ -506,16 +473,6 @@ function App() {
     ? `${renameEntryDraft.workspaceScope}:${renameEntryDraft.projectId ?? ''}:${renameEntryDraft.entryPath}`
     : null;
   const [quickActionError, setQuickActionError] = useState<string | null>(null);
-  const [documentAnnotationFile, setDocumentAnnotationFile] = useState<DocumentAnnotationFile | null>(null);
-  const [documentAnnotationSummaries, setDocumentAnnotationSummaries] = useState<DocumentAnnotationSummary[]>([]);
-  const [documentAnnotationSummaryState, setDocumentAnnotationSummaryState] = useState<LoadState>('idle');
-  const [documentAnnotationPanelOpen, setDocumentAnnotationPanelOpen] = useState(false);
-  const [expandedAnnotationFilePaths, setExpandedAnnotationFilePaths] = useState<string[]>([]);
-  const [annotationBridgeFiles, setAnnotationBridgeFiles] = useState<Record<string, DocumentAnnotationFile>>({});
-  const [annotationBridgeFileStates, setAnnotationBridgeFileStates] = useState<Record<string, LoadState>>({});
-  const [documentAnnotationState, setDocumentAnnotationState] = useState<LoadState>('idle');
-  const [documentAnnotationError, setDocumentAnnotationError] = useState<string | null>(null);
-  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [uploadTarget, setUploadTarget] = useState<WorkspaceTarget | null>(null);
   const [uploadMode, setUploadMode] = useState<'files' | 'folder'>('files');
   const [uploadState, setUploadState] = useState<'idle' | 'uploading'>('idle');
@@ -536,7 +493,6 @@ function App() {
     : activeWorkspaceScope === 'temporary'
       ? selectedTemporaryProjectId
       : null;
-  const annotationSummaryProjectId = chatScope === 'project' ? selectedProjectId : activeProjectWorkspaceId;
   const activeEntries = activeWorkspaceScope === 'global'
     ? globalEntries
     : activeWorkspaceScope === 'temporary' && selectedTemporaryProjectId
@@ -557,27 +513,6 @@ function App() {
   const isImageFile = selectedEntry?.type === 'file' && IMAGE_FILE_PATTERN.test(selectedEntry.path);
   const isPdfFile = selectedEntry?.type === 'file' && PDF_FILE_PATTERN.test(selectedEntry.path);
   const isHtmlFile = selectedEntry?.type === 'file' && HTML_FILE_PATTERN.test(selectedEntry.path);
-  const isMarkdownFile = selectedEntry?.type === 'file' && isMarkdownFilePath(selectedEntry.path);
-  const locatedDocumentAnnotations = useMemo(
-    () => documentAnnotationFile && selectedPath && documentAnnotationFile.filePath === selectedPath
-      ? locateAnnotations(fileContent, documentAnnotationFile.annotations)
-      : [],
-    [documentAnnotationFile, fileContent, selectedPath],
-  );
-  const savedDocumentAnnotations = useMemo(
-    () => documentAnnotationFile && selectedPath && documentAnnotationFile.filePath === selectedPath
-      ? locateAnnotations(lastSavedContent, documentAnnotationFile.annotations)
-      : [],
-    [documentAnnotationFile, lastSavedContent, selectedPath],
-  );
-  const transientSelectionAnnotation = useMemo(
-    () => buildTransientSelectionAnnotation(selectedPath, selectedTextContextMenu, annotationComposerDraft),
-    [annotationComposerDraft, selectedPath, selectedTextContextMenu],
-  );
-  const visibleDocumentAnnotations = useMemo(() => {
-    const activeAnnotations = locatedDocumentAnnotations.filter((annotation) => annotation.status !== 'resolved');
-    return transientSelectionAnnotation ? [...activeAnnotations, transientSelectionAnnotation] : activeAnnotations;
-  }, [locatedDocumentAnnotations, transientSelectionAnnotation]);
   const rawPreviewUrl = selectedPath
     ? activeWorkspaceScope === 'global'
       ? resolveApiUrl(`/api/global/raw/${encodeWorkspacePath(selectedPath)}`)
@@ -586,11 +521,6 @@ function App() {
         : ''
     : '';
   const hasUnsavedChanges = isTextFile && fileContent !== lastSavedContent;
-
-  useEffect(() => {
-    lastFileTextSelectionRef.current = null;
-  }, [fileContent, selectedPath]);
-
   const selectWorkspacePath = useCallback((workspaceScope: WorkspaceScope, projectId: string | null, path: string) => {
     setActiveWorkspaceScope(workspaceScope);
     if (workspaceScope === 'global') {
@@ -640,292 +570,6 @@ function App() {
     }
     selectEntryForPreview(activeWorkspaceScope, activeProjectWorkspaceId, targetEntry);
   }, [activeEntries, activeProjectWorkspaceId, activeWorkspaceScope, selectEntryForPreview, showToast]);
-
-  useEffect(() => {
-    if (!activeProjectWorkspaceId || !selectedPath || !isMarkdownFilePath(selectedPath)) {
-      setDocumentAnnotationFile(null);
-      setDocumentAnnotationState('idle');
-      setDocumentAnnotationError(null);
-      setActiveAnnotationId(null);
-      return;
-    }
-
-    let cancelled = false;
-    setDocumentAnnotationState('loading');
-    setDocumentAnnotationError(null);
-    void apiClient.readDocumentAnnotations(activeProjectWorkspaceId, selectedPath)
-      .then((annotations) => {
-        if (!cancelled) {
-          setDocumentAnnotationFile(annotations);
-          setDocumentAnnotationState('idle');
-          setActiveAnnotationId(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setDocumentAnnotationFile(null);
-          setDocumentAnnotationState('error');
-          setDocumentAnnotationError(errorToMessage(error));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectWorkspaceId, selectedPath]);
-
-  useEffect(() => {
-    if (!activeProjectWorkspaceId || activeWorkspaceScope === 'global') {
-      setDocumentAnnotationSummaries([]);
-      setDocumentAnnotationSummaryState('idle');
-      return;
-    }
-    void loadDocumentAnnotationSummaries(activeProjectWorkspaceId);
-  }, [activeProjectWorkspaceId, activeWorkspaceScope]);
-  useEffect(() => {
-    if (
-      !activeProjectWorkspaceId ||
-      !selectedPath ||
-      fileState !== 'idle' ||
-      !documentAnnotationFile ||
-      documentAnnotationFile.filePath !== selectedPath ||
-      !isMarkdownFilePath(selectedPath) ||
-      hasUnsavedChanges
-    ) return;
-
-    const currentHash = hashDocumentContent(lastSavedContent);
-    const annotationsToMarkStale = savedDocumentAnnotations.filter((annotation) =>
-      annotation.effectiveStatus === 'stale' &&
-      annotation.status !== 'stale' &&
-      annotation.fileContentHash !== currentHash,
-    );
-    const annotationsToRestore = savedDocumentAnnotations.filter((annotation) =>
-      annotation.status === 'stale' &&
-      annotation.currentStartOffset !== null &&
-      annotation.currentEndOffset !== null,
-    );
-    if (annotationsToMarkStale.length === 0 && annotationsToRestore.length === 0) return;
-
-    void Promise.all([
-      ...annotationsToMarkStale.map((annotation) =>
-        apiClient.updateDocumentAnnotation(activeProjectWorkspaceId, annotation.id, { filePath: annotation.filePath, status: 'stale' }),
-      ),
-      ...annotationsToRestore.map((annotation) =>
-        apiClient.updateDocumentAnnotation(activeProjectWorkspaceId, annotation.id, { filePath: annotation.filePath, status: 'open' }),
-      ),
-    ]).then((updates) => {
-      const latest = updates[updates.length - 1];
-      if (latest) setDocumentAnnotationFile((current) => current?.filePath === latest.filePath ? latest : current);
-      void loadDocumentAnnotationSummaries(activeProjectWorkspaceId);
-    }).catch(() => {});
-  }, [activeProjectWorkspaceId, documentAnnotationFile, fileState, hasUnsavedChanges, lastSavedContent, savedDocumentAnnotations, selectedPath]);
-
-  function addSelectedTextAnnotation() {
-    if (!selectedTextContextMenu || selectedTextContextMenu.source !== 'file' || !activeProjectWorkspaceId) return;
-    const ctx = selectedTextContextMenu;
-    const draft = ctx.annotationDraft;
-    closeSelectedTextContextMenu();
-    if (!draft) {
-      setQuickActionError('无法定位选中文本，不能添加批注。');
-      return;
-    }
-
-    const x = Math.max(VIEWPORT_EDGE_GAP, Math.min(ctx.x, window.innerWidth - ANNOTATION_COMPOSER_WIDTH - VIEWPORT_EDGE_GAP));
-    const y = Math.max(VIEWPORT_EDGE_GAP, Math.min(ctx.y, window.innerHeight - ANNOTATION_COMPOSER_HEIGHT - VIEWPORT_EDGE_GAP));
-    setAnnotationComposerDraft({
-      x,
-      y,
-      text: ctx.text,
-      sourcePath: ctx.sourcePath,
-      annotationDraft: draft,
-      value: '',
-    });
-  }
-
-  function closeAnnotationComposer() {
-    setAnnotationComposerDraft(null);
-    clearFileTextSelectionSnapshot();
-  }
-
-  async function saveAnnotationComposerDraft() {
-    if (!activeProjectWorkspaceId || !annotationComposerDraft) return;
-    const comment = annotationComposerDraft.value.trim();
-    if (!comment) return;
-    try {
-      const updated = await apiClient.createDocumentAnnotation(activeProjectWorkspaceId, {
-        filePath: annotationComposerDraft.sourcePath,
-        ...annotationComposerDraft.annotationDraft,
-        comment,
-      });
-      setDocumentAnnotationFile(updated);
-      setAnnotationBridgeFiles((current) => ({ ...current, [updated.filePath]: updated }));
-      setActiveAnnotationId(updated.annotations[updated.annotations.length - 1]?.id ?? null);
-      closeAnnotationComposer();
-      showToast('批注已保存', 'success');
-      await loadDocumentAnnotationSummaries(activeProjectWorkspaceId);
-      await refreshActiveEntriesAfterAnnotationChange();
-    } catch (error) {
-      setQuickActionError(errorToMessage(error));
-    }
-  }
-
-  async function deleteDocumentAnnotation(annotationId: string) {
-    if (!activeProjectWorkspaceId || !documentAnnotationFile) return;
-    try {
-      const updated = await apiClient.deleteDocumentAnnotation(activeProjectWorkspaceId, documentAnnotationFile.filePath, annotationId);
-      setDocumentAnnotationFile(updated.annotations.length > 0 ? updated : null);
-      setAnnotationBridgeFiles((current) => updated.annotations.length > 0
-        ? { ...current, [updated.filePath]: updated }
-        : Object.fromEntries(Object.entries(current).filter(([path]) => path !== updated.filePath)));
-      setExpandedAnnotationFilePaths((current) => updated.annotations.length > 0 ? current : current.filter((path) => path !== updated.filePath));
-      setActiveAnnotationId((current) => current === annotationId ? null : current);
-      await loadDocumentAnnotationSummaries(activeProjectWorkspaceId);
-      await refreshActiveEntriesAfterAnnotationChange();
-    } catch (error) {
-      setQuickActionError(errorToMessage(error));
-    }
-  }
-
-  async function updateDocumentAnnotationComment(annotationId: string, comment: string) {
-    if (!activeProjectWorkspaceId || !documentAnnotationFile) return;
-    try {
-      const updated = await apiClient.updateDocumentAnnotation(activeProjectWorkspaceId, annotationId, {
-        filePath: documentAnnotationFile.filePath,
-        comment,
-      });
-      setDocumentAnnotationFile(updated);
-      setAnnotationBridgeFiles((current) => ({ ...current, [updated.filePath]: updated }));
-      setActiveAnnotationId(annotationId);
-      await loadDocumentAnnotationSummaries(activeProjectWorkspaceId);
-      await refreshActiveEntriesAfterAnnotationChange();
-    } catch (error) {
-      setQuickActionError(errorToMessage(error));
-      throw error;
-    }
-  }
-
-  async function clearCurrentDocumentAnnotations() {
-    if (!activeProjectWorkspaceId || !documentAnnotationFile || documentAnnotationFile.annotations.length === 0) return;
-    const confirmed = await showConfirm({ title: '清空当前文档批注', message: '这会删除当前文档的全部批注，原文不会被修改。', danger: true, confirmLabel: '清空批注' });
-    if (!confirmed) return;
-    try {
-      const cleared = await apiClient.clearDocumentAnnotations(activeProjectWorkspaceId, documentAnnotationFile.filePath);
-      setDocumentAnnotationFile(cleared.annotations.length > 0 ? cleared : null);
-      setAnnotationBridgeFiles((current) => Object.fromEntries(Object.entries(current).filter(([path]) => path !== cleared.filePath)));
-      setExpandedAnnotationFilePaths((current) => current.filter((path) => path !== cleared.filePath));
-      setActiveAnnotationId(null);
-      await loadDocumentAnnotationSummaries(activeProjectWorkspaceId);
-      await refreshActiveEntriesAfterAnnotationChange();
-    } catch (error) {
-      setQuickActionError(errorToMessage(error));
-    }
-  }
-
-  function selectDocumentAnnotation(annotationId: string) {
-    setActiveAnnotationId(annotationId);
-    window.requestAnimationFrame(() => {
-      document.getElementById(`annotation-highlight-${annotationId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    });
-  }
-
-  async function loadDocumentAnnotationSummaries(projectId: string) {
-    setDocumentAnnotationSummaryState('loading');
-    try {
-      const summaries = await apiClient.listDocumentAnnotationSummaries(projectId);
-      setDocumentAnnotationSummaries(summaries);
-      setDocumentAnnotationSummaryState('idle');
-    } catch {
-      setDocumentAnnotationSummaryState('error');
-    }
-  }
-
-  function useAnnotationsInComposer(filePath?: string) {
-    const targets = filePath
-      ? documentAnnotationSummaries.filter((summary) => summary.filePath === filePath)
-      : documentAnnotationSummaries.filter((summary) => summary.openCount > 0 || summary.staleCount > 0);
-    if (targets.length === 0) return;
-
-    const references = targets.map((summary) => ({ path: summary.filePath, label: basename(summary.filePath) }));
-    setReferencedFiles((current) => {
-      const existing = new Set(current.map((item) => item.path));
-      return [...current, ...references.filter((reference) => !existing.has(reference.path))];
-    });
-    setPrompt((current) => {
-      const instruction = '根据批注进行修改';
-      return current.trim() ? current : instruction;
-    });
-    setDocumentAnnotationPanelOpen(false);
-    closeReferenceMenu();
-    focusComposerAtEnd();
-  }
-
-  async function copyAllAnnotationsFromBridge() {
-    const targetProjectId = annotationSummaryProjectId ?? activeProjectWorkspaceId;
-    if (!targetProjectId) return;
-    const targets = documentAnnotationSummaries.filter((summary) => summary.openCount > 0 || summary.staleCount > 0);
-    if (targets.length === 0) return;
-
-    try {
-      const files = await Promise.all(targets.map((summary) =>
-        annotationBridgeFiles[summary.filePath] ?? apiClient.readDocumentAnnotations(targetProjectId, summary.filePath),
-      ));
-      await copyTextToClipboard(formatDocumentAnnotationsForClipboard(files));
-      showToast('批注内容已复制', 'success');
-    } catch (error) {
-      setQuickActionError(errorToMessage(error));
-    }
-  }
-  function openAnnotatedFile(filePath: string) {
-    const targetProjectId = annotationSummaryProjectId ?? activeProjectWorkspaceId;
-    if (!targetProjectId) return;
-    const targetScope: WorkspaceScope = activeWorkspaceScope === 'temporary' && targetProjectId === selectedTemporaryProjectId ? 'temporary' : 'project';
-    const targetEntries = targetScope === 'temporary'
-      ? temporaryEntriesByProject[targetProjectId] ?? []
-      : entriesProjectId === targetProjectId ? entries : activeEntries;
-    const targetEntry = targetEntries.find((entry) => entry.type === 'file' && entry.path === filePath);
-    if (!targetEntry) return;
-    selectEntryForPreview(targetScope, targetProjectId, targetEntry);
-  }
-
-  async function toggleAnnotationFileDetails(filePath: string) {
-    setExpandedAnnotationFilePaths((current) => current.includes(filePath) ? current.filter((path) => path !== filePath) : [...current, filePath]);
-    if (annotationBridgeFiles[filePath] || annotationBridgeFileStates[filePath] === 'loading') return;
-    const targetProjectId = annotationSummaryProjectId ?? activeProjectWorkspaceId;
-    if (!targetProjectId) return;
-    setAnnotationBridgeFileStates((current) => ({ ...current, [filePath]: 'loading' }));
-    try {
-      const annotationFile = await apiClient.readDocumentAnnotations(targetProjectId, filePath);
-      setAnnotationBridgeFiles((current) => ({ ...current, [filePath]: annotationFile }));
-      setAnnotationBridgeFileStates((current) => ({ ...current, [filePath]: 'idle' }));
-    } catch {
-      setAnnotationBridgeFileStates((current) => ({ ...current, [filePath]: 'error' }));
-    }
-  }
-
-  async function deleteAnnotationFromBridge(filePath: string, annotationId: string) {
-    const targetProjectId = annotationSummaryProjectId ?? activeProjectWorkspaceId;
-    if (!targetProjectId) return;
-    try {
-      const updated = await apiClient.deleteDocumentAnnotation(targetProjectId, filePath, annotationId);
-      setAnnotationBridgeFiles((current) => updated.annotations.length > 0
-        ? { ...current, [filePath]: updated }
-        : Object.fromEntries(Object.entries(current).filter(([path]) => path !== filePath)));
-      setExpandedAnnotationFilePaths((current) => updated.annotations.length > 0 ? current : current.filter((path) => path !== filePath));
-      if (documentAnnotationFile?.filePath === filePath) setDocumentAnnotationFile(updated.annotations.length > 0 ? updated : null);
-      await loadDocumentAnnotationSummaries(targetProjectId);
-      await refreshActiveEntriesAfterAnnotationChange();
-    } catch (error) {
-      setQuickActionError(errorToMessage(error));
-    }
-  }
-
-  async function refreshActiveEntriesAfterAnnotationChange() {
-    if (!activeProjectWorkspaceId) return;
-    if (activeWorkspaceScope === 'temporary') {
-      await loadTemporaryEntries(activeProjectWorkspaceId, { keepSelectedPath: selectedPath, revealPath: selectedPath });
-    } else {
-      await loadEntries(activeProjectWorkspaceId, { keepSelectedPath: selectedPath, revealPath: selectedPath });
-    }
-  }
   const projectChatSessions = useMemo(
     () =>
       chatSessions
@@ -982,12 +626,8 @@ function App() {
     [chatSessions],
   );
   const selectedProjectFiles = useMemo(
-    () => activeWorkspaceScope === 'project' && selectedProjectId && entriesProjectId === selectedProjectId ? entries.filter((entry) => entry.type === 'file' && !isHiddenWorkspacePath(entry.path)) : [],
+    () => activeWorkspaceScope === 'project' && selectedProjectId && entriesProjectId === selectedProjectId ? entries.filter((entry) => entry.type === 'file') : [],
     [activeWorkspaceScope, entries, entriesProjectId, selectedProjectId],
-  );
-  const pendingDocumentAnnotationSummaries = useMemo(
-    () => documentAnnotationSummaries.filter((summary) => summary.openCount > 0 || summary.staleCount > 0),
-    [documentAnnotationSummaries],
   );
   const activeChatScopeName = chatScope === 'project' && selectedProject ? selectedProject.name : '临时工作目录';
   const chatModelOptions = useMemo(() => modelsForCapability(aigcHubModels, 'chat'), [aigcHubModels]);
@@ -1006,7 +646,6 @@ function App() {
     setSidebarContextMenu(null);
     setChatSessionContextMenu(null);
     previewTabs.closeContextMenu();
-    closeAnnotationComposer();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
     setSelectedTextContextMenu({
@@ -1288,13 +927,6 @@ function App() {
       renameEntryInputRef.current?.select();
     });
   }, [renameEntryFocusKey]);
-
-  useEffect(() => {
-    if (!annotationComposerDraft) return;
-    requestAnimationFrame(() => {
-      annotationComposerTextareaRef.current?.focus();
-    });
-  }, [annotationComposerDraft?.sourcePath, annotationComposerDraft?.annotationDraft.startOffset]);
 
   useEffect(() => {
     if (activeToolPanel === 'connectors') {
@@ -2294,22 +1926,6 @@ function App() {
   function removeReferencedFile(path: string) {
     setReferencedFiles((current) => current.filter((item) => item.path !== path));
   }
-  function focusComposerAtEnd() {
-    window.requestAnimationFrame(() => {
-      composerRef.current?.focus();
-      const end = composerRef.current?.value.length ?? 0;
-      composerRef.current?.setSelectionRange(end, end);
-    });
-  }
-
-  function addFileReferenceToComposer(path: string) {
-    const reference = { path, label: basename(path) };
-    setReferencedFiles((current) =>
-      current.some((item) => item.path === reference.path) ? current : [...current, reference],
-    );
-    closeReferenceMenu();
-    focusComposerAtEnd();
-  }
 
   function removeReferencedSnippet(id: string) {
     setReferencedSnippets((current) => current.filter((item) => item.id !== id));
@@ -2870,7 +2486,6 @@ function App() {
     closeChatSessionContextMenu();
     closePreviewTabContextMenu();
     closeSelectedTextContextMenu();
-    closeAnnotationComposer();
     const workspaceScope = payload.workspaceScope ?? 'project';
     setActiveWorkspaceScope(workspaceScope);
     if (workspaceScope === 'project' && payload.projectId) {
@@ -2911,7 +2526,6 @@ function App() {
     closeSidebarContextMenu();
     closePreviewTabContextMenu();
     closeSelectedTextContextMenu();
-    closeAnnotationComposer();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
     setChatSessionContextMenu({
@@ -2932,7 +2546,6 @@ function App() {
     closeSidebarContextMenu();
     closeChatSessionContextMenu();
     closeSelectedTextContextMenu();
-    closeAnnotationComposer();
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
     const menuY = Math.min(event.clientY, window.innerHeight - SIDEBAR_CONTEXT_MENU_MAX_HEIGHT - VIEWPORT_EDGE_GAP);
     previewTabs.setContextMenu({
@@ -2946,45 +2559,9 @@ function App() {
     previewTabs.closeContextMenu();
   }
 
-  function clearFileTextSelectionSnapshot() {
-    lastFileTextSelectionRef.current = null;
-  }
-
-  function createFileTextSelectionSnapshot(selection: TextSelectionDetails): FileTextSelectionSnapshot | null {
-    const selectedText = selection.text.trim();
-    if (!selectedText || !selectedPath) return null;
-
-    const selectionDraft = isMarkdownFilePath(selectedPath)
-      ? selection.startOffset !== null && selection.endOffset !== null
-        ? createAnnotationDraftFromOffsets(fileContent, selection.startOffset, selection.endOffset)
-        : createAnnotationDraftFromSelectedText(fileContent, selectedText)
-      : null;
-    const annotationDraft = activeProjectWorkspaceId ? selectionDraft : null;
-
-    return {
-      text: selectedText.slice(0, 4000),
-      sourcePath: selectedPath,
-      ...(selectionDraft ? { selectionDraft } : {}),
-      ...(annotationDraft ? { annotationDraft } : {}),
-    };
-  }
-  function captureFileTextSelectionSnapshot(event: React.MouseEvent | React.KeyboardEvent | React.SyntheticEvent) {
-    if ('button' in event && event.button !== 0) return;
-    const snapshot = createFileTextSelectionSnapshot(getSelectedTextDetailsFromEvent(event));
-    if (snapshot) {
-      lastFileTextSelectionRef.current = snapshot;
-    } else {
-      clearFileTextSelectionSnapshot();
-    }
-  }
-
   function openSelectedTextContextMenu(event: React.MouseEvent) {
-    const liveSnapshot = createFileTextSelectionSnapshot(getSelectedTextDetailsFromEvent(event));
-    const cachedSnapshot = lastFileTextSelectionRef.current?.sourcePath === selectedPath
-      ? lastFileTextSelectionRef.current
-      : null;
-    const selectionSnapshot = liveSnapshot ?? cachedSnapshot;
-    if (!selectionSnapshot || !selectedPath) {
+    const selectedText = getSelectedTextFromEvent(event).trim();
+    if (!selectedText || !selectedPath) {
       closeSelectedTextContextMenu();
       return;
     }
@@ -2994,23 +2571,19 @@ function App() {
     closeSidebarContextMenu();
     closeChatSessionContextMenu();
     closePreviewTabContextMenu();
-    closeAnnotationComposer();
-    lastFileTextSelectionRef.current = selectionSnapshot;
     const menuX = Math.min(event.clientX, window.innerWidth - SIDEBAR_CONTEXT_MENU_WIDTH - VIEWPORT_EDGE_GAP);
-    const menuY = Math.min(event.clientY, window.innerHeight - 120 - VIEWPORT_EDGE_GAP);
+    const menuY = Math.min(event.clientY, window.innerHeight - 90 - VIEWPORT_EDGE_GAP);
     setSelectedTextContextMenu({
       x: Math.max(VIEWPORT_EDGE_GAP, menuX),
       y: Math.max(VIEWPORT_EDGE_GAP, menuY),
-      text: selectionSnapshot.text,
+      text: selectedText.slice(0, 4000),
       source: 'file',
-      sourcePath: selectionSnapshot.sourcePath,
-      ...(selectionSnapshot.selectionDraft ? { selectionDraft: selectionSnapshot.selectionDraft } : {}),
-      ...(selectionSnapshot.annotationDraft ? { annotationDraft: selectionSnapshot.annotationDraft } : {}),
+      sourcePath: selectedPath,
     });
   }
+
   function closeSelectedTextContextMenu() {
     setSelectedTextContextMenu(null);
-    clearFileTextSelectionSnapshot();
   }
 
   function quoteSelectedTextToComposer() {
@@ -3049,7 +2622,11 @@ function App() {
 
     closeSelectedTextContextMenu();
     closeReferenceMenu();
-    focusComposerAtEnd();
+    window.requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      const end = composerRef.current?.value.length ?? 0;
+      composerRef.current?.setSelectionRange(end, end);
+    });
   }
 
   async function copySelectedText() {
@@ -3292,8 +2869,7 @@ function App() {
       | 'rename-project'
       | 'delete-project'
       | 'move'
-      | 'delete'
-      | 'reference-in-chat',
+      | 'delete',
   ) {
     const context = sidebarContextMenu;
     closeSidebarContextMenu();
@@ -3311,14 +2887,6 @@ function App() {
     }
     setActiveWorkspaceScope(context?.workspaceScope ?? 'project');
 
-    if (action === 'reference-in-chat' && context?.workspaceScope === 'project' && context.entryPath && context.entryType === 'file') {
-      if (context.projectId && context.projectId !== selectedProjectId) {
-        setSelectedProjectId(context.projectId);
-      }
-      setChatScope('project');
-      addFileReferenceToComposer(context.entryPath);
-      return;
-    }
     if (action === 'new-folder') {
       startCreateEntry('folder', context);
       return;
@@ -4178,7 +3746,7 @@ function App() {
           onSetMarkdownMode={previewTabs.setSelectedMarkdownMode}
         />
 
-        <div className="editor-scroll" onMouseUp={captureFileTextSelectionSnapshot} onKeyUp={captureFileTextSelectionSnapshot} onSelect={captureFileTextSelectionSnapshot} onContextMenu={openSelectedTextContextMenu}>
+        <div className="editor-scroll" onContextMenu={openSelectedTextContextMenu}>
               {!selectedEntry ? (
                 <div className="editor-empty">
                   <div className="editor-empty__icon"><File size={48} /></div>
@@ -4228,12 +3796,6 @@ function App() {
                     rawPreviewUrl,
                     workspaceEntries: activeEntries,
                     markdownMode: previewTabs.selectedMarkdownMode,
-                    annotationLocations: isMarkdownFile ? visibleDocumentAnnotations : [],
-                    activeAnnotationId,
-                    onSelectAnnotation: selectDocumentAnnotation,
-                    onDeleteAnnotation: (annotationId: string) => void deleteDocumentAnnotation(annotationId),
-                    onUpdateAnnotationComment: (annotationId: string, comment: string) => updateDocumentAnnotationComment(annotationId, comment),
-                    onClearAnnotations: () => void clearCurrentDocumentAnnotations(),
                     onChange: (content: string) => {
                       setFileContent(content);
                       setSaveState('idle');
@@ -4412,17 +3974,6 @@ function App() {
                 <ArrowDown size={16} />
               </button>
             </section>
-
-            <AnnotationComposerBridge
-              summaries={pendingDocumentAnnotationSummaries}
-              state={documentAnnotationSummaryState}
-              open={documentAnnotationPanelOpen}
-              onToggle={() => setDocumentAnnotationPanelOpen((current) => !current)}
-              onUseAll={() => useAnnotationsInComposer()}
-              onUseFile={(filePath) => useAnnotationsInComposer(filePath)}
-              onCopyAll={() => void copyAllAnnotationsFromBridge()}
-              onOpenFile={openAnnotatedFile}
-            />
 
             <section className="composer">
               {referencedFiles.length > 0 || referencedSnippets.length > 0 || imageReferenceDrafts.length > 0 ? (
@@ -4761,7 +4312,6 @@ function App() {
           {sidebarContextMenu.entryPath ? (
             <>
               <div className="context-menu-separator" />
-              {sidebarContextMenu.workspaceScope === 'project' && sidebarContextMenu.entryType === 'file' ? <button type="button" onClick={() => void runSidebarAction('reference-in-chat')}>引入到会话</button> : null}
               <button type="button" onClick={() => void runSidebarAction('rename')}>重命名</button>
               <button type="button" onClick={() => void runSidebarAction('move')}>移动</button>
               <button type="button" className="danger-item" onClick={() => void runSidebarAction('delete')}>删除</button>
@@ -4803,46 +4353,8 @@ function App() {
           onContextMenu={(event) => event.preventDefault()}
         >
           <button type="button" onClick={quoteSelectedTextToComposer}>引入到会话</button>
-          {selectedTextContextMenu.source === 'file' && selectedTextContextMenu.annotationDraft ? (
-            <button type="button" onClick={addSelectedTextAnnotation}>添加批注</button>
-          ) : null}
           <button type="button" onClick={() => void copySelectedText()}>复制文字</button>
         </div>
-      ) : null}
-      {annotationComposerDraft ? (
-        <form
-          className="annotation-composer-popover"
-          style={{ left: annotationComposerDraft.x, top: annotationComposerDraft.y }}
-          onClick={(event) => event.stopPropagation()}
-          onContextMenu={(event) => event.preventDefault()}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveAnnotationComposerDraft();
-          }}
-        >
-          <textarea
-            ref={annotationComposerTextareaRef}
-            className="annotation-comment-textarea"
-            value={annotationComposerDraft.value}
-            placeholder="输入修改意见"
-            onChange={(event) => setAnnotationComposerDraft((current) => current ? { ...current, value: event.target.value } : current)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                closeAnnotationComposer();
-                return;
-              }
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault();
-                void saveAnnotationComposerDraft();
-              }
-            }}
-          />
-          <div className="annotation-composer-popover__actions">
-            <button type="button" className="button-ghost" onClick={closeAnnotationComposer}>取消</button>
-            <button type="submit" disabled={!annotationComposerDraft.value.trim()}>保存批注</button>
-          </div>
-        </form>
       ) : null}
 
       {toasts.length > 0 ? (
@@ -4881,137 +4393,6 @@ function App() {
   );
 }
 
-function buildTransientSelectionAnnotation(
-  selectedPath: string | null,
-  selectedTextContextMenu: SelectedTextContextMenu | null,
-  annotationComposerDraft: AnnotationComposerDraft | null,
-): LocatedDocumentAnnotation | null {
-  const source = annotationComposerDraft
-    ? { sourcePath: annotationComposerDraft.sourcePath, draft: annotationComposerDraft.annotationDraft, text: annotationComposerDraft.text }
-    : selectedTextContextMenu?.source === 'file' && (selectedTextContextMenu.selectionDraft ?? selectedTextContextMenu.annotationDraft)
-      ? { sourcePath: selectedTextContextMenu.sourcePath, draft: selectedTextContextMenu.selectionDraft ?? selectedTextContextMenu.annotationDraft!, text: selectedTextContextMenu.text }
-      : null;  if (!source || !selectedPath || source.sourcePath !== selectedPath) return null;
-
-  const annotation: DocumentAnnotation = {
-    id: '__current-selection__',
-    filePath: source.sourcePath,
-    selectedText: source.draft.selectedText || source.text,
-    startLine: source.draft.startLine,
-    endLine: source.draft.endLine,
-    startOffset: source.draft.startOffset,
-    endOffset: source.draft.endOffset,
-    beforeText: source.draft.beforeText,
-    afterText: source.draft.afterText,
-    fileContentHash: source.draft.fileContentHash,
-    comment: '当前选区',
-    status: 'open',
-    createdAt: '',
-    updatedAt: '',
-  };
-
-  return {
-    ...annotation,
-    effectiveStatus: 'open',
-    currentStartOffset: source.draft.startOffset,
-    currentEndOffset: source.draft.endOffset,
-    currentStartLine: source.draft.startLine,
-    currentEndLine: source.draft.endLine,
-  };
-}
-function formatDocumentAnnotationsForClipboard(files: DocumentAnnotationFile[]): string {
-  return files
-    .map((file) => {
-      const annotations = file.annotations.filter((annotation) => annotation.status !== 'resolved');
-      if (annotations.length === 0) return '';
-      const lines = [`文件：${file.filePath}`];
-      annotations.forEach((annotation, index) => {
-        lines.push(
-          '',
-          `${index + 1}. ${formatDocumentAnnotationRawLine(annotation)} · ${documentAnnotationStatusLabel(annotation.status)}`,
-          `原文：${annotation.selectedText}`,
-          `批注：${annotation.comment}`,
-        );
-      });
-      return lines.join('\n');
-    })
-    .filter(Boolean)
-    .join('\n\n---\n\n');
-}
-
-function formatDocumentAnnotationRawLine(annotation: DocumentAnnotationFile['annotations'][number]): string {
-  return annotation.startLine === annotation.endLine ? `第 ${annotation.startLine} 行` : `第 ${annotation.startLine}-${annotation.endLine} 行`;
-}
-
-function documentAnnotationStatusLabel(status: DocumentAnnotationFile['annotations'][number]['status']): string {
-  if (status === 'resolved') return '已归档';
-  if (status === 'stale') return '位置待确认';
-  return '待处理';
-}
-function AnnotationComposerBridge({
-  summaries,
-  state,
-  open,
-  onToggle,
-  onUseAll,
-  onUseFile,
-  onCopyAll,
-  onOpenFile,
-}: {
-  summaries: DocumentAnnotationSummary[];
-  state: LoadState;
-  open: boolean;
-  onToggle: () => void;
-  onUseAll: () => void;
-  onUseFile: (filePath: string) => void;
-  onCopyAll: () => void;
-  onOpenFile: (filePath: string) => void;
-}): JSX.Element | null {
-  if (summaries.length === 0 && state !== 'loading') return null;
-
-  const openCount = summaries.reduce((total, summary) => total + summary.openCount, 0);
-  const staleCount = summaries.reduce((total, summary) => total + summary.staleCount, 0);
-  const totalCount = summaries.reduce((total, summary) => total + summary.count, 0);
-  const summaryText = state === 'loading'
-    ? '读取批注中'
-    : `${openCount} 待处理${staleCount ? ` / ${staleCount} 待确认` : ''}`;
-
-  return (
-    <section className={`annotation-composer-bridge ${open ? 'is-open' : ''}`}>
-      <button type="button" className="annotation-composer-bridge__summary" onClick={onToggle} aria-expanded={open}>
-        <span>批注</span>
-        <strong>{summaryText}</strong>
-        <small>{totalCount} 条 / {summaries.length} 个文档</small>
-        <ChevronDown size={14} />
-      </button>
-      {open ? (
-        <div className="annotation-composer-bridge__panel">
-          {state === 'error' ? <p className="annotation-composer-bridge__error">批注列表读取失败</p> : null}
-          <div className="annotation-composer-bridge__actions">
-            <button type="button" onClick={onUseAll} disabled={summaries.length === 0}>@全部批注文档</button>
-            <button type="button" className="button-ghost" onClick={onCopyAll} disabled={summaries.length === 0}>复制全部批注</button>
-          </div>
-          <div className="annotation-composer-bridge__list">
-            {summaries.map((summary) => (
-              <article key={summary.filePath} className="annotation-composer-bridge__item">
-                <div className="annotation-composer-bridge__item-head annotation-composer-bridge__item-head--compact">
-                  <button type="button" className="annotation-composer-bridge__file" onClick={() => onOpenFile(summary.filePath)} title={summary.filePath}>
-                    <FileText size={14} />
-                    <span>{basename(summary.filePath)}</span>
-                  </button>
-                  <span className="annotation-composer-bridge__meta">
-                    {summary.openCount} 待处理{summary.staleCount ? ` / ${summary.staleCount} 待确认` : ''}
-                  </span>
-                  <button type="button" className="button-ghost" onClick={() => onOpenFile(summary.filePath)}>查看</button>
-                  <button type="button" className="button-ghost" onClick={() => onUseFile(summary.filePath)}>@此文档</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
 function HarnessStandalonePage(): JSX.Element {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
 
@@ -5032,10 +4413,6 @@ function HarnessStandalonePage(): JSX.Element {
       <HarnessPanel apiClient={apiClient} standalone />
     </div>
   );
-}
-
-function isMarkdownFilePath(path: string): boolean {
-  return /\.(md|markdown)$/i.test(path);
 }
 
 function isSupportedTextFile(path: string): boolean {
@@ -5302,40 +4679,17 @@ function createSnippetReferenceId(input: Extract<SelectedTextContextMenu, { sour
   return `snippet-${input.messageId}-${Math.abs(hashCode(`${input.messageId}:${input.text}`)).toString(36)}`;
 }
 
-type TextSelectionDetails = { text: string; startOffset: number | null; endOffset: number | null };
-type TextSelectionSourceEvent = { target: EventTarget; currentTarget: EventTarget };
-
-function getSelectedTextFromEvent(event: TextSelectionSourceEvent): string {
-  return getSelectedTextDetailsFromEvent(event).text;
-}
-
-function getSelectedTextDetailsFromEvent(event: TextSelectionSourceEvent): TextSelectionDetails {
+function getSelectedTextFromEvent(event: React.MouseEvent): string {
   const target = event.target;
   if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
-    return getTextControlSelection(target);
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    return start === end ? '' : target.value.slice(start, end);
   }
 
-  const activeElement = document.activeElement;
-  if (
-    (activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLInputElement) &&
-    event.currentTarget instanceof Element &&
-    event.currentTarget.contains(activeElement)
-  ) {
-    return getTextControlSelection(activeElement);
-  }
-
-  return { text: window.getSelection()?.toString() ?? '', startOffset: null, endOffset: null };
+  return window.getSelection()?.toString() ?? '';
 }
 
-function getTextControlSelection(control: HTMLTextAreaElement | HTMLInputElement): { text: string; startOffset: number | null; endOffset: number | null } {
-  const start = control.selectionStart ?? 0;
-  const end = control.selectionEnd ?? 0;
-  return {
-    text: start === end ? '' : control.value.slice(start, end),
-    startOffset: start,
-    endOffset: end,
-  };
-}
 async function copyTextToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     try {
@@ -6462,7 +5816,6 @@ function RuntimeSettingsPanel({
   const [chatBaseUrl, setChatBaseUrl] = useState('');
   const [chatApiKey, setChatApiKey] = useState('');
   const [chatModel, setChatModel] = useState('');
-  const [chatEndpoint, setChatEndpoint] = useState<NonNullable<RuntimeConfig['modelProvider']['chatEndpoint']>>('responses');
   const [imageUseGlobal, setImageUseGlobal] = useState(true);
   const [imageBaseUrl, setImageBaseUrl] = useState('');
   const [imageApiKey, setImageApiKey] = useState('');
@@ -6476,7 +5829,6 @@ function RuntimeSettingsPanel({
   const [releaseInfoOpen, setReleaseInfoOpen] = useState(false);
   const [localDataRoot, setLocalDataRoot] = useState('');
   const [dataRootRestartRequired, setDataRootRestartRequired] = useState(false);
-  const [dataRootSelectionError, setDataRootSelectionError] = useState('');
   const [modelTestState, setModelTestState] = useState<Record<'chat' | 'image' | 'embedding', LoadState>>({ chat: 'idle', image: 'idle', embedding: 'idle' });
   const [modelTestMessage, setModelTestMessage] = useState<Record<'chat' | 'image' | 'embedding', string>>({ chat: '', image: '', embedding: '' });
   const [memoryRebuildState, setMemoryRebuildState] = useState<LoadState>('idle');
@@ -6488,7 +5840,6 @@ function RuntimeSettingsPanel({
     setChatUseGlobal(config.modelProvider.chatUsesGlobalConfig ?? true);
     setChatBaseUrl(config.modelProvider.chatBaseUrl ?? config.modelProvider.baseUrl ?? '');
     setChatModel(config.modelProvider.chatModel ?? '');
-    setChatEndpoint(config.modelProvider.chatEndpoint ?? 'responses');
     setImageUseGlobal(config.modelProvider.imageUsesGlobalConfig ?? true);
     setImageBaseUrl(config.modelProvider.imageBaseUrl ?? config.modelProvider.baseUrl ?? '');
     setImageModel(config.modelProvider.imageModel ?? '');
@@ -6503,7 +5854,6 @@ function RuntimeSettingsPanel({
     setEmbeddingApiKey('');
     setLocalDataRoot(config.desktop.dataRoot ?? '');
     setDataRootRestartRequired(false);
-    setDataRootSelectionError('');
     setModelTestState({ chat: 'idle', image: 'idle', embedding: 'idle' });
     setModelTestMessage({ chat: '', image: '', embedding: '' });
     setMemoryRebuildState('idle');
@@ -6518,7 +5868,6 @@ function RuntimeSettingsPanel({
     chatBaseUrl: chatUseGlobal ? '' : chatBaseUrl,
     ...(chatUseGlobal || chatApiKey.trim() ? { chatApiKey: chatUseGlobal ? '' : chatApiKey } : {}),
     chatModel,
-    chatEndpoint,
     imageBaseUrl: imageUseGlobal ? '' : imageBaseUrl,
     ...(imageUseGlobal || imageApiKey.trim() ? { imageApiKey: imageUseGlobal ? '' : imageApiKey } : {}),
     imageModel,
@@ -6553,24 +5902,6 @@ function RuntimeSettingsPanel({
     const saved = savedEmbeddingInput();
     return current.baseUrl !== saved.baseUrl || current.model !== saved.model || current.dims !== saved.dims;
   };
-
-  async function selectDesktopDataRoot() {
-    setDataRootSelectionError('');
-    const selectDataRoot = window.viforgeDesktop?.selectDataRoot;
-    if (!selectDataRoot) {
-      setDataRootSelectionError('当前窗口没有桌面数据路径选择能力，请在 ViForge 桌面客户端中打开设置。');
-      return;
-    }
-
-    try {
-      const result = await selectDataRoot();
-      if (!result || result.canceled || !result.dataRoot) return;
-      setLocalDataRoot(result.dataRoot);
-      setDataRootRestartRequired(Boolean(result.restartRequired));
-    } catch (error) {
-      setDataRootSelectionError(error instanceof Error ? error.message : String(error));
-    }
-  }
 
   async function saveSettings() {
     if (hasExistingEmbeddingIndex() && embeddingConfigChanged()) {
@@ -6620,17 +5951,22 @@ function RuntimeSettingsPanel({
         <section className="runtime-settings-section">
           <h3>本地数据路径</h3>
           <div className="runtime-settings-grid">
-            <label className="runtime-settings-wide"><span>数据路径</span><input value={localDataRoot} readOnly placeholder="首次启动时必须选择" onClick={() => void selectDesktopDataRoot()} /></label>
+            <label className="runtime-settings-wide"><span>数据路径</span><input value={localDataRoot} readOnly placeholder="首次启动时必须选择" /></label>
           </div>
           <div className="runtime-settings-actions runtime-settings-actions-inline">
             <button
               type="button"
-              disabled={busy}
-              onClick={() => void selectDesktopDataRoot()}
+              disabled={busy || !canSelectDesktopDataRoot}
+              onClick={async () => {
+                const result = await window.viforgeDesktop?.selectDataRoot();
+                if (!result || result.canceled || !result.dataRoot) return;
+                setLocalDataRoot(result.dataRoot);
+                setDataRootRestartRequired(Boolean(result.restartRequired));
+              }}
             >选择数据路径</button>
           </div>
-          <p className={dataRootSelectionError ? 'runtime-settings-status runtime-settings-status-error' : 'runtime-settings-status'}>
-            {dataRootSelectionError || (dataRootRestartRequired ? '数据路径已更新，重启 ViForge 后生效。' : canSelectDesktopDataRoot ? '项目、配置、日志和内置 PostgreSQL 数据都会保存在此路径下。' : '当前窗口未检测到桌面路径选择能力，请确认正在使用 ViForge 桌面客户端。')}
+          <p className="runtime-settings-status">
+            {dataRootRestartRequired ? '数据路径已更新，重启 ViForge 后生效。' : '项目、配置、日志和内置 PostgreSQL 数据都会保存在此路径下。'}
           </p>
         </section>
       ) : null}
@@ -6652,10 +5988,6 @@ function RuntimeSettingsPanel({
             <div className="runtime-settings-grid runtime-settings-grid-model">
               <label><span>Base URL</span><input value={chatBaseUrl} onChange={(event) => setChatBaseUrl(event.target.value)} placeholder={baseUrl || 'https://api.openai.com/v1'} disabled={chatUseGlobal} /></label>
               <label><span>API Key</span><input type="password" value={chatApiKey} onChange={(event) => setChatApiKey(event.target.value)} placeholder={chatUseGlobal ? '使用全局 API Key' : config?.modelProvider.chatApiKeyConfigured ? '已配置，留空则不修改' : 'sk-...'} disabled={chatUseGlobal} /></label>
-              <label><span>接口</span><select value={chatEndpoint} onChange={(event) => setChatEndpoint(event.target.value as NonNullable<RuntimeConfig['modelProvider']['chatEndpoint']>)}>
-                <option value="responses">Responses API</option>
-                <option value="chat_completions">Chat Completions</option>
-              </select></label>
               <label className="runtime-settings-wide"><span>模型 ID</span><ModelIdInput id="runtime-chat-model" value={chatModel} onChange={setChatModel} options={chatModelOptions} fallback="gpt-5.5" placeholder="选择或输入文本模型 ID" /></label>
             </div>
             <div className="runtime-settings-actions runtime-settings-actions-inline"><button type="button" disabled={busy || modelTestState.chat === 'loading'} onClick={() => void testRuntimeModel('chat')}>测试</button></div>

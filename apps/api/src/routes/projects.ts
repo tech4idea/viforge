@@ -2,7 +2,6 @@ import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { createDocumentAnnotationStore } from '../storage/documentAnnotationStore';
 import type { WorkspaceStore } from '../storage/workspaceStore';
 import { PRODUCT_PROFILE } from '../env';
 
@@ -48,7 +47,6 @@ const moveEntrySchema = z.object({
 
 export function createProjectsRoutes(store: WorkspaceStore): Hono {
   const routes = new Hono();
-  const annotationStore = createDocumentAnnotationStore(store);
 
   routes.get('/product-profile', (context) => context.json(PRODUCT_PROFILE));
 
@@ -363,11 +361,7 @@ export function createProjectsRoutes(store: WorkspaceStore): Hono {
       }
 
       const sourcePath = moveSourcePathFromRequest(context.req.raw, projectId);
-      const moved = await store.moveWorkspaceEntry(projectId, sourcePath, parsed.data.targetPath);
-      if (moved.type === 'file' && isMarkdownFilePath(sourcePath) && isMarkdownFilePath(moved.path)) {
-        await annotationStore.moveAnnotations(projectId, sourcePath, moved.path);
-      }
-      return context.json(moved);
+      return context.json(await store.moveWorkspaceEntry(projectId, sourcePath, parsed.data.targetPath));
     } catch (error) {
       return handleKnownError(context, error, 'File not found');
     }
@@ -425,12 +419,7 @@ export function createProjectsRoutes(store: WorkspaceStore): Hono {
         return missingProject;
       }
 
-      const entryPath = filePathFromRequest(context.req.raw, projectId);
-      const deleted = await store.deleteWorkspaceEntry(projectId, entryPath);
-      if (isMarkdownFilePath(entryPath)) {
-        await annotationStore.clearAnnotations(projectId, entryPath);
-      }
-      return context.json(deleted);
+      return context.json(await store.deleteWorkspaceEntry(projectId, filePathFromRequest(context.req.raw, projectId)));
     } catch (error) {
       return handleKnownError(context, error, 'File not found');
     }
@@ -439,9 +428,6 @@ export function createProjectsRoutes(store: WorkspaceStore): Hono {
   return routes;
 }
 
-function isMarkdownFilePath(filePath: string): boolean {
-  return /\.(?:md|markdown)$/i.test(filePath);
-}
 function globalRawPathFromRequest(request: Request): string {
   const pathname = new URL(request.url).pathname;
   const pathPrefix = '/global/raw/';

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { RuntimeChatEndpoint, RuntimeConfig, RuntimeMemoryEmbeddingProfile, UpdateRuntimeConfigInput } from '@viforge/shared';
+import type { RuntimeConfig, RuntimeMemoryEmbeddingProfile, UpdateRuntimeConfigInput } from '@viforge/shared';
 
 import { resetLangGraphMemoryBackend } from './runs/langGraphAgents';
 
@@ -22,7 +22,6 @@ type StoredRuntimeConfig = {
     chatBaseUrl?: string;
     chatApiKey?: string;
     chatModel?: string;
-    chatEndpoint?: RuntimeChatEndpoint;
     imageBaseUrl?: string;
     imageApiKey?: string;
     imageModel?: string;
@@ -47,7 +46,6 @@ type StoredRuntimeConfig = {
 const DEFAULT_DATABASE_PORT = 15432;
 const DEFAULT_MODEL_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_CHAT_MODEL = 'gpt-5.5';
-const DEFAULT_CHAT_ENDPOINT: RuntimeChatEndpoint = 'responses';
 
 export type RuntimeConfigStore = {
   getConfig(): Promise<RuntimeConfig>;
@@ -143,7 +141,6 @@ export function applyRuntimeConfigToEnv(config: StoredRuntimeConfig): void {
   if (model?.chatBaseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL = model.chatBaseUrl;
   if (model?.chatApiKey !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY = model.chatApiKey;
   if (model?.chatModel !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_MODEL = model.chatModel;
-  if (model?.chatEndpoint !== undefined) process.env.VIFORGE_AIGC_HUB_CHAT_ENDPOINT = model.chatEndpoint;
   if (model?.imageBaseUrl !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL = model.imageBaseUrl;
   if (model?.imageApiKey !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY = model.imageApiKey;
   if (model?.imageModel !== undefined) process.env.VIFORGE_AIGC_HUB_IMAGE_MODEL = model.imageModel;
@@ -190,7 +187,6 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
   const chatBaseUrl = model.chatBaseUrl || process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL || globalBaseUrl;
   const imageBaseUrl = model.imageBaseUrl || process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL || globalBaseUrl;
   const embeddingBaseUrl = model.embeddingBaseUrl || process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL || globalBaseUrl;
-  const chatEndpoint = normalizeChatEndpoint(model.chatEndpoint || process.env.VIFORGE_AIGC_HUB_CHAT_ENDPOINT);
   const chatApiKeyConfigured = Boolean(model.chatApiKey ?? process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY) || globalApiKeyConfigured;
   const imageApiKeyConfigured = Boolean(model.imageApiKey ?? process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY) || globalApiKeyConfigured;
   const embeddingApiKeyConfigured = Boolean(model.embeddingApiKey ?? process.env.VIFORGE_AIGC_HUB_EMBEDDING_API_KEY) || globalApiKeyConfigured;
@@ -206,7 +202,6 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
       chatApiKeyConfigured,
       chatUsesGlobalConfig: !model.chatBaseUrl && !process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL && !model.chatApiKey && !process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY,
       chatModel: model.chatModel || process.env.VIFORGE_AIGC_HUB_CHAT_MODEL || AIGC_HUB_CHAT_MODEL || DEFAULT_CHAT_MODEL,
-      chatEndpoint,
       imageBaseUrl,
       imageApiKeyConfigured,
       imageUsesGlobalConfig: !model.imageBaseUrl && !process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL && !model.imageApiKey && !process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY,
@@ -243,9 +238,6 @@ function toRuntimeConfig(config: StoredRuntimeConfig, restartRequired = false): 
   };
 }
 
-function normalizeChatEndpoint(value: unknown): RuntimeChatEndpoint {
-  return value === 'chat_completions' ? 'chat_completions' : DEFAULT_CHAT_ENDPOINT;
-}
 function effectiveEmbeddingProfile(config: StoredRuntimeConfig): RuntimeMemoryEmbeddingProfile {
   const model = config.modelProvider ?? {};
   const globalBaseUrl = model.baseUrl || process.env.VIFORGE_AIGC_HUB_BASE_URL || AIGC_HUB_BASE_URL || DEFAULT_MODEL_BASE_URL;
@@ -296,7 +288,6 @@ function cleanModelProviderInput(input: UpdateRuntimeConfigInput['modelProvider'
     ...(input.chatBaseUrl !== undefined ? { chatBaseUrl: input.chatBaseUrl.trim() } : {}),
     ...(input.chatApiKey !== undefined ? { chatApiKey: input.chatApiKey.trim() } : {}),
     ...(input.chatModel !== undefined ? { chatModel: input.chatModel.trim() } : {}),
-    ...(input.chatEndpoint !== undefined ? { chatEndpoint: normalizeChatEndpoint(input.chatEndpoint) } : {}),
     ...(input.imageBaseUrl !== undefined ? { imageBaseUrl: input.imageBaseUrl.trim() } : {}),
     ...(input.imageApiKey !== undefined ? { imageApiKey: input.imageApiKey.trim() } : {}),
     ...(input.imageModel !== undefined ? { imageModel: input.imageModel.trim() } : {}),

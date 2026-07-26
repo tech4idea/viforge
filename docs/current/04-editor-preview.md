@@ -94,9 +94,3 @@ CSV 会按逗号和换行解析为单 sheet。非 CSV 文件尝试按 Fortune Sh
 
 保存成功后更新 `fileContent` 和 `lastSavedContent`。
 
-
-## Markdown 批注
-
-Markdown 文档支持在标题或正文中选中文本后添加批注，选区可以跨多行。批注不写入正文，而是由 API 持久化为原文同目录隐藏文件：`.<原文件名>.annotations.json`。前端文件树隐藏 `**/.*.annotations.json`，但 Agent 可以通过专用 annotation 工具读取。
-
-前端保存每条批注的 `selectedText`、起止行号、起止 offset、`beforeText`、`afterText` 和 `fileContentHash`。文档变化后会重新定位批注；能定位的批注直接在原 Markdown 编辑器中高亮，悬浮或点击高亮文本时显示批注气泡；无法可靠定位到原文时，会在保存的起始行号处显示“批注”标记，点击后同样查看、修改或删除。会话输入框上方显示待处理批注折叠栏，用于打开原文档、复制全部批注内容，或一键把批注文档引用到输入框并填入“根据批注进行修改”。Agent 执行完修改不会自动清除批注，用户需要手动删除、清空或标记完成。
