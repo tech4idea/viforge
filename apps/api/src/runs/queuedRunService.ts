@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 
 import type { AgentRun, StreamEvent } from '@viforge/shared';
 
+import { appendJsonLog } from '../logger';
 import type { RunBus } from './runBus';
 import type { CreateRunInput, RunService } from './runService';
 
 type QueuedRun = {
   input: CreateRunInput & { runId: string };
   run: AgentRun;
+  queuedAt: number;
 };
 
 export function createQueuedRunService(inner: RunService, bus: RunBus): RunService {
@@ -16,6 +18,15 @@ export function createQueuedRunService(inner: RunService, bus: RunBus): RunServi
 
   async function startQueuedRun(key: string, item: QueuedRun): Promise<void> {
     runningKeys.add(key);
+    appendJsonLog('api-runs.jsonl', {
+      scope: 'queued-run',
+      stage: 'dequeued.start',
+      runId: item.input.runId,
+      projectId: item.input.projectId,
+      sessionId: item.input.sessionId ?? null,
+      key,
+      queuedMs: Date.now() - item.queuedAt,
+    });
     try {
       await inner.createRun(item.input);
       await waitForRunEnd(bus, item.input.runId);
@@ -28,6 +39,14 @@ export function createQueuedRunService(inner: RunService, bus: RunBus): RunServi
         errorMessage: error instanceof Error ? error.message : 'Run failed',
       });
     } finally {
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'queued-run',
+        stage: 'run.released',
+        runId: item.input.runId,
+        projectId: item.input.projectId,
+        sessionId: item.input.sessionId ?? null,
+        key,
+      });
       runningKeys.delete(key);
       const queue = queues.get(key) ?? [];
       const next = queue.shift();
@@ -64,15 +83,40 @@ export function createQueuedRunService(inner: RunService, bus: RunBus): RunServi
 
       if (runningKeys.has(key) || (queues.get(key)?.length ?? 0) > 0) {
         const queue = queues.get(key) ?? [];
-        queue.push({ input: queuedInput, run: pendingRun });
+        queue.push({ input: queuedInput, run: pendingRun, queuedAt: Date.now() });
         queues.set(key, queue);
+        appendJsonLog('api-runs.jsonl', {
+          scope: 'queued-run',
+          stage: 'queued',
+          runId,
+          projectId: input.projectId,
+          sessionId: input.sessionId ?? null,
+          key,
+          queueDepth: queue.length,
+        });
         return { run: pendingRun };
       }
 
       runningKeys.add(key);
+      appendJsonLog('api-runs.jsonl', {
+        scope: 'queued-run',
+        stage: 'immediate.start',
+        runId,
+        projectId: input.projectId,
+        sessionId: input.sessionId ?? null,
+        key,
+      });
       try {
         const result = await inner.createRun(queuedInput);
         void waitForRunEnd(bus, runId).finally(() => {
+          appendJsonLog('api-runs.jsonl', {
+            scope: 'queued-run',
+            stage: 'run.released',
+            runId,
+            projectId: input.projectId,
+            sessionId: input.sessionId ?? null,
+            key,
+          });
           runningKeys.delete(key);
           const queue = queues.get(key) ?? [];
           const next = queue.shift();

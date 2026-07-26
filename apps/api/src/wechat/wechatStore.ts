@@ -25,6 +25,8 @@ type WechatIlinkState = {
   qrUrl: string | null;
   /** ilink bot token (received after QR scan confirmed) */
   botToken: string | null;
+  /** ilink API base URL returned by QR confirmation */
+  baseUrl: string | null;
   /** ilink getUpdates cursor */
   pollCursor: string | null;
   /** ilink context tokens keyed by externalUserId */
@@ -64,8 +66,9 @@ export type WechatStore = {
   getAttachmentsForMessage(externalMessageId: string): Promise<Array<{ assetPath: string; mimeType: string; name: string }>>;
   /** ilink: get stored bot token (for session restore) */
   getIlinkBotToken(): Promise<string | null>;
+  getIlinkBaseUrl(): Promise<string | null>;
   /** ilink: store bot token after login confirmed */
-  setIlinkBotToken(token: string): Promise<void>;
+  setIlinkBotToken(token: string, baseUrl?: string | null): Promise<void>;
   /** ilink: get QR code string */
   getIlinkQrCode(): Promise<string | null>;
   /** ilink: get scan URL for QR generation */
@@ -124,6 +127,7 @@ export function createWechatStore(statePath: string): WechatStore {
       qrcode: null,
       qrUrl: null,
       botToken: null,
+      baseUrl: null,
       pollCursor: null,
       contextTokens: {},
       pollerEnabled: false,
@@ -143,6 +147,7 @@ export function createWechatStore(statePath: string): WechatStore {
         qrcode: ilink.qrcode ?? null,
         qrUrl: ilink.qrUrl ?? null,
         botToken: ilink.botToken ?? null,
+        baseUrl: typeof ilink.baseUrl === 'string' ? ilink.baseUrl : null,
         pollCursor: ilink.pollCursor ?? null,
         contextTokens: ilink.contextTokens ?? {},
         pollerEnabled: ilink.pollerEnabled ?? false,
@@ -192,7 +197,7 @@ export function createWechatStore(statePath: string): WechatStore {
         setupSession: s.setupSession,
         ilink: {
           configured: Boolean(s.ilink.botToken),
-          baseUrl: null, accountId: null, routeTag: null, allowFrom: [],
+          baseUrl: s.ilink.baseUrl, accountId: null, routeTag: null, allowFrom: [],
           pollerRunning: s.ilink.pollerEnabled,
           lastPollAt: null, pollError: null,
         },
@@ -230,7 +235,7 @@ export function createWechatStore(statePath: string): WechatStore {
         setupSession: { ...s.setupSession, status: 'connected' },
         ilink: {
           configured: Boolean(s.ilink.botToken),
-          baseUrl: null, accountId: null, routeTag: null, allowFrom: [],
+          baseUrl: s.ilink.baseUrl, accountId: null, routeTag: null, allowFrom: [],
           pollerRunning: s.ilink.pollerEnabled,
           lastPollAt: null, pollError: null,
         },
@@ -281,7 +286,7 @@ export function createWechatStore(statePath: string): WechatStore {
       const connectionMatches = s.connection.externalUserId === externalUserId;
       const placeholderConnection = s.connection.externalUserId.startsWith('ilink:');
       if (!connectionMatches && !placeholderConnection) return { accepted: false };
-      if (s.inboundMessageIds.includes(externalMessageId)) return { accepted: true };
+      if (s.inboundMessageIds.includes(externalMessageId)) return { accepted: false };
       await writeState({
         ...s,
         connection: placeholderConnection ? { ...s.connection, externalUserId } : s.connection,
@@ -301,9 +306,21 @@ export function createWechatStore(statePath: string): WechatStore {
     },
 
     async getIlinkBotToken() { return (await readState()).ilink.botToken; },
-    async setIlinkBotToken(token) {
+    async getIlinkBaseUrl() { return (await readState()).ilink.baseUrl; },
+    async setIlinkBotToken(token, baseUrl) {
       const s = await readState();
-      await writeState({ ...s, ilink: { ...s.ilink, botToken: token } });
+      const nextBaseUrl = baseUrl ?? null;
+      const changed = s.ilink.botToken !== token || s.ilink.baseUrl !== nextBaseUrl;
+      await writeState({
+        ...s,
+        ilink: {
+          ...s.ilink,
+          botToken: token,
+          baseUrl: nextBaseUrl,
+          pollCursor: changed ? null : s.ilink.pollCursor,
+          contextTokens: changed ? {} : s.ilink.contextTokens,
+        },
+      });
     },
 
     async getIlinkQrCode() { return (await readState()).ilink.qrcode; },
@@ -375,6 +392,7 @@ export function createWechatStore(statePath: string): WechatStore {
           qrcode: null,
           qrUrl: null,
           botToken: null,
+          baseUrl: null,
           pollCursor: null,
           contextTokens: {},
           pollerEnabled: false,

@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StreamEvent } from '@viforge/shared';
+import type { AgentLayerConfig, AgentToolPolicy, BehaviorRuleConfig, EvalRun, StreamEvent, ToolDescriptionConfig } from '@viforge/shared';
 
+import { createDocumentAnnotationStore } from '../storage/documentAnnotationStore';
 import { createWorkspaceStore, type WorkspaceStore } from '../storage/workspaceStore';
 import { createLangGraphRunService, __langGraphRunServiceTest } from './langGraphRunService';
 import { assertMemoryEmbeddingIndexAvailable, runWithMemoryEmbeddingRebuildLock } from './langGraphAgents';
@@ -130,6 +131,35 @@ describe('langgraph run service', () => {
     expect(events.at(-1)).toMatchObject({ type: 'run.end', status: 'success' });
   });
 
+  it('returns a clear message for model service 403 errors', async () => {
+    const project = await store.createProject({ name: 'Forbidden Model' });
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      createAgent() {
+        return {
+          async stream() {
+            throw Object.assign(new Error('403 status code (no body)'), { status: 403 });
+          },
+          async generate() {
+            return { text: 'should not run' };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-forbidden',
+      prompt: 'hello',
+      model: 'restricted-model',
+    });
+
+    const events = await collectUntilEnd(bus, run.id);
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'run.end',
+      status: 'error',
+      errorMessage: '模型调用失败：权限不足或账户无权访问该模型（403）。',
+    });
+  });
   it('uses the project product profile for prompts and specialist registry setup', async () => {
     const project = await store.createProject({ name: 'Studio Sitcom', productId: 'sitcom' });
     let capturedPrompt = '';
@@ -141,6 +171,9 @@ describe('langgraph run service', () => {
         capturedProfileId = context.productProfile?.id ?? '';
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -189,6 +222,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          blogWriting: specialistAgent('blog-writing-agent', specialistCalls),
+          research: specialistAgent('research-agent', specialistCalls),
+          publisher: specialistAgent('publisher-agent', specialistCalls),
           character: specialistAgent('character-agent', specialistCalls),
           continuity: specialistAgent('continuity-agent', specialistCalls),
           story: specialistAgent('story-agent', specialistCalls),
@@ -235,6 +271,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: specialistAgent('brainstorm-agent', specialistCalls),
+          blogWriting: specialistAgent('blog-writing-agent', specialistCalls),
+          research: specialistAgent('research-agent', specialistCalls),
+          publisher: specialistAgent('publisher-agent', specialistCalls),
           character: specialistAgent('character-agent', specialistCalls),
           continuity: specialistAgent('continuity-agent', specialistCalls),
           story: specialistAgent('story-agent', specialistCalls),
@@ -300,6 +339,7 @@ describe('langgraph run service', () => {
 
   it('exposes Playwriter browser tools to the main agent', async () => {
     const project = await store.createProject({ name: 'Browser Study', productId: 'study' });
+    await store.writeWorkspaceFile(project.id, 'uploads/example.txt', 'upload me');
     const browserCalls: string[] = [];
     let browserToolResult: unknown = null;
 
@@ -318,6 +358,10 @@ describe('langgraph run service', () => {
         browserCalls.push(`evaluate:${input.code}`);
         return { stdout: { title: 'Example' } };
       },
+      async uploadFile(input: { selector: string; fileName: string; bytes: Buffer }) {
+        browserCalls.push(`upload:${input.selector}:${input.fileName}:${input.bytes.toString('utf8')}`);
+        return { stdout: { uploaded: true, fileName: input.fileName } };
+      },
     };
 
     const { run } = await createLangGraphRunService(store, bus, {
@@ -325,6 +369,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -342,6 +389,7 @@ describe('langgraph run service', () => {
               async stream() {
                 browserToolResult = await runtimeTools.browser_navigate.execute?.({ url: 'example.com' }, {} as never);
                 await runtimeTools.browser_snapshot.execute?.({}, {} as never);
+                await runtimeTools.browser_upload_file.execute?.({ path: 'uploads/example.txt', selector: 'input[type=file]' }, {} as never);
                 return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: '已读取网页。' } }]) };
               },
               async generate() {
@@ -359,7 +407,7 @@ describe('langgraph run service', () => {
 
     await collectUntilEnd(bus, run.id);
 
-    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot']);
+    expect(browserCalls).toEqual(['navigate:example.com', 'snapshot', 'upload:input[type=file]:example.txt:upload me']);
     expect(browserToolResult).toEqual({ stdout: { url: 'example.com', title: 'Example' } });
   });
 
@@ -389,6 +437,9 @@ describe('langgraph run service', () => {
       async createAgentRegistry(tools) {
         return {
           brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
           character: null,
           continuity: null,
           story: null,
@@ -444,6 +495,144 @@ describe('langgraph run service', () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'tool_use.start', toolName: 'create_scheduled_task' }),
     ]));
+  });
+
+  it('applies active runtime config policies to ordinary LangGraph runs', async () => {
+    const project = await store.createProject({ name: 'Runtime Config Ordinary Run', productId: 'sitcom' });
+    const now = '2026-07-25T00:00:00.000Z';
+    const layerConfig: AgentLayerConfig = {
+      id: 'runtime-layer-ordinary',
+      productId: 'sitcom',
+      version: 1,
+      status: 'active',
+      behaviorRuleRefs: ['ordinary-runtime-rule@1'],
+      toolPolicyRefs: ['ordinary-runtime-tool-policy@1'],
+      toolDescriptionRefs: ['ordinary-read-description@1'],
+      systemAgent: {
+        agentId: 'system',
+        promptBlockRefs: [],
+        allowedTools: [],
+        instructionOverride: 'ORDINARY RUNTIME SYSTEM OVERRIDE',
+      },
+      specialists: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const behaviorRule: BehaviorRuleConfig = {
+      id: 'ordinary-runtime-rule',
+      productId: 'sitcom',
+      title: 'Ordinary runtime behavior rule',
+      version: 1,
+      status: 'active',
+      scope: 'product',
+      content: 'ORDINARY RUNTIME BEHAVIOR RULE',
+      contentHash: 'sha256:rule',
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const toolPolicy: AgentToolPolicy = {
+      id: 'ordinary-runtime-tool-policy',
+      productId: 'sitcom',
+      title: 'Ordinary runtime tool policy',
+      version: 1,
+      status: 'active',
+      scope: 'product',
+      allowedToolIds: ['read_workspace_file', 'delegate_to_specialist_agent'],
+      deniedToolIds: [],
+      highRiskToolIds: [],
+      toolDescriptionRefs: ['ordinary-read-description@1'],
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const toolDescription: ToolDescriptionConfig = {
+      id: 'ordinary-read-description',
+      productId: 'sitcom',
+      title: 'Ordinary read description',
+      version: 1,
+      status: 'active',
+      scope: 'product',
+      toolId: 'read_workspace_file',
+      description: 'ORDINARY RUNTIME READ DESCRIPTION',
+      parameterDescriptions: { path: 'ORDINARY RUNTIME PATH PARAM' },
+      outputDescription: 'ORDINARY RUNTIME READ OUTPUT',
+      contentHash: 'sha256:tool-description',
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    let capturedInstructions = '';
+    let capturedToolKeys: string[] = [];
+    let capturedReadDescription = '';
+    let capturedPathDescription = '';
+
+    const harnessStore = {
+      async getActiveResolvedAgentConfig(): Promise<EvalRun['resolvedAgentConfig']> {
+        return {
+          layerConfig,
+          behaviorRules: [behaviorRule],
+          toolPolicies: [toolPolicy],
+          toolDescriptionOverrides: [toolDescription],
+          promptBlocks: [],
+          promptBlockRefs: [],
+          skillRefs: [],
+        };
+      },
+      async recordRunArtifactEvent() {},
+    } as never;
+
+    const { run } = await createLangGraphRunService(store, bus, {
+      harnessStore,
+      async createAgentRegistry(tools) {
+        return {
+          brainstorm: null,
+          blogWriting: null,
+          research: null,
+          publisher: null,
+          character: null,
+          continuity: null,
+          story: null,
+          sourceAnalyst: null,
+          adaptationPlanner: null,
+          screenwriter: null,
+          reviewer: null,
+          outline: null,
+          knowledgeSearch: null,
+          knowledgeOrganizer: null,
+          async systemAgent(instructions, toolsOverride) {
+            const runtimeTools = toolsOverride ?? tools;
+            capturedInstructions = instructions;
+            capturedToolKeys = Object.keys(runtimeTools).sort();
+            const readTool = runtimeTools.read_workspace_file as { description?: string; schema?: { shape?: { path?: { description?: string } } } };
+            capturedReadDescription = readTool.description ?? '';
+            capturedPathDescription = readTool.schema?.shape?.path?.description ?? '';
+            return {
+              id: 'viforge-system-agent',
+              async stream() {
+                return { fullStream: asyncGenerator([{ type: 'text-delta', payload: { text: 'runtime config ok' } }]) };
+              },
+              async generate() {
+                return { text: 'runtime config ok' };
+              },
+            };
+          },
+        };
+      },
+    }).createRun({
+      projectId: project.id,
+      sessionId: 'session-runtime-config',
+      prompt: '检查线上运行配置',
+    });
+
+    await collectUntilEnd(bus, run.id);
+
+    expect(capturedInstructions).toContain('ORDINARY RUNTIME SYSTEM OVERRIDE');
+    expect(capturedInstructions).toContain('ORDINARY RUNTIME BEHAVIOR RULE');
+    expect(capturedToolKeys).toEqual(['delegate_to_specialist_agent', 'read_workspace_file']);
+    expect(capturedReadDescription).toContain('ORDINARY RUNTIME READ DESCRIPTION');
+    expect(capturedReadDescription).toContain('ORDINARY RUNTIME READ OUTPUT');
+    expect(capturedPathDescription).toBe('ORDINARY RUNTIME PATH PARAM');
   });
 
 
@@ -555,6 +744,57 @@ describe('langgraph run service', () => {
   });
 
 
+  it('exposes Markdown document annotation tools without requiring hidden path scanning', async () => {
+    const project = await store.createProject({ name: 'Annotation Tools' });
+    const filePath = '03 剧本/01 第一集/剧本.md';
+    const annotationStore = createDocumentAnnotationStore(store);
+    const created = await annotationStore.createAnnotation(project.id, {
+      filePath,
+      selectedText: 'Annotation Tools',
+      startLine: 1,
+      endLine: 1,
+      startOffset: 0,
+      endOffset: 16,
+      beforeText: '',
+      afterText: '',
+      fileContentHash: 'fnv1a-test',
+      comment: '补充一个反常细节',
+    });
+    const annotationId = created.annotations[0]!.id;
+    const events: StreamEvent[] = [];
+    const tools = __langGraphRunServiceTest.createWorkspaceTools(
+      store,
+      project.id,
+      (event) => events.push(event),
+      'run_annotation_tools',
+      () => '2026-07-19T00:00:00.000Z',
+    );
+
+    expect(tools.list_document_annotations.description).not.toContain('扫描隐藏批注文件');
+    expect(tools.read_document_annotations.description).toContain('selectedText');
+    expect(tools.clear_document_annotations.description).toContain('不要自动调用');
+
+    const workspaceEntries = await tools.list_workspace_entries.execute?.({ query: '' }, {} as never) as { entries: Array<{ path: string }> };
+    const directSidecarRead = await tools.read_workspace_file.execute?.({ path: '03 剧本/01 第一集/.剧本.md.annotations.json' }, {} as never) as { error: string };
+
+    expect(workspaceEntries.entries.map((entry) => entry.path)).not.toContain('03 剧本/01 第一集/.剧本.md.annotations.json');
+    expect(directSidecarRead.error).toContain('annotation');
+
+    const listed = await tools.list_document_annotations.execute?.({}, {} as never) as { annotations: Array<{ filePath: string; count: number; openCount: number }> };
+    const read = await tools.read_document_annotations.execute?.({ filePath }, {} as never) as { annotations: Array<{ id: string; comment: string }> };
+    const resolved = await tools.update_document_annotation_status.execute?.({ filePath, annotationId, status: 'resolved' }, {} as never) as { annotations: Array<{ status: string }> };
+    const cleared = await tools.clear_document_annotations.execute?.({ filePath }, {} as never) as { annotations: unknown[] };
+
+    expect(listed.annotations).toEqual([expect.objectContaining({ filePath, count: 1, openCount: 1 })]);
+    expect(read.annotations).toEqual([expect.objectContaining({ id: annotationId, comment: '补充一个反常细节' })]);
+    expect(resolved.annotations).toEqual([expect.objectContaining({ status: 'resolved' })]);
+    expect(cleared.annotations).toEqual([]);
+    await expect(store.readWorkspaceFile(project.id, '03 剧本/01 第一集/.剧本.md.annotations.json')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'file.changed', path: '03 剧本/01 第一集/.剧本.md.annotations.json', change: 'modified' }),
+      expect.objectContaining({ type: 'file.changed', path: '03 剧本/01 第一集/.剧本.md.annotations.json', change: 'deleted' }),
+    ]));
+  });
   it('blocks semantic memory tools while memory index rebuild is in progress', async () => {
     const project = await store.createProject({ name: 'Memory Tools Rebuild Lock' });
     const tools = __langGraphRunServiceTest.createWorkspaceTools(
@@ -746,4 +986,3 @@ function restoreEnv(name: string, value: string | undefined): void {
   }
   process.env[name] = value;
 }
-

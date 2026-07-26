@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 
 import { createRuntimeConfigRoutes } from './runtimeConfig';
 import { applyRuntimeConfigToEnv, createRuntimeConfigStore } from '../runtimeConfigStore';
@@ -13,6 +13,7 @@ const originalDatabaseMode = process.env.VIFORGE_DATABASE_MODE;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 const originalChatBaseUrl = process.env.VIFORGE_AIGC_HUB_CHAT_BASE_URL;
 const originalChatApiKey = process.env.VIFORGE_AIGC_HUB_CHAT_API_KEY;
+const originalChatEndpoint = process.env.VIFORGE_AIGC_HUB_CHAT_ENDPOINT;
 const originalImageBaseUrl = process.env.VIFORGE_AIGC_HUB_IMAGE_BASE_URL;
 const originalImageApiKey = process.env.VIFORGE_AIGC_HUB_IMAGE_API_KEY;
 const originalEmbeddingBaseUrl = process.env.VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL;
@@ -28,6 +29,7 @@ afterEach(async () => {
   restoreEnv('DATABASE_URL', originalDatabaseUrl);
   restoreEnv('VIFORGE_AIGC_HUB_CHAT_BASE_URL', originalChatBaseUrl);
   restoreEnv('VIFORGE_AIGC_HUB_CHAT_API_KEY', originalChatApiKey);
+  restoreEnv('VIFORGE_AIGC_HUB_CHAT_ENDPOINT', originalChatEndpoint);
   restoreEnv('VIFORGE_AIGC_HUB_IMAGE_BASE_URL', originalImageBaseUrl);
   restoreEnv('VIFORGE_AIGC_HUB_IMAGE_API_KEY', originalImageApiKey);
   restoreEnv('VIFORGE_AIGC_HUB_EMBEDDING_BASE_URL', originalEmbeddingBaseUrl);
@@ -36,6 +38,7 @@ afterEach(async () => {
   restoreEnv('AIGC_HUB_API_KEY', originalLegacyApiKey);
   restoreEnv('VIFORGE_PGVECTOR_AVAILABLE', originalPgvectorAvailable);
   restoreEnv('VIFORGE_MEMORY_EMBEDDING_REINDEX_REQUIRED', originalMemoryReindexRequired);
+  vi.unstubAllGlobals();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -52,6 +55,7 @@ describe('runtime config routes', () => {
       modelProvider: {
         baseUrl: 'https://api.openai.com/v1',
         chatModel: 'gpt-5.5',
+        chatEndpoint: 'responses',
       },
     });
   });
@@ -69,7 +73,7 @@ describe('runtime config routes', () => {
       version: '0.1.0',
       tag: 'v0.1.0',
       channel: 'beta',
-      updateHeadline: '建立统一版本管理链路',
+      updateHeadline: 'ViForge第一个版本发布，欢迎使用！',
     });
   });
 
@@ -106,6 +110,37 @@ describe('runtime config routes', () => {
     });
   });
 
+  it('tests the configured chat endpoint path and request body', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
+    tempDirs.push(root);
+    const app = createRuntimeConfigRoutes(createRuntimeConfigStore(path.join(root, 'runtime-config.json')));
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const defaultResponse = await app.request('/runtime-config/test-model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.openai.com/v1', apiKey: 'secret', chatModel: 'gpt-5.5' } }),
+    });
+
+    expect(defaultResponse.status).toBe(200);
+    expect(fetchMock).toHaveBeenLastCalledWith('https://api.openai.com/v1/responses', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ model: 'gpt-5.5', input: 'ping', max_output_tokens: 8 }),
+    }));
+
+    const completionsResponse = await app.request('/runtime-config/test-model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ modelProvider: { baseUrl: 'https://api.openai.com/v1', apiKey: 'secret', chatModel: 'gpt-5.5', chatEndpoint: 'chat_completions' } }),
+    });
+
+    expect(completionsResponse.status).toBe(200);
+    expect(fetchMock).toHaveBeenLastCalledWith('https://api.openai.com/v1/chat/completions', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'ping' }], max_tokens: 8, temperature: 0 }),
+    }));
+  });
   it('persists OpenAI-compatible model and database configuration without returning secrets', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'viforge-runtime-config-'));
     tempDirs.push(root);
@@ -121,6 +156,7 @@ describe('runtime config routes', () => {
           chatBaseUrl: 'https://chat.example.test/v1',
           chatApiKey: 'chat-secret-key',
           chatModel: 'gpt-compatible-chat',
+          chatEndpoint: 'chat_completions',
           imageBaseUrl: 'https://image.example.test/v1',
           imageApiKey: 'image-secret-key',
           imageModel: 'image-compatible',
@@ -146,6 +182,7 @@ describe('runtime config routes', () => {
       chatApiKeyConfigured: true,
       chatUsesGlobalConfig: false,
       chatModel: 'gpt-compatible-chat',
+      chatEndpoint: 'chat_completions',
       imageBaseUrl: 'https://image.example.test/v1',
       imageApiKeyConfigured: true,
       imageUsesGlobalConfig: false,
@@ -170,6 +207,7 @@ describe('runtime config routes', () => {
         apiKeyConfigured: true,
         chatBaseUrl: 'https://chat.example.test/v1',
         chatApiKeyConfigured: true,
+        chatEndpoint: 'chat_completions',
         imageBaseUrl: 'https://image.example.test/v1',
         imageApiKeyConfigured: true,
         embeddingBaseUrl: 'https://embedding.example.test/v1',

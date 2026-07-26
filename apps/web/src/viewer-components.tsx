@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import type { WorkspaceEntry } from './api';
+import type { LocatedDocumentAnnotation } from './document-annotations';
 import { buildMarkdownRawUrl, resolveMarkdownWorkspacePath } from './markdown-workspace';
 import { detectViewerKind, type ViewerKind } from './viewers';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from './components/icons';
@@ -21,6 +22,14 @@ interface EditorViewerProps {
   rawPreviewUrl: string;
   workspaceEntries?: WorkspaceEntry[];
   markdownMode?: 'source' | 'wysiwyg';
+  annotationLocations?: LocatedDocumentAnnotation[];
+  annotationState?: 'idle' | 'loading' | 'error';
+  annotationError?: string | null;
+  activeAnnotationId?: string | null;
+  onSelectAnnotation?: (annotationId: string) => void;
+  onDeleteAnnotation?: (annotationId: string) => void;
+  onUpdateAnnotationComment?: (annotationId: string, comment: string) => Promise<void> | void;
+  onClearAnnotations?: () => void;
   onChange: (content: string) => void;
   onNavigateToPath?: (path: string) => void;
 }
@@ -156,6 +165,13 @@ export function renderEditorViewer(props: EditorViewerProps): JSX.Element {
           value={props.fileContent}
           rawPreviewUrl={props.rawPreviewUrl}
           mode={props.markdownMode === 'source' ? 'source' : 'wysiwyg'}
+          annotations={props.annotationLocations ?? []}
+          annotationState={props.annotationState ?? 'idle'}
+          annotationError={props.annotationError ?? null}
+          activeAnnotationId={props.activeAnnotationId}
+          onSelectAnnotation={props.onSelectAnnotation}
+          onDeleteAnnotation={props.onDeleteAnnotation}
+          onUpdateAnnotationComment={props.onUpdateAnnotationComment}
           onChange={props.onChange}
         />
       </Suspense>
@@ -262,4 +278,3 @@ export const MarkdownReadPreview = memo(function MarkdownReadPreview({
     </div>
   );
 });
-
